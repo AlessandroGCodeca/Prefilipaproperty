@@ -176,6 +176,7 @@ with st.sidebar:
     do_lv   = st.button("🔒 LV DEBT FILTER", use_container_width=True)
     do_cf   = st.button("💰 CASHFLOW SCORE", use_container_width=True)
     do_loc  = st.button("📍 LOCATION IQ",    use_container_width=True)
+    do_test = st.button("🔗 TEST SITES",      use_container_width=True)
 
     st.markdown("---")
     st.markdown("#### FILTERS")
@@ -251,6 +252,26 @@ if do_loc:
     from modules.location_iq import run_location_scoring
     n = run_location_scoring(progress_callback=loc_cb)
     bar.empty(); txt.empty(); st.success(f"✅ Location scored {n}"); st.rerun()
+
+if do_test:
+    import requests as _req
+    results = []
+    for label, url in [
+        ("nehnutelnosti.sk", "https://www.nehnutelnosti.sk/slovensko/byty/predaj/?p[page]=1"),
+        ("bazos.sk",          "https://reality.bazos.sk/predaj/byt/"),
+    ]:
+        try:
+            _r = _req.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "sk-SK,sk;q=0.9,en;q=0.8",
+            }, timeout=10)
+            snippet = _r.text[:80].strip().replace("\n"," ")
+            results.append(f"**{label}** → HTTP {_r.status_code} | `{snippet}`")
+        except Exception as _e:
+            results.append(f"**{label}** → ❌ {_e}")
+    for line in results:
+        st.info(line)
 
 
 # ── Data ──────────────────────────────────────────────────────────────────────
