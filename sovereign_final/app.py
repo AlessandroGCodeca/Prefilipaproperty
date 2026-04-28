@@ -405,10 +405,9 @@ def render_card(l):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TABS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-t1, t2, t3, t4 = st.tabs([
+t1, t2, t3 = st.tabs([
     "ACTIVE SNAG LIST",
     "SATELLITE VIEWER",
-    "s.r.o. vs PERSONAL",
     "ONE-CLICK CLOSE",
 ])
 
@@ -503,106 +502,9 @@ with t2:
             st.success(f"✅ Vibe {vibe}/10 saved.")
 
 
-# ── Tab 3: s.r.o. vs Personal ─────────────────────────────────────────────────
+
+# ── Tab 3: One-Click Close ────────────────────────────────────────────────────
 with t3:
-    from engine.financial import analyse, MORTGAGE_RATE_PA, LTV_RATIO as _LTV
-    from config import SRO_SETUP_COST, GREEN_RATIO, YELLOW_RATIO
-
-    st.markdown('<div class="muted">s.r.o. vs PERSONAL — LIVE TAX OPTIMISATION CALCULATOR · Slovakia 2026</div>', unsafe_allow_html=True)
-    st.markdown("")
-
-    load_from_snag = st.toggle("Load from Snag List", value=bool(data))
-
-    if load_from_snag and data:
-        opts = {f"{l.get('title','?')} — €{l.get('price_eur',0):,.0f}": l for l in data}
-        sel2 = opts[st.selectbox("Listing", list(opts.keys()))]
-        price2 = float(sel2["price_eur"])
-        size2  = float(sel2["size_m2"] or 55)
-        dist2  = sel2.get("district","Bratislava II")
-        rent2  = None
-    else:
-        st.markdown("#### MANUAL INPUT")
-        mi1, mi2, mi3 = st.columns(3)
-        with mi1: price2 = st.number_input("Price €", 30000, 1000000, 150000, 5000)
-        with mi2: size2  = st.number_input("Size m²", 20, 300, 55, 5)
-        with mi3:
-            dist2 = st.selectbox("District", [
-                "Bratislava I","Bratislava II","Bratislava III","Bratislava IV","Bratislava V",
-                "Košice I","Žilina","Nitra","Trnava","Prešov","Banská Bystrica","Trenčín","Martin","Poprad",
-            ])
-        rent_raw = st.number_input("Override rent €/mo (0 = auto)", 0, 5000, 0, 10)
-        rent2 = float(rent_raw) if rent_raw > 0 else None
-
-    r = analyse(price2, size2, dist2, rent_override=rent2)
-
-    st.markdown('<hr class="div">', unsafe_allow_html=True)
-
-    # Headline
-    opt_color = "#ffd740"
-    saving_color = "#00e676" if r.annual_sro_saving > 0 else "#ff5252"
-    st.markdown(
-        f'<div class="muted">OPTIMAL: <span style="color:{opt_color};font-weight:700">{r.optimal_structure}</span>'
-        f' · Annual saving: <span style="color:{saving_color}">€{r.annual_sro_saving:+,.0f}</span>'
-        f'{f" · Break-even: {r.sro_break_even_months}mo" if r.sro_break_even_months else ""}</div>',
-        unsafe_allow_html=True
-    )
-    st.markdown(f'<div class="muted" style="margin-top:4px">💡 {r.recommendation}</div>', unsafe_allow_html=True)
-    st.markdown("")
-
-    col_p, col_s = st.columns(2)
-
-    for col, label, color, \
-        income_tax, health_levy, total_c, surplus, ratio in [
-        (col_p, "PERSONAL — Fyzická osoba", "#6b7a96",
-         r.income_tax_personal, r.health_levy_personal,
-         r.total_costs_personal, r.surplus_personal, r.ratio_personal),
-        (col_s, "s.r.o. — Spoločnosť",     "#ffd740",
-         r.income_tax_sro, r.health_levy_sro,
-         r.total_costs_sro, r.surplus_sro, r.ratio_sro),
-    ]:
-        with col:
-            cls_v = ("GREEN" if ratio >= GREEN_RATIO else
-                     "YELLOW" if ratio >= YELLOW_RATIO else "WHITE")
-            cls_c = {"GREEN":"#00e676","YELLOW":"#ffd740","WHITE":"#607d8b"}[cls_v]
-
-            st.markdown(f'<div class="muted" style="color:{color};margin-bottom:8px">{label} '
-                        f'<span class="badge" style="background:rgba(255,255,255,.05);color:{cls_c}">{cls_v}</span></div>',
-                        unsafe_allow_html=True)
-
-            rows = [
-                ("Gross Rent",      r.estimated_rent),
-                ("Mortgage",        r.mortgage_monthly),
-                ("HOA",             r.hoa_monthly),
-                ("Property Tax",    r.property_tax_monthly),
-                ("Vacancy 5%",      r.vacancy_cost),
-                ("Maintenance 1%",  r.maintenance_monthly),
-                (f"Income Tax ({'19/25%' if 'Personal' in label else '21%'})", income_tax),
-                (f"Health Levy ({'16%' if 'Personal' in label else '0%'})",    health_levy),
-            ]
-            html = ""
-            for lbl, val in rows:
-                html += f'<div class="brow"><span class="l">{lbl}</span><span class="v">€{val:,.0f}/mo</span></div>'
-            html += f'<div class="brow tot"><span class="l">TOTAL COSTS</span><span class="v">€{total_c:,.0f}/mo</span></div>'
-            s_cls = "pos" if surplus >= 0 else "neg"
-            html += f'<div class="brow tot {s_cls}"><span class="l">NET SURPLUS</span><span class="v">€{surplus:+,.0f}/mo</span></div>'
-            st.markdown(html, unsafe_allow_html=True)
-
-            st.markdown("<br>", unsafe_allow_html=True)
-            m1, m2 = st.columns(2)
-            with m1:
-                st.metric("Self-Fund",  f"{ratio*100:.1f}%")
-                st.metric("CoC Return", f"{r.cash_on_cash*100:.2f}%")
-            with m2:
-                st.metric("Net Yield",  f"{r.net_rental_yield*100:.2f}%")
-                st.metric("Gross Yield",f"{r.gross_yield*100:.2f}%")
-
-    # Assumptions
-    st.markdown('<hr class="div">', unsafe_allow_html=True)
-    st.markdown(f'<div class="muted">ASSUMPTIONS: Mortgage {MORTGAGE_RATE_PA*100:.1f}% · LTV {_LTV*100:.0f}% · Term 25yr · Vacancy 5% · Maintenance 1% · s.r.o. setup €{SRO_SETUP_COST:,}</div>', unsafe_allow_html=True)
-
-
-# ── Tab 4: One-Click Close ────────────────────────────────────────────────────
-with t4:
     st.markdown('<div class="muted">ONE-CLICK CLOSE — NOTARY CONTRACT DRAFT GENERATOR</div>', unsafe_allow_html=True)
     st.markdown('<div class="muted" style="color:#ff5252;margin-bottom:16px">⚠️ DRAFT ONLY — no legal validity until executed before a licensed Slovak notár</div>', unsafe_allow_html=True)
 
