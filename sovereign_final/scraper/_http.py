@@ -32,11 +32,17 @@ BROWSER_HEADERS = {
 }
 
 
-def get(url: str, session: requests.Session = None, timeout: int = 20) -> requests.Response:
-    """Make a GET request, routing through ScraperAPI if key is configured."""
+def get(url: str, session: requests.Session = None, timeout: int = 20, render: bool = False) -> requests.Response:
+    """Make a GET request, routing through ScraperAPI if key is configured.
+    render=True uses ScraperAPI's headless Chrome to execute JavaScript (needed for SPAs).
+    """
     sess = session or requests.Session()
     if SCRAPER_API_KEY:
-        proxy_url = f"{SCRAPER_API_BASE}?api_key={SCRAPER_API_KEY}&url={requests.utils.quote(url, safe='')}"
+        proxy_url = (
+            f"{SCRAPER_API_BASE}?api_key={SCRAPER_API_KEY}"
+            f"&url={requests.utils.quote(url, safe='')}"
+            + ("&render=true" if render else "")
+        )
         return sess.get(proxy_url, timeout=timeout)
     else:
         sess.headers.update(BROWSER_HEADERS)
