@@ -6,37 +6,16 @@ Scrapes private-seller listings from bazos.sk/reality
 import hashlib, time, re
 from datetime import datetime, timezone
 
-import requests
 from bs4 import BeautifulSoup
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import SCRAPE_DELAY_SEC
 from database import upsert_listing, init_db
+from scraper._http import get, make_session
 
-BASE    = "https://reality.bazos.sk"
-SEARCH  = BASE + "/predaj/byt/?hledat=&rubriky=byt&hlokalita=&humkreis=25&cenaod=&cenado=&Submit=Hledat&kitems=20&offset={offset}"
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": (
-        "text/html,application/xhtml+xml,application/xml;"
-        "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
-    ),
-    "Accept-Language": "sk-SK,sk;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Referer": BASE + "/",
-}
+BASE   = "https://reality.bazos.sk"
+SEARCH = BASE + "/predaj/byt/?hledat=&rubriky=byt&hlokalita=&humkreis=25&cenaod=&cenado=&Submit=Hledat&kitems=20&offset={offset}"
 
 
 def _price(text: str) -> float:
@@ -54,31 +33,25 @@ def _district(text: str) -> str:
     return parts[-1] if parts else ""
 
 
-def _make_session() -> requests.Session:
-    s = requests.Session()
-    s.headers.update(HEADERS)
+def check_reachable() -> tuple[int, str]:
     try:
-        s.get(BASE, timeout=10)
-        time.sleep(1)
-    except Exception:
-        pass
-    return s
+        r = get(SEARCH.format(offset=0), timeout=10)
+        return r.status_code, r.text[:300].strip().replace("\n", " ")
+    except Exception as e:
+        return 0, str(e)
 
 
-def scrape_page(offset: int, session: requests.Session = None) -> list[dict]:
+def scrape_page(offset: int, session=None) -> list[dict]:
     url = SEARCH.format(offset=offset)
-    sess = session or requests.Session()
-    sess.headers.update(HEADERS)
     try:
-        r = sess.get(url, timeout=15)
+        r = get(url, session=session, timeout=20)
         r.raise_for_status()
     except Exception as e:
-        print(f"    ⚠️ Offset {offset}: {e}")
+        print(f"    ⚠️ Offset {offset}: {e}", flush=True)
         return []
 
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # Try multiple selector strategies
     cards = (
         soup.select("div.inzeraty div.inzerat")
         or soup.select("div.maincontent div.inzerat")
@@ -100,11 +73,11 @@ def scrape_page(offset: int, session: requests.Session = None) -> list[dict]:
             if not href.startswith("http"):
                 href = BASE + "/" + href.lstrip("/")
 
-            title      = link.get_text(strip=True)
-            price_tag  = card.select_one(".cena, [class*='price'], [class*='cena']")
-            desc_tag   = card.select_one(".popis, p, [class*='desc'], [class*='popis']")
-            loc_tag    = card.select_one(".lokalita, [class*='location'], [class*='lokalita'], [class*='mesto']")
-            img_tag    = card.select_one("img[src]")
+            title     = link.get_text(strip=True)
+            price_tag = card.select_one(".cena, [class*='price'], [class*='cena']")
+            desc_tag  = card.select_one(".popis, p, [class*='desc'], [class*='popis']")
+            loc_tag   = card.select_one(".lokalita, [class*='location'], [class*='lokalita'], [class*='mesto']")
+            img_tag   = card.select_one("img[src]")
 
             price = _price(price_tag.get_text() if price_tag else "")
             desc  = desc_tag.get_text(" ", strip=True) if desc_tag else title
@@ -112,11 +85,7 @@ def scrape_page(offset: int, session: requests.Session = None) -> list[dict]:
             addr  = loc_tag.get_text(strip=True) if loc_tag else ""
             img   = img_tag.get("src", "") if img_tag else ""
 
-            if not href:
-                continue
-
             uid = hashlib.md5(href.encode()).hexdigest()
-
             results.append({
                 "id":                uid,
                 "source":            "bazos",
@@ -141,30 +110,20 @@ def scrape_page(offset: int, session: requests.Session = None) -> list[dict]:
                 "last_seen_at":      now,
             })
         except Exception as e:
-            print(f"    ⚠️ Card error: {e}")
+            print(f"    ⚠️ Card error: {e}", flush=True)
 
     return results
-
-
-def check_reachable() -> tuple[int, str]:
-    """Return (http_status, snippet) for diagnostics."""
-    try:
-        r = requests.get(SEARCH.format(offset=0), headers=HEADERS, timeout=10)
-        snippet = r.text[:300].strip().replace("\n", " ")
-        return r.status_code, snippet
-    except Exception as e:
-        return 0, str(e)
 
 
 def run(max_pages: int = 10) -> int:
     status, snippet = check_reachable()
     if status != 200:
-        msg = f"HTTP {status} — {snippet[:120]}"
-        print(f"    ⚠️ Bazos unreachable: {msg}")
-        raise RuntimeError(f"Bazos blocked or unreachable: {msg}")
+        raise RuntimeError(
+            f"Bazos blocked or unreachable: HTTP {status} — {snippet[:120]}"
+        )
 
-    print(f"🔍 Bazos.sk ({max_pages} pages)...")
-    session = _make_session()
+    print(f"🔍 Bazos.sk ({max_pages} pages)...", flush=True)
+    session = make_session(warmup_url=BASE)
     total = 0
     for p in range(max_pages):
         listings = scrape_page(p * 20, session=session)
@@ -173,15 +132,15 @@ def run(max_pages: int = 10) -> int:
                 upsert_listing(l)
                 total += 1
             except Exception as e:
-                print(f"    DB error: {e}")
-        print(f"  Page {p+1}: {len(listings)} found")
+                print(f"    DB error: {e}", flush=True)
+        print(f"  Page {p+1}: {len(listings)} found", flush=True)
         time.sleep(SCRAPE_DELAY_SEC)
     if total == 0:
         raise RuntimeError(
-            "Scraped 0 listings — the site responded but no listing cards matched "
-            "the CSS selectors. The site may have updated its layout."
+            "Site responded but 0 listing cards matched the CSS selectors — "
+            "the site layout may have changed."
         )
-    print(f"✅ Bazos done. {total} upserted.\n")
+    print(f"✅ Bazos done. {total} upserted.", flush=True)
     return total
 
 

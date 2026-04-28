@@ -72,6 +72,9 @@ CADASTRAL_API_KEY = os.getenv("CADASTRAL_API_KEY", "")
 FINSTAT_API_KEY   = os.getenv("FINSTAT_API_KEY", "")
 DMR_ENDPOINT      = os.getenv("DMR_ENDPOINT", "http://localhost:12434/v1")
 LLM_MODEL         = os.getenv("LLM_MODEL", "mistral:7b-instruct-q4_k_m")
+# ScraperAPI key — bypasses IP blocks on nehnutelnosti/bazos when running
+# from a server/cloud environment. Free tier: https://www.scraperapi.com
+SCRAPER_API_KEY   = os.getenv("SCRAPER_API_KEY", "")
 
 # ── Scraper ───────────────────────────────────────────────────────────────────
 SCRAPE_DELAY_SEC       = 2.5

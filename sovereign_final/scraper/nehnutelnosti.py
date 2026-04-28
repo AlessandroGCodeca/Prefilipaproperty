@@ -6,39 +6,16 @@ Scrapes for-sale listings from nehnutelnosti.sk
 import hashlib, time, re
 from datetime import datetime, timezone
 
-import requests
 from bs4 import BeautifulSoup
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import SCRAPE_DELAY_SEC
 from database import upsert_listing, init_db
+from scraper._http import get, make_session
 
-BASE    = "https://www.nehnutelnosti.sk"
-SEARCH  = BASE + "/slovensko/byty/predaj/?p[page]={page}"
-
-# Full browser headers — avoids basic bot-detection blocks
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": (
-        "text/html,application/xhtml+xml,application/xml;"
-        "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,"
-        "application/signed-exchange;v=b3;q=0.7"
-    ),
-    "Accept-Language": "sk-SK,sk;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Cache-Control": "max-age=0",
-}
+BASE   = "https://www.nehnutelnosti.sk"
+SEARCH = BASE + "/slovensko/byty/predaj/?p[page]={page}"
 
 ENERGY_VALID = {"A0", "A1", "A", "B", "C", "D", "E", "F", "G"}
 
@@ -58,32 +35,25 @@ def _district(address: str) -> str:
     return parts[-1] if parts else ""
 
 
-def _make_session() -> requests.Session:
-    s = requests.Session()
-    s.headers.update(HEADERS)
-    # Warm up with the homepage so we get session cookies before hitting search
+def check_reachable() -> tuple[int, str]:
     try:
-        s.get(BASE, timeout=10)
-        time.sleep(1)
-    except Exception:
-        pass
-    return s
+        r = get(SEARCH.format(page=1), timeout=10)
+        return r.status_code, r.text[:300].strip().replace("\n", " ")
+    except Exception as e:
+        return 0, str(e)
 
 
-def scrape_page(page: int, session: requests.Session = None) -> list[dict]:
+def scrape_page(page: int, session=None) -> list[dict]:
     url = SEARCH.format(page=page)
-    sess = session or requests.Session()
-    sess.headers.update(HEADERS)
     try:
-        r = sess.get(url, timeout=15)
+        r = get(url, session=session, timeout=20)
         r.raise_for_status()
     except Exception as e:
-        print(f"    ⚠️ Page {page}: {e}")
+        print(f"    ⚠️ Page {page}: {e}", flush=True)
         return []
 
-    soup = BeautifulSoup(r.text, "html.parser")
+    soup  = BeautifulSoup(r.text, "html.parser")
 
-    # Try multiple selector strategies in order of specificity
     cards = (
         soup.select("div.advertisement-item")
         or soup.select("div[class*='advertisement-item']")
@@ -106,6 +76,8 @@ def scrape_page(page: int, session: requests.Session = None) -> list[dict]:
             href = link.get("href", "")
             if not href.startswith("http"):
                 href = BASE + href
+            if "/nehnutelnost/" not in href:
+                continue
 
             price_tag  = (
                 card.select_one("[class*='price'],[class*='Price']")
@@ -131,11 +103,7 @@ def scrape_page(page: int, session: requests.Session = None) -> list[dict]:
             img    = img_tag.get("src", "") if img_tag else ""
             title  = (title_tag.get_text(strip=True) if title_tag else addr)
 
-            if not href or "/nehnutelnost/" not in href:
-                continue
-
             uid = hashlib.md5(href.encode()).hexdigest()
-
             results.append({
                 "id":                uid,
                 "source":            "nehnutelnosti",
@@ -160,31 +128,20 @@ def scrape_page(page: int, session: requests.Session = None) -> list[dict]:
                 "last_seen_at":      now,
             })
         except Exception as e:
-            print(f"    ⚠️ Card parse error: {e}")
+            print(f"    ⚠️ Card parse error: {e}", flush=True)
 
     return results
 
 
-def check_reachable() -> tuple[int, str]:
-    """Return (http_status, snippet) for diagnostics."""
-    try:
-        r = requests.get(SEARCH.format(page=1), headers=HEADERS, timeout=10)
-        snippet = r.text[:300].strip().replace("\n", " ")
-        return r.status_code, snippet
-    except Exception as e:
-        return 0, str(e)
-
-
-def run(max_pages: int = 10) -> int | str:
-    # Quick reachability check on page 1 before spinning through all pages
+def run(max_pages: int = 10) -> int:
     status, snippet = check_reachable()
     if status != 200:
-        msg = f"HTTP {status} — {snippet[:120]}"
-        print(f"    ⚠️ Nehnutelnosti unreachable: {msg}")
-        raise RuntimeError(f"Nehnutelnosti blocked or unreachable: {msg}")
+        raise RuntimeError(
+            f"Nehnutelnosti blocked or unreachable: HTTP {status} — {snippet[:120]}"
+        )
 
-    print(f"🔍 Nehnutelnosti.sk ({max_pages} pages)...")
-    session = _make_session()
+    print(f"🔍 Nehnutelnosti.sk ({max_pages} pages)...", flush=True)
+    session = make_session(warmup_url=BASE)
     total = 0
     for p in range(1, max_pages + 1):
         listings = scrape_page(p, session=session)
@@ -193,15 +150,15 @@ def run(max_pages: int = 10) -> int | str:
                 upsert_listing(l)
                 total += 1
             except Exception as e:
-                print(f"    DB error: {e}")
-        print(f"  Page {p}: {len(listings)} found")
+                print(f"    DB error: {e}", flush=True)
+        print(f"  Page {p}: {len(listings)} found", flush=True)
         time.sleep(SCRAPE_DELAY_SEC)
     if total == 0:
         raise RuntimeError(
-            "Scraped 0 listings — the site responded but no listing cards matched "
-            "the CSS selectors. The site may have updated its layout."
+            "Site responded but 0 listing cards matched the CSS selectors — "
+            "the site layout may have changed."
         )
-    print(f"✅ Nehnutelnosti done. {total} upserted.\n")
+    print(f"✅ Nehnutelnosti done. {total} upserted.", flush=True)
     return total
 
 

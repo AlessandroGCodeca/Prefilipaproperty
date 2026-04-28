@@ -199,35 +199,59 @@ def run_step(label, fn, *args, **kwargs):
         except Exception as e:
             st.error(f"❌ {e}")
 
-if do_nehnut:
-    import importlib, sys as _sys
-    for _m in [k for k in _sys.modules if k.startswith("scraper")]:
-        del _sys.modules[_m]
-    from scraper.nehnutelnosti import run as _scrape_nehnut
-    from modules.cashflow_runner import run_scoring as _run_cf
-    with st.spinner("Scraping Nehnutelnosti..."):
+def _run_scraper_subprocess(script_name: str) -> tuple[int, str]:
+    """Run a scraper as a fresh subprocess — bypasses Python module cache."""
+    import subprocess, json as _json
+    _dir = os.path.dirname(__file__)
+    wrapper = f"""
+import sys, os, json
+sys.path.insert(0, {repr(_dir)})
+try:
+    import importlib
+    mod = importlib.import_module('scraper.{script_name}')
+    n = mod.run(max_pages=10)
+    print(json.dumps({{"ok": True, "n": n}}))
+except Exception as e:
+    print(json.dumps({{"ok": False, "error": str(e)}}))
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", wrapper],
+        capture_output=True, text=True, timeout=300
+    )
+    for line in (proc.stdout + proc.stderr).strip().splitlines():
         try:
-            n = _scrape_nehnut(max_pages=10)
+            data = _json.loads(line)
+            if data.get("ok"):
+                return data["n"], ""
+            else:
+                return 0, data.get("error", "Unknown error")
+        except Exception:
+            continue
+    stderr = proc.stderr.strip()
+    return 0, stderr or "Scraper produced no output"
+
+
+if do_nehnut:
+    with st.spinner("Scraping Nehnutelnosti..."):
+        n, err = _run_scraper_subprocess("nehnutelnosti")
+        if err:
+            st.error(f"❌ Nehnutelnosti: {err}")
+        else:
+            from modules.cashflow_runner import run_scoring as _run_cf
             scored = _run_cf()
             st.success(f"✅ Scraped {n} listings, scored {scored}.")
             st.rerun()
-        except Exception as e:
-            st.error(f"❌ Nehnutelnosti: {e}")
 
 if do_bazos:
-    import sys as _sys
-    for _m in [k for k in _sys.modules if k.startswith("scraper")]:
-        del _sys.modules[_m]
-    from scraper.bazos import run as _scrape_bazos
-    from modules.cashflow_runner import run_scoring as _run_cf
     with st.spinner("Scraping Bazos..."):
-        try:
-            n = _scrape_bazos(max_pages=10)
+        n, err = _run_scraper_subprocess("bazos")
+        if err:
+            st.error(f"❌ Bazos: {err}")
+        else:
+            from modules.cashflow_runner import run_scoring as _run_cf
             scored = _run_cf()
             st.success(f"✅ Scraped {n} listings, scored {scored}.")
             st.rerun()
-        except Exception as e:
-            st.error(f"❌ Bazos: {e}")
 
 if do_lv:
     bar = st.progress(0)
@@ -254,24 +278,20 @@ if do_loc:
     bar.empty(); txt.empty(); st.success(f"✅ Location scored {n}"); st.rerun()
 
 if do_test:
-    import requests as _req
-    results = []
+    from scraper._http import get as _http_get, SCRAPER_API_KEY as _sak
+    _proxy_mode = bool(_sak)
+    st.info(f"Proxy mode: {'✅ ScraperAPI' if _proxy_mode else '⚠️ Direct (no SCRAPER_API_KEY set)'}")
     for label, url in [
         ("nehnutelnosti.sk", "https://www.nehnutelnosti.sk/slovensko/byty/predaj/?p[page]=1"),
         ("bazos.sk",          "https://reality.bazos.sk/predaj/byt/"),
     ]:
         try:
-            _r = _req.get(url, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "sk-SK,sk;q=0.9,en;q=0.8",
-            }, timeout=10)
-            snippet = _r.text[:80].strip().replace("\n"," ")
-            results.append(f"**{label}** → HTTP {_r.status_code} | `{snippet}`")
+            _r = _http_get(url, timeout=12)
+            snippet = _r.text[:80].strip().replace("\n", " ")
+            icon = "✅" if _r.status_code == 200 else "❌"
+            st.info(f"{icon} **{label}** → HTTP {_r.status_code} | `{snippet}`")
         except Exception as _e:
-            results.append(f"**{label}** → ❌ {_e}")
-    for line in results:
-        st.info(line)
+            st.error(f"❌ **{label}** → {_e}")
 
 
 # ── Data ──────────────────────────────────────────────────────────────────────
