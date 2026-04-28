@@ -394,7 +394,7 @@ def get_unscored_cashflow():
         SELECT l.id, l.price_eur, l.size_m2, l.district, l.energy_class
         FROM listings l
         LEFT JOIN cashflow_scores c ON l.id = c.listing_id
-        WHERE l.lv_status='PASS' AND c.listing_id IS NULL
+        WHERE l.lv_status != 'REJECTED' AND c.listing_id IS NULL
           AND l.price_eur > 0 AND l.size_m2 > 0 AND l.is_active=1
     """).fetchall()
     conn.close()

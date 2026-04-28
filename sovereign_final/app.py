@@ -199,12 +199,34 @@ def run_step(label, fn, *args, **kwargs):
             st.error(f"❌ {e}")
 
 if do_nehnut:
-    from scraper.nehnutelnosti import run
-    run_step("Scraping Nehnutelnosti", run, max_pages=10)
+    from scraper.nehnutelnosti import run as _scrape_nehnut
+    from modules.cashflow_runner import run_scoring as _run_cf
+    with st.spinner("Scraping Nehnutelnosti..."):
+        try:
+            n = _scrape_nehnut(max_pages=10)
+            if n == 0:
+                st.warning("⚠️ Nehnutelnosti returned 0 listings — the site may have blocked this request or changed its layout. Try again or check your network.")
+            else:
+                scored = _run_cf()
+                st.success(f"✅ Scraped {n} listings, scored {scored}.")
+                st.rerun()
+        except Exception as e:
+            st.error(f"❌ {e}")
 
 if do_bazos:
-    from scraper.bazos import run
-    run_step("Scraping Bazos", run, max_pages=10)
+    from scraper.bazos import run as _scrape_bazos
+    from modules.cashflow_runner import run_scoring as _run_cf
+    with st.spinner("Scraping Bazos..."):
+        try:
+            n = _scrape_bazos(max_pages=10)
+            if n == 0:
+                st.warning("⚠️ Bazos returned 0 listings — the site may have blocked this request or changed its layout. Try again or check your network.")
+            else:
+                scored = _run_cf()
+                st.success(f"✅ Scraped {n} listings, scored {scored}.")
+                st.rerun()
+        except Exception as e:
+            st.error(f"❌ {e}")
 
 if do_lv:
     bar = st.progress(0)
@@ -416,13 +438,18 @@ greens  = sorted([l for l in data if (l.get("cf_class") or l.get("classification
 yellows = sorted([l for l in data if (l.get("cf_class") or l.get("classification")) == "YELLOW"],
                  key=lambda x: x.get("surplus_sro") or 0, reverse=True)
 whites  = [l for l in data if (l.get("cf_class") or l.get("classification")) == "WHITE"]
+pending = [l for l in data if (l.get("cf_class") or l.get("classification") or "PENDING") == "PENDING"
+           and l.get("id","").startswith("d") is False
+           and l.get("id") not in ("d1","d2","d3")]
 
 
 # ── Tab 1: Snag List ──────────────────────────────────────────────────────────
 with t1:
-    if not greens and not yellows:
-        st.info("No scored listings. Run the full pipeline.")
+    if not greens and not yellows and not whites and not pending:
+        st.info("No listings in DB yet — click NEHNUT or BAZOS in the sidebar to scrape.")
     else:
+        if not greens and not yellows and not whites and pending:
+            st.info(f"⏳ {len(pending)} listing(s) scraped and pending scoring. Click 💰 CASHFLOW SCORE in the sidebar to classify them.")
         if greens:
             st.markdown(f'<div class="muted" style="margin:14px 0 8px">🟢 GREEN — ALPHA HOLDS ({len(greens)})</div>', unsafe_allow_html=True)
             for l in greens:
@@ -435,6 +462,14 @@ with t1:
             st.markdown(f'<div class="muted" style="margin:18px 0 8px">⚪ WHITE — MARKET / FLIP ({len(whites)})</div>', unsafe_allow_html=True)
             for l in whites:
                 render_card(l)
+        if pending:
+            with st.expander(f"⏳ PENDING SCORING ({len(pending)} listings scraped, not yet classified)"):
+                for l in pending:
+                    title = l.get("title") or l.get("address_raw") or l.get("district") or "—"
+                    price = l.get("price_eur") or 0
+                    size  = l.get("size_m2") or 0
+                    src   = (l.get("source") or "").upper()
+                    st.markdown(f'<div class="brow"><span class="l">{title[:60]}</span><span class="v">€{price:,.0f} · {size:.0f}m² · {src}</span></div>', unsafe_allow_html=True)
 
 
 # ── Tab 2: Satellite Viewer ───────────────────────────────────────────────────
