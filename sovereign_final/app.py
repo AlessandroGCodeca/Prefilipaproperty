@@ -199,34 +199,34 @@ def run_step(label, fn, *args, **kwargs):
             st.error(f"❌ {e}")
 
 if do_nehnut:
+    import importlib, sys as _sys
+    for _m in [k for k in _sys.modules if k.startswith("scraper")]:
+        del _sys.modules[_m]
     from scraper.nehnutelnosti import run as _scrape_nehnut
     from modules.cashflow_runner import run_scoring as _run_cf
     with st.spinner("Scraping Nehnutelnosti..."):
         try:
             n = _scrape_nehnut(max_pages=10)
-            if n == 0:
-                st.warning("⚠️ Nehnutelnosti returned 0 listings — the site may have blocked this request or changed its layout. Try again or check your network.")
-            else:
-                scored = _run_cf()
-                st.success(f"✅ Scraped {n} listings, scored {scored}.")
-                st.rerun()
+            scored = _run_cf()
+            st.success(f"✅ Scraped {n} listings, scored {scored}.")
+            st.rerun()
         except Exception as e:
-            st.error(f"❌ {e}")
+            st.error(f"❌ Nehnutelnosti: {e}")
 
 if do_bazos:
+    import sys as _sys
+    for _m in [k for k in _sys.modules if k.startswith("scraper")]:
+        del _sys.modules[_m]
     from scraper.bazos import run as _scrape_bazos
     from modules.cashflow_runner import run_scoring as _run_cf
     with st.spinner("Scraping Bazos..."):
         try:
             n = _scrape_bazos(max_pages=10)
-            if n == 0:
-                st.warning("⚠️ Bazos returned 0 listings — the site may have blocked this request or changed its layout. Try again or check your network.")
-            else:
-                scored = _run_cf()
-                st.success(f"✅ Scraped {n} listings, scored {scored}.")
-                st.rerun()
+            scored = _run_cf()
+            st.success(f"✅ Scraped {n} listings, scored {scored}.")
+            st.rerun()
         except Exception as e:
-            st.error(f"❌ {e}")
+            st.error(f"❌ Bazos: {e}")
 
 if do_lv:
     bar = st.progress(0)

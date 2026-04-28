@@ -165,7 +165,24 @@ def scrape_page(page: int, session: requests.Session = None) -> list[dict]:
     return results
 
 
-def run(max_pages: int = 10) -> int:
+def check_reachable() -> tuple[int, str]:
+    """Return (http_status, snippet) for diagnostics."""
+    try:
+        r = requests.get(SEARCH.format(page=1), headers=HEADERS, timeout=10)
+        snippet = r.text[:300].strip().replace("\n", " ")
+        return r.status_code, snippet
+    except Exception as e:
+        return 0, str(e)
+
+
+def run(max_pages: int = 10) -> int | str:
+    # Quick reachability check on page 1 before spinning through all pages
+    status, snippet = check_reachable()
+    if status != 200:
+        msg = f"HTTP {status} — {snippet[:120]}"
+        print(f"    ⚠️ Nehnutelnosti unreachable: {msg}")
+        raise RuntimeError(f"Nehnutelnosti blocked or unreachable: {msg}")
+
     print(f"🔍 Nehnutelnosti.sk ({max_pages} pages)...")
     session = _make_session()
     total = 0
@@ -179,6 +196,11 @@ def run(max_pages: int = 10) -> int:
                 print(f"    DB error: {e}")
         print(f"  Page {p}: {len(listings)} found")
         time.sleep(SCRAPE_DELAY_SEC)
+    if total == 0:
+        raise RuntimeError(
+            "Scraped 0 listings — the site responded but no listing cards matched "
+            "the CSS selectors. The site may have updated its layout."
+        )
     print(f"✅ Nehnutelnosti done. {total} upserted.\n")
     return total
 
