@@ -23,7 +23,8 @@ from scraper._http import get, make_session, SCRAPER_API_BASE, BROWSER_HEADERS
 import requests as _requests
 
 BASE        = "https://www.nehnutelnosti.sk"
-SEARCH_PAGE = BASE + "/slovensko/byty/predaj/?p[page]={page}"
+# The actual listings page (NOT /slovensko/byty/predaj/ — that's a redirect shell)
+SEARCH_PAGE = BASE + "/vysledky/byty/slovensko/predaj?page={page}"
 
 ENERGY_VALID = {"A0", "A1", "A", "B", "C", "D", "E", "F", "G"}
 
