@@ -254,16 +254,39 @@ def _merge_ld(data: dict, ld) -> None:
             pass
 
 
+def _safe_content(page) -> str:
+    """Fetch page.content(); retry once on RSC-streaming race errors."""
+    for _ in range(2):
+        try:
+            return page.content()
+        except Exception:
+            try:
+                page.wait_for_timeout(800)
+            except Exception:
+                pass
+    return ""
+
+
+def _safe_text(page) -> str:
+    """Get fully rendered visible text from the page (more reliable than HTML)."""
+    try:
+        return page.evaluate("() => document.body ? document.body.innerText : ''") or ""
+    except Exception:
+        return ""
+
+
 def _scrape_detail_page(page, url: str) -> dict:
     """Open one /detail/ page in the same browser session and pull structured fields."""
     data: dict = {}
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=25000)
-        page.wait_for_timeout(400)
+        page.wait_for_timeout(900)
     except Exception:
         return data
 
-    html = page.content()
+    html = _safe_content(page)
+    if not html:
+        return data
 
     # 1. JSON-LD schema.org (most reliable when present)
     for m in re.finditer(
@@ -292,30 +315,40 @@ def _scrape_detail_page(page, url: str) -> dict:
                 t = re.sub(r'\s*[\|\-]\s*[Nn]ehnute.*$', '', m.group(1)).strip()
                 data["title"] = t[:200]
 
-    # 3. Price regex fallback — Slovak sites use "120 000 €" or "120 000 €"
+    # 3. For price/size/energy, regex on rendered visible text — more reliable
+    #    than HTML because these fields are often split across many spans.
+    text = ""
+    if not (data.get("price") and data.get("size") and data.get("energy")):
+        text = _safe_text(page)
+
+    # Price — handle regular space, NBSP (\xa0), narrow NBSP (\u202f), thin space (\u2009)
     if not data.get("price"):
-        m = re.search(r'(\d{1,3}(?:[\s ]\d{3})+|\d{4,8})\s*€', html)
+        m = re.search(r"(\d{1,3}(?:[\s\xa0\u202f\u2009]\d{3})+|\d{4,8})\s*€", text or html)
         if m:
             try:
-                data["price"] = float(re.sub(r'[\s ]', '', m.group(1)))
+                data["price"] = float(re.sub(r"[\s\xa0\u202f\u2009]", "", m.group(1)))
             except Exception:
                 pass
 
-    # 4. Size regex fallback — "úžitková plocha 75 m²" or any "75 m²"
+    # Size — prefer "úžitková plocha N m²"; fall back to first standalone N m²
     if not data.get("size"):
-        m = (re.search(r'úžitkov[áa][^<\d]{0,40}(\d{2,4}(?:[.,]\d+)?)\s*m', html, re.I)
-             or re.search(r'(\d{2,4}(?:[.,]\d+)?)\s*m²', html)
-             or re.search(r'(\d{2,4}(?:[.,]\d+)?)\s*m2', html))
+        target = text or html
+        m = (re.search(r"úžitkov[áa][^<\d]{0,40}(\d{2,4}(?:[.,]\d+)?)\s*m", target, re.I)
+             or re.search(r"celkov[áa][^<\d]{0,40}(\d{2,4}(?:[.,]\d+)?)\s*m", target, re.I)
+             or re.search(r"(\d{2,4}(?:[.,]\d+)?)\s*m²", target)
+             or re.search(r"(\d{2,4}(?:[.,]\d+)?)\s*m2\b", target))
         if m:
             try:
-                data["size"] = float(m.group(1).replace(",", "."))
+                v = float(m.group(1).replace(",", "."))
+                if 10 < v < 2000:
+                    data["size"] = v
             except Exception:
                 pass
 
-    # 5. Energy class — "Energetická trieda B" or similar
+    # Energy class — "Energetická trieda B" or similar
     if not data.get("energy"):
-        m = re.search(r'energetick[aá]\s+(?:trieda|certifik\w*)[^A-Z]{0,30}\b([A-G][01]?)\b',
-                      html, re.I)
+        m = re.search(r"energetick[aá]\s+(?:trieda|certifik\w*)[^A-Z]{0,30}\b([A-G][01]?)\b",
+                      text or html, re.I)
         if m:
             cls = m.group(1).upper()
             if cls in ENERGY_VALID:
