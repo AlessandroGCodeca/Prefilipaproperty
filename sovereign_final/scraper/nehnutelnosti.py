@@ -191,6 +191,159 @@ def _minimal_listing(url: str, title: str, now: str) -> dict:
     }
 
 
+def _merge_ld(data: dict, ld) -> None:
+    """Pull fields out of a schema.org JSON-LD blob into our flat dict."""
+    if not isinstance(ld, dict):
+        return
+    t = ld.get("@type", "")
+    if isinstance(t, list):
+        t = t[0] if t else ""
+    if t not in ("Product", "Apartment", "House", "Residence", "RealEstateListing",
+                 "SingleFamilyResidence", "Accommodation", "Place"):
+        return
+
+    name = ld.get("name")
+    if name and not data.get("title"):
+        data["title"] = str(name)[:200]
+
+    img = ld.get("image")
+    if img and not data.get("image"):
+        if isinstance(img, list) and img:
+            img = img[0]
+        if isinstance(img, dict):
+            img = img.get("url", "")
+        data["image"] = str(img)
+
+    offers = ld.get("offers")
+    if isinstance(offers, list) and offers:
+        offers = offers[0]
+    if isinstance(offers, dict):
+        for pkey in ("price", "lowPrice", "highPrice"):
+            p = offers.get(pkey)
+            if p:
+                try:
+                    data["price"] = float(p)
+                    break
+                except Exception:
+                    pass
+
+    addr = ld.get("address")
+    if isinstance(addr, dict):
+        parts = [addr.get(k, "") for k in
+                 ("streetAddress", "addressLocality", "addressRegion", "postalCode")]
+        joined = ", ".join(p for p in parts if p)
+        if joined and not data.get("address"):
+            data["address"] = joined
+    elif isinstance(addr, str) and not data.get("address"):
+        data["address"] = addr
+
+    fs = ld.get("floorSize")
+    if isinstance(fs, dict):
+        v = fs.get("value")
+        if v:
+            try:
+                data["size"] = float(v)
+            except Exception:
+                pass
+
+    rooms = ld.get("numberOfRooms") or ld.get("numberOfBedrooms")
+    if rooms:
+        try:
+            data["rooms"] = int(float(rooms))
+        except Exception:
+            pass
+
+
+def _scrape_detail_page(page, url: str) -> dict:
+    """Open one /detail/ page in the same browser session and pull structured fields."""
+    data: dict = {}
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=25000)
+        page.wait_for_timeout(400)
+    except Exception:
+        return data
+
+    html = page.content()
+
+    # 1. JSON-LD schema.org (most reliable when present)
+    for m in re.finditer(
+        r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>',
+        html, re.DOTALL,
+    ):
+        try:
+            blob = json.loads(m.group(1).strip())
+        except Exception:
+            continue
+        for b in (blob if isinstance(blob, list) else [blob]):
+            _merge_ld(data, b)
+
+    # 2. og:image / og:title meta fallbacks
+    if not data.get("image"):
+        m = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', html)
+        if m:
+            data["image"] = m.group(1)
+    if not data.get("title"):
+        m = re.search(r'<meta\s+property="og:title"\s+content="([^"]+)"', html)
+        if m:
+            data["title"] = m.group(1)[:200]
+        else:
+            m = re.search(r'<title>([^<]+)</title>', html)
+            if m:
+                t = re.sub(r'\s*[\|\-]\s*[Nn]ehnute.*$', '', m.group(1)).strip()
+                data["title"] = t[:200]
+
+    # 3. Price regex fallback — Slovak sites use "120 000 €" or "120 000 €"
+    if not data.get("price"):
+        m = re.search(r'(\d{1,3}(?:[\s ]\d{3})+|\d{4,8})\s*€', html)
+        if m:
+            try:
+                data["price"] = float(re.sub(r'[\s ]', '', m.group(1)))
+            except Exception:
+                pass
+
+    # 4. Size regex fallback — "úžitková plocha 75 m²" or any "75 m²"
+    if not data.get("size"):
+        m = (re.search(r'úžitkov[áa][^<\d]{0,40}(\d{2,4}(?:[.,]\d+)?)\s*m', html, re.I)
+             or re.search(r'(\d{2,4}(?:[.,]\d+)?)\s*m²', html)
+             or re.search(r'(\d{2,4}(?:[.,]\d+)?)\s*m2', html))
+        if m:
+            try:
+                data["size"] = float(m.group(1).replace(",", "."))
+            except Exception:
+                pass
+
+    # 5. Energy class — "Energetická trieda B" or similar
+    if not data.get("energy"):
+        m = re.search(r'energetick[aá]\s+(?:trieda|certifik\w*)[^A-Z]{0,30}\b([A-G][01]?)\b',
+                      html, re.I)
+        if m:
+            cls = m.group(1).upper()
+            if cls in ENERGY_VALID:
+                data["energy"] = cls
+
+    return data
+
+
+def _apply_detail(listing: dict, detail: dict) -> None:
+    """Overlay enrichment data onto a minimal listing record."""
+    if detail.get("title") and not listing.get("title"):
+        listing["title"] = detail["title"][:200]
+    if detail.get("price"):
+        listing["price_eur"] = detail["price"]
+    if detail.get("size"):
+        listing["size_m2"] = detail["size"]
+    if detail.get("rooms"):
+        listing["rooms"] = detail["rooms"]
+    if detail.get("address"):
+        listing["address_raw"] = detail["address"]
+        listing["district"] = _district(detail["address"])
+    if detail.get("energy"):
+        listing["energy_class"] = detail["energy"]
+    if detail.get("image"):
+        listing["primary_image_url"] = detail["image"]
+        listing["image_urls"] = detail["image"]
+
+
 def _scrape_page_playwright(page_num: int) -> list[dict]:
     """Load one search page via Playwright, capture API responses + DOM links."""
     from playwright.sync_api import sync_playwright
@@ -252,44 +405,56 @@ def _scrape_page_playwright(page_num: int) -> list[dict]:
         page.wait_for_timeout(3000)
 
         html = page.content()
+        now = datetime.now(timezone.utc).isoformat()
+        results: list[dict] = []
 
-        # ── Strategy 1: API interception gave results ──────────────────────────
+        # ── Strategy 1: API interception gave full structured items ────────────
         if captured_api:
-            browser.close()
-            now = datetime.now(timezone.utc).isoformat()
-            return [r for r in (_parse_api_item(item, now) for item in captured_api) if r]
+            results = [r for r in (_parse_api_item(item, now) for item in captured_api) if r]
+        else:
+            # ── Strategy 2: DOM link extraction with /detail/ selector ─────────
+            print(f"    No API JSON captured — trying DOM extraction...", flush=True)
+            links = page.eval_on_selector_all(
+                "a[href*='/detail/']",
+                "els => els.map(e => ({href: e.href, text: e.innerText.trim().slice(0,200)}))"
+            )
+            print(f"    /detail/ links in DOM: {len(links)}", flush=True)
 
-        # ── Strategy 2: DOM link extraction with /detail/ selector ────────────
-        print(f"    No API JSON captured — trying DOM extraction...", flush=True)
-        links = page.eval_on_selector_all(
-            "a[href*='/detail/']",
-            "els => els.map(e => ({href: e.href, text: e.innerText.trim().slice(0,200)}))"
-        )
-        print(f"    /detail/ links in DOM: {len(links)}", flush=True)
+            # ── Strategy 3: RSC chunk parsing from HTML source ─────────────────
+            rsc_items = _parse_rsc_chunks(html)
+            print(f"    RSC /detail/ URLs found: {len(rsc_items)}", flush=True)
 
-        # ── Strategy 3: RSC chunk parsing from HTML source ────────────────────
-        rsc_items = _parse_rsc_chunks(html)
-        print(f"    RSC /detail/ URLs found: {len(rsc_items)}", flush=True)
+            seen: set[str] = set()
+            for l in links:
+                href = l.get("href", "")
+                if href and "/detail/" in href and href not in seen:
+                    seen.add(href)
+                    results.append(_minimal_listing(href, l.get("text", ""), now))
+            for item in rsc_items:
+                href = item["_url"]
+                if href not in seen:
+                    seen.add(href)
+                    results.append(_minimal_listing(href, "", now))
+
+        # ── Enrichment: open each listing's detail page in same browser ────────
+        to_enrich = [r for r in results if not r.get("price_eur")]
+        if to_enrich:
+            print(f"    Enriching {len(to_enrich)} listings (detail pages)...", flush=True)
+            success = 0
+            for i, listing in enumerate(to_enrich, 1):
+                try:
+                    detail = _scrape_detail_page(page, listing["url"])
+                    if detail:
+                        _apply_detail(listing, detail)
+                        if detail.get("price"):
+                            success += 1
+                except Exception as e:
+                    print(f"      [{i}] enrich error: {e}", flush=True)
+                if i % 10 == 0 or i == len(to_enrich):
+                    print(f"      progress {i}/{len(to_enrich)} (with price: {success})",
+                          flush=True)
 
         browser.close()
-
-    now = datetime.now(timezone.utc).isoformat()
-    seen: set[str] = set()
-    results: list[dict] = []
-
-    # Merge DOM links
-    for l in links:
-        href = l.get("href", "")
-        if href and "/detail/" in href and href not in seen:
-            seen.add(href)
-            results.append(_minimal_listing(href, l.get("text", ""), now))
-
-    # Merge RSC links not already in DOM results
-    for item in rsc_items:
-        href = item["_url"]
-        if href not in seen:
-            seen.add(href)
-            results.append(_minimal_listing(href, "", now))
 
     return results
 
