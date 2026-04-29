@@ -45,61 +45,39 @@ def check_reachable() -> tuple[int, str]:
         return 0, str(e)
 
 
-def _build_listing_from_link(link, base_url: str) -> dict | None:
-    """Build a listing record by walking up from an /inzerat/ link."""
+def _build_listing_from_card(card, link) -> dict | None:
+    """Build a listing record from a known card element + the listing link inside it."""
     href = link.get("href", "")
     if not href.startswith("http"):
         href = BASE + "/" + href.lstrip("/")
     if "/inzerat/" not in href:
         return None
 
-    # Walk up at most 6 levels to find the card container
-    card = link.parent
-    for _ in range(6):
-        if card is None:
-            break
-        text = card.get_text(" ", strip=True)
-        cls = " ".join(card.get("class") or [])
-        if ("inzerat" in cls or len(text) > 60) and card.name in ("div", "article", "li", "section"):
-            break
-        card = card.parent
+    card_text = card.get_text(" ", strip=True)
+    title = link.get_text(strip=True) or card_text[:80]
 
-    card_text = card.get_text(" ", strip=True) if card else link.get_text(" ", strip=True)
-
-    # Extract title from the link or a heading inside the card
-    title = link.get_text(strip=True)
-    if card:
-        heading = card.select_one("h2, h3, .nadpis, [class*='nadpis']")
-        if heading:
-            title = heading.get_text(strip=True)
-
-    # Price: look for €-tagged text
+    # Price — bazos uses div.inzeratycena
     price = 0.0
-    if card:
-        price_tag = card.select_one(".cena, [class*='price'], [class*='cena']")
-        if price_tag:
-            price = _price(price_tag.get_text())
+    price_tag = card.select_one("div.inzeratycena, .cena, [class*='cena']")
+    if price_tag:
+        price = _price(price_tag.get_text())
     if not price:
-        price_match = re.search(r"([\d\s]{4,})\s*(?:€|EUR)", card_text)
-        if price_match:
-            price = _price(price_match.group(1))
+        m = re.search(r"([\d\s]{4,})\s*(?:€|EUR)", card_text)
+        if m:
+            price = _price(m.group(1))
 
-    # Size: look for m² pattern
+    # Size — search the card description text for m² patterns
     size = _size(card_text) or _size(title)
 
-    # Location
-    addr = ""
-    if card:
-        loc = card.select_one(".lokalita, [class*='location'], [class*='lokalita'], [class*='mesto']")
-        if loc:
-            addr = loc.get_text(strip=True)
+    # Location — bazos uses div.inzeratylok
+    loc = card.select_one("div.inzeratylok, .lokalita, [class*='lokalita'], [class*='mesto']")
+    addr = loc.get_text(" ", strip=True) if loc else ""
 
     # Image
-    img = ""
-    if card:
-        img_tag = card.select_one("img[src]")
-        if img_tag:
-            img = img_tag.get("src", "")
+    img_tag = card.select_one("img[src]")
+    img = img_tag.get("src", "") if img_tag else ""
+    if img and not img.startswith("http"):
+        img = "https:" + img if img.startswith("//") else BASE + img
 
     uid = hashlib.md5(href.encode()).hexdigest()
     now = datetime.now(timezone.utc).isoformat()
@@ -114,6 +92,19 @@ def _build_listing_from_link(link, base_url: str) -> dict | None:
         "classification": "PENDING", "lv_status": "PENDING",
         "scraped_at": now, "last_seen_at": now,
     }
+
+
+def _build_listing_from_link(link) -> dict | None:
+    """Fallback: walk up from a stray /inzerat/ link to find a card-like ancestor."""
+    card = link.parent
+    for _ in range(6):
+        if card is None:
+            return None
+        cls = " ".join(card.get("class") or [])
+        if "inzeratyflex" in cls or "inzerat" in cls and card.name == "div":
+            break
+        card = card.parent
+    return _build_listing_from_card(card, link) if card else None
 
 
 def scrape_page(offset: int, session=None) -> list[dict]:
@@ -136,25 +127,22 @@ def scrape_page(offset: int, session=None) -> list[dict]:
 
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # Primary: find listing cards by class
+    # Primary: real card class is "inzeraty inzeratyflex" (confirmed from live DOM)
     cards = (
-        soup.select("div.inzeraty div.inzerat")
-        or soup.select("div.maincontent div.inzerat")
-        or soup.select("div.inzerat")
-        or soup.select("div[class*='inzerat']")
-        or soup.select("article.inzerat, article[class*='ad']")
+        soup.select("div.inzeratyflex")
+        or soup.select("div.inzeraty.inzeratyflex")
+        or soup.select("div[class*='inzeratyflex']")
     )
 
     results = []
 
     if cards:
-        now = datetime.now(timezone.utc).isoformat()
         for card in cards:
             try:
-                link = card.select_one("h2 a, h3 a, a.nadpis, a[href*='/inzerat/']")
+                link = card.select_one("div.inzeratynadpis a, h2 a, h3 a, a[href*='/inzerat/']")
                 if not link:
                     continue
-                rec = _build_listing_from_link(link, BASE)
+                rec = _build_listing_from_card(card, link)
                 if rec:
                     results.append(rec)
             except Exception as e:
@@ -169,7 +157,7 @@ def scrape_page(offset: int, session=None) -> list[dict]:
                 continue
             seen.add(href)
             try:
-                rec = _build_listing_from_link(link, BASE)
+                rec = _build_listing_from_link(link)
                 if rec:
                     results.append(rec)
             except Exception as e:
