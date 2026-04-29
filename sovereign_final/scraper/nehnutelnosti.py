@@ -330,20 +330,63 @@ def _scrape_detail_page(page, url: str) -> dict:
             except Exception:
                 pass
 
-    # Size — prefer "úžitková plocha N m²"; fall back to first standalone N m²
+    # Size — try labelled patterns first, then fall back to the first
+    # plausible "N m²" in the rendered text. Window widened to 120 chars
+    # because rendered DOM splits label from value across multiple newlines.
     if not data.get("size"):
         target = text or html
-        m = (re.search(r"úžitkov[áa][^<\d]{0,40}(\d{2,4}(?:[.,]\d+)?)\s*m", target, re.I)
-             or re.search(r"celkov[áa][^<\d]{0,40}(\d{2,4}(?:[.,]\d+)?)\s*m", target, re.I)
-             or re.search(r"(\d{2,4}(?:[.,]\d+)?)\s*m²", target)
-             or re.search(r"(\d{2,4}(?:[.,]\d+)?)\s*m2\b", target))
-        if m:
-            try:
-                v = float(m.group(1).replace(",", "."))
-                if 10 < v < 2000:
-                    data["size"] = v
-            except Exception:
-                pass
+        size_value = 0.0
+
+        # Slovak real-estate labels for apartment area, in priority order
+        label_patterns = [
+            r"úžitkov[áa]\s+plocha",
+            r"podlahov[áa]\s+plocha",
+            r"celkov[áa]\s+plocha",
+            r"obytn[áa]\s+plocha",
+            r"plocha\s+bytu",
+            r"plocha\s+úžitkov[áa]",
+            r"výmera",
+            r"rozloha",
+            r"\bplocha\b",
+        ]
+        for lbl in label_patterns:
+            m = re.search(
+                lbl + r"[^\d]{0,120}(\d{2,4}(?:[.,]\d+)?)\s*(?:m²|m2|m\b)",
+                target, re.I,
+            )
+            if m:
+                try:
+                    v = float(m.group(1).replace(",", "."))
+                    if 15 < v < 500:
+                        size_value = v
+                        break
+                except Exception:
+                    pass
+
+        # Fallback — first plausible "N m²" anywhere in rendered text
+        if not size_value:
+            for m in re.finditer(r"(\d{2,4}(?:[.,]\d+)?)\s*(?:m²|m2)\b", target):
+                try:
+                    v = float(m.group(1).replace(",", "."))
+                    if 20 < v < 300:
+                        size_value = v
+                        break
+                except Exception:
+                    pass
+
+        # Last resort — pull "N m²" out of the title (Bazos-style headlines)
+        if not size_value and data.get("title"):
+            m = re.search(r"(\d{2,4}(?:[.,]\d+)?)\s*(?:m²|m2)", data["title"])
+            if m:
+                try:
+                    v = float(m.group(1).replace(",", "."))
+                    if 15 < v < 500:
+                        size_value = v
+                except Exception:
+                    pass
+
+        if size_value:
+            data["size"] = size_value
 
     # Energy class — "Energetická trieda B" or similar
     if not data.get("energy"):
