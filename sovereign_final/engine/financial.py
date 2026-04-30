@@ -99,9 +99,60 @@ def calc_income_tax_sro(annual_net: float) -> float:
     return max(annual_net * TAX_RATE_SRO, 0)
 
 
+_CITY_ONLY_KEYS = {"bratislava", "košice"}  # used only as last-resort city fallbacks
+
+
 def get_rent_estimate(district: str, size_m2: float) -> float:
-    key  = district.lower().strip()
-    rate = RENT_PER_M2.get(key, RENT_PER_M2["default"])
+    key = district.lower().strip()
+
+    # 1. Exact match — including the city-only keys.
+    rate = RENT_PER_M2.get(key)
+
+    # 2. A known district name appears inside the address string.
+    # Iterate longest-first so "petržalka" beats "ružinov" when both are
+    # subsumed; suburbs/specific districts are preferred over bare city
+    # names ("bratislava", "košice"), which are reserved as final fallbacks.
+    keys_by_specificity = sorted(
+        (k for k in RENT_PER_M2 if k != "default" and k not in _CITY_ONLY_KEYS),
+        key=len, reverse=True,
+    )
+    if rate is None:
+        for known in keys_by_specificity:
+            if known in key:
+                rate = RENT_PER_M2[known]
+                break
+
+    # 3. Reverse: district token appears in a known key (longest-first so
+    # "košice i" wins over plain "košice" when district is just "košice i")
+    if rate is None and key:
+        for known in keys_by_specificity:
+            if key in known:
+                rate = RENT_PER_M2[known]
+                break
+
+    # 4. City-name anchor: if a major city appears anywhere in the district string,
+    #    use the base (non-numbered) district rate as a reasonable approximation.
+    if rate is None:
+        CITY_ANCHORS = [
+            ("bratislava", "bratislava iv"),   # suburban BA default
+            ("košice",     "košice ii"),
+            ("žilina",     "žilina"),
+            ("nitra",      "nitra"),
+            ("trnava",     "trnava"),
+            ("prešov",     "prešov"),
+            ("banská bystrica", "banská bystrica"),
+            ("trenčín",    "trenčín"),
+            ("poprad",     "poprad"),
+            ("martin",     "martin"),
+        ]
+        for city, fallback_key in CITY_ANCHORS:
+            if city in key:
+                rate = RENT_PER_M2.get(fallback_key, RENT_PER_M2["default"])
+                break
+
+    if rate is None:
+        rate = RENT_PER_M2["default"]
+
     if any(z in key for z in INDUSTRIAL_ZONES):
         rate *= INDUSTRIAL_RENT_PREMIUM
     return round(rate * size_m2, 2)
