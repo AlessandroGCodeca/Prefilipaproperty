@@ -111,17 +111,24 @@ _SLUG_TO_DIACRITIC = {
 def _parse_slug(url: str) -> dict:
     """Pull title + city/district hints out of a nehnutelnosti.sk URL slug.
 
-    URL form: https://www.nehnutelnosti.sk/detail/{id}/{slug}/
-    The slug is SEO-friendly and almost always contains the city + suburb
-    e.g. '3-izbovy-byt-bratislava-ruzinov-trnavska-cesta'.
+    Two URL forms to handle:
+      - /detail/{id}/{slug}                       (regular listings)
+      - /detail/developersky-projekt/{id}/{slug}  (developer-project pages)
 
-    Returns dict with optional 'title', 'city', 'district' keys.
+    The slug is the LAST hyphenated segment, not the first non-empty one.
     """
     out: dict = {}
-    m = re.search(r"/detail/[^/]+/([^/?#]+)", url or "")
-    if not m:
+    if not url or "/detail/" not in url:
         return out
-    slug = m.group(1).lower()
+    tail = url.split("/detail/", 1)[1].split("?", 1)[0].split("#", 1)[0]
+    parts = [p for p in tail.split("/") if p]
+    slug = ""
+    for part in reversed(parts):
+        if "-" in part:
+            slug = part.lower()
+            break
+    if not slug:
+        return out
 
     # Title: clean slug → readable text
     nice = slug.replace("-", " ").strip()
@@ -419,11 +426,19 @@ def _scrape_detail_page(page, url: str) -> dict:
                 t = re.sub(r'\s*[\|\-]\s*[Nn]ehnute.*$', '', m.group(1)).strip()
                 data["title"] = t[:200]
 
-    # 3. For price/size/energy, regex on rendered visible text — more reliable
-    #    than HTML because these fields are often split across many spans.
+    # 3. For price/size/energy/address, regex on rendered visible text — more
+    #    reliable than HTML because these fields are often split across spans.
     text = ""
-    if not (data.get("price") and data.get("size") and data.get("energy")):
+    if not (data.get("price") and data.get("size") and data.get("energy")
+            and data.get("address")):
         text = _safe_text(page)
+
+    # Address — JSON-LD often omits it on PREMIUM listings. Scan the rendered
+    # text for known cities/suburbs (suburbs win over their parent city).
+    if not data.get("address") and text:
+        addr = _extract_location_from_text(text)
+        if addr:
+            data["address"] = addr
 
     # Price — handle regular space, NBSP (\xa0), narrow NBSP (\u202f), thin space (\u2009)
     if not data.get("price"):
@@ -505,6 +520,68 @@ def _scrape_detail_page(page, url: str) -> dict:
 
 
 _GENERIC_TITLES = {"premium", "top", "exclusive", "exkluzivne", "exkluzívne", ""}
+
+# Suburbs (specific) → "Suburb, Parent City" so engine.get_rent_estimate
+# can match either the suburb (Petržalka → 10.5 €/m²) or fall back to the
+# city anchor (Bratislava → BA IV rate). Order matters: longest/most-specific
+# names first so "Devínska Nová Ves" wins over "Bratislava".
+_TEXT_LOCATION_PATTERNS: list[tuple[re.Pattern, str]] = []
+
+
+def _build_location_patterns() -> list[tuple[re.Pattern, str]]:
+    suburb_to_city = {
+        "Devínska Nová Ves": "Bratislava", "Podunajské Biskupice": "Bratislava",
+        "Záhorská Bystrica": "Bratislava", "Karlova Ves": "Bratislava",
+        "Staré Mesto": "Bratislava", "Nové Mesto": "Bratislava",
+        "Petržalka": "Bratislava", "Ružinov": "Bratislava", "Dúbravka": "Bratislava",
+        "Vrakuňa": "Bratislava", "Vajnory": "Bratislava", "Rusovce": "Bratislava",
+        "Jarovce": "Bratislava", "Čunovo": "Bratislava", "Lamač": "Bratislava",
+        "Rača": "Bratislava", "Ťahanovce": "Košice", "Barca": "Košice",
+    }
+    cities = [
+        "Banská Bystrica", "Liptovský Mikuláš", "Spišská Nová Ves",
+        "Považská Bystrica", "Rimavská Sobota", "Vranov nad Topľou",
+        "Bánovce nad Bebravou", "Kysucké Nové Mesto", "Žiar nad Hronom",
+        "Nové Mesto nad Váhom", "Dunajská Streda", "Stará Ľubovňa",
+        "Veľký Krtíš", "Zlaté Moravce", "Bratislava", "Košice", "Žilina",
+        "Nitra", "Trnava", "Trenčín", "Prešov", "Poprad", "Martin",
+        "Ružomberok", "Zvolen", "Trebišov", "Galanta", "Komárno", "Levice",
+        "Nové Zámky", "Pezinok", "Senec", "Malacky", "Modra", "Piešťany",
+        "Hlohovec", "Senica", "Skalica", "Púchov", "Partizánske",
+        "Topoľčany", "Levoča", "Sabinov", "Bardejov", "Humenné", "Snina",
+        "Kežmarok", "Stropkov", "Sobrance", "Michalovce", "Rožňava",
+        "Detva", "Lučenec", "Brezno", "Námestovo", "Tvrdošín", "Dolný Kubín",
+        "Bytča", "Čadca", "Revúca", "Krupina", "Hnúšťa", "Stupava", "Šaľa",
+    ]
+    pats: list[tuple[re.Pattern, str]] = []
+    # Suburbs first (sorted by length desc so multi-word names win)
+    for suburb in sorted(suburb_to_city, key=len, reverse=True):
+        pats.append((
+            re.compile(r"(?<!\w)" + re.escape(suburb) + r"(?!\w)"),
+            f"{suburb}, {suburb_to_city[suburb]}",
+        ))
+    # Then cities (longest first so "Banská Bystrica" wins over "Bystrica")
+    for city in sorted(cities, key=len, reverse=True):
+        pats.append((re.compile(r"(?<!\w)" + re.escape(city) + r"(?!\w)"), city))
+    return pats
+
+
+_TEXT_LOCATION_PATTERNS = _build_location_patterns()
+
+
+def _extract_location_from_text(text: str) -> str:
+    """Find the first known Slovak city/suburb in rendered detail-page text.
+
+    Address is almost always near the top of the page; trim the search window
+    to keep this O(1) per listing.
+    """
+    if not text:
+        return ""
+    snippet = text[:4000]
+    for pattern, address in _TEXT_LOCATION_PATTERNS:
+        if pattern.search(snippet):
+            return address
+    return ""
 
 
 def _apply_detail(listing: dict, detail: dict) -> None:
