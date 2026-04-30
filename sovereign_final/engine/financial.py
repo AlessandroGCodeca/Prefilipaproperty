@@ -100,8 +100,55 @@ def calc_income_tax_sro(annual_net: float) -> float:
 
 
 def get_rent_estimate(district: str, size_m2: float) -> float:
-    key  = district.lower().strip()
-    rate = RENT_PER_M2.get(key, RENT_PER_M2["default"])
+    key = district.lower().strip()
+
+    # 1. Exact match
+    rate = RENT_PER_M2.get(key)
+
+    # 2. A known district name appears inside the address string
+    # e.g. "bratislava - rača" matches "bratislava iv" if "bratislava iv" ⊂ key — no,
+    # but "bratislava" ⊂ key lets us pick the best Bratislava district.
+    # More usefully: "košice" ⊂ "košice-okolie, východné slovensko" → matches "košice i" etc.
+    if rate is None:
+        for known, r in RENT_PER_M2.items():
+            if known == "default":
+                continue
+            if known in key:
+                rate = r
+                break
+
+    # 3. Reverse: district token appears in a known key
+    if rate is None:
+        for known, r in RENT_PER_M2.items():
+            if known == "default":
+                continue
+            if key and key in known:
+                rate = r
+                break
+
+    # 4. City-name anchor: if a major city appears anywhere in the district string,
+    #    use the base (non-numbered) district rate as a reasonable approximation.
+    if rate is None:
+        CITY_ANCHORS = [
+            ("bratislava", "bratislava iv"),   # suburban BA default
+            ("košice",     "košice ii"),
+            ("žilina",     "žilina"),
+            ("nitra",      "nitra"),
+            ("trnava",     "trnava"),
+            ("prešov",     "prešov"),
+            ("banská bystrica", "banská bystrica"),
+            ("trenčín",    "trenčín"),
+            ("poprad",     "poprad"),
+            ("martin",     "martin"),
+        ]
+        for city, fallback_key in CITY_ANCHORS:
+            if city in key:
+                rate = RENT_PER_M2.get(fallback_key, RENT_PER_M2["default"])
+                break
+
+    if rate is None:
+        rate = RENT_PER_M2["default"]
+
     if any(z in key for z in INDUSTRIAL_ZONES):
         rate *= INDUSTRIAL_RENT_PREMIUM
     return round(rate * size_m2, 2)

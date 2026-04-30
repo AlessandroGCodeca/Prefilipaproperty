@@ -269,6 +269,31 @@ def _detect_search_url(sess) -> str:
     return ""
 
 
+def _deactivate_non_apartments() -> int:
+    """Mark topreality listings as inactive when the title reveals a non-apartment.
+
+    URL-level filtering catches most cases before scraping, but developer-project
+    pages and assignment-of-ownership listings (postúpenie) can slip through with
+    titles that only become visible after the detail page is fetched.
+    """
+    from database import get_conn
+    conn = get_conn()
+    clauses = " OR ".join(
+        f"LOWER(title) LIKE '%{kw}%'" for kw in EXCLUDE_KEYWORDS
+    )
+    sql = f"""
+        UPDATE listings SET is_active=0
+        WHERE source='topreality' AND is_active=1
+          AND ({clauses})
+    """
+    n = conn.execute(sql).rowcount
+    conn.commit()
+    conn.close()
+    if n:
+        print(f"  ↳ deactivated {n} non-apartment topreality listings by title", flush=True)
+    return n
+
+
 def check_reachable() -> tuple[int, str]:
     try:
         r = get(BASE, timeout=10)
@@ -325,6 +350,7 @@ def run(max_pages: int = 5) -> int:
             "Topreality: 0 listings parsed. Check DETAIL_HREF_PATTERNS in "
             "scraper/topreality.py — the link patterns may need updating."
         )
+    _deactivate_non_apartments()
     print(f"✅ Topreality done. {total} upserted.", flush=True)
     return total
 
