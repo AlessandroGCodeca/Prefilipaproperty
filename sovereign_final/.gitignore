@@ -1,0 +1,5 @@
+
+# scraper debug artifacts
+*.html
+!templates/*.html
+playwright_*.png
