@@ -296,7 +296,7 @@ if do_test:
     for label, url in [
         ("nehnutelnosti.sk", "https://www.nehnutelnosti.sk/slovensko/byty/predaj/?p[page]=1"),
         ("bazos.sk",          "https://reality.bazos.sk/predaj/byt/"),
-        ("topreality.sk",     "https://www.topreality.sk/vyhladavanie-byty-predaj/strana-1.html"),
+        ("topreality.sk",     "https://www.topreality.sk/vyhladavanie/byty/predaj?page=1"),
     ]:
         try:
             _r = _http_get(url, timeout=12)
@@ -500,7 +500,7 @@ pending = [l for l in data if (l.get("cf_class") or l.get("classification") or "
 # ── Tab 1: Snag List ──────────────────────────────────────────────────────────
 with t1:
     if not greens and not yellows and not whites and not pending:
-        st.info("No listings in DB yet — click NEHNUT or BAZOS in the sidebar to scrape.")
+        st.info("No listings in DB yet — click NEHNUT, BAZOS, or TOPREAL in the sidebar to scrape.")
     else:
         if not greens and not yellows and not whites and pending:
             st.info(f"⏳ {len(pending)} listing(s) scraped and pending scoring. Click 💰 CASHFLOW SCORE in the sidebar to classify them.")
