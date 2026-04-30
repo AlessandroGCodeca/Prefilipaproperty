@@ -64,9 +64,35 @@ ENERGY_VALID = {"A0", "A1", "A", "B", "C", "D", "E", "F", "G"}
 
 
 # ── Field extraction helpers (mostly cribbed from nehnutelnosti.py) ───────────
+# Plausible apartment sale price range. Numbers below the floor are almost
+# always deposits / monthly fees / per-m² rates, not the actual sale price.
+_PRICE_MIN = 30_000
+_PRICE_MAX = 10_000_000
+
+
+def _is_plausible_price(v: float) -> bool:
+    return _PRICE_MIN <= v <= _PRICE_MAX
+
+
 def _price_from_text(t: str) -> float:
+    """Extract the apartment sale price from rendered text.
+
+    The page often contains other € amounts (deposit, monthly fee, parking
+    spot price, per-m² rate). We take the LARGEST value within a plausible
+    sale-price range to avoid grabbing those.
+    """
     if not t:
         return 0.0
+    candidates: list[float] = []
+    for m in re.finditer(r"(\d{1,3}(?:[\s\xa0  ]\d{3})+|\d{4,8})\s*€", t):
+        try:
+            v = float(re.sub(r"[\s\xa0  ]", "", m.group(1)))
+            if _is_plausible_price(v):
+                candidates.append(v)
+        except Exception:
+            pass
+    return max(candidates) if candidates else 0.0
+
     m = re.search(r"(\d{1,3}(?:[\s\xa0  ]\d{3})+|\d{4,8})\s*€", t)
     if m:
         try:
@@ -192,7 +218,9 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
                 p = offers.get("price") or offers.get("lowPrice")
                 if p and not ld_data.get("price"):
                     try:
-                        ld_data["price"] = float(p)
+                        v = float(p)
+                        if _is_plausible_price(v):
+                            ld_data["price"] = v
                     except Exception:
                         pass
             addr = b.get("address")
@@ -294,6 +322,28 @@ def _deactivate_non_apartments() -> int:
     return n
 
 
+def _zero_bogus_prices() -> int:
+    """Zero out bogus prices that an older extractor may have stored.
+
+    Listings with price_eur below _PRICE_MIN are deposits / monthly fees /
+    per-m² rates rather than the actual sale price. Setting price_eur=0
+    sends them back to PENDING so they're not classified GREEN on bad data.
+    """
+    from database import get_conn
+    conn = get_conn()
+    n = conn.execute(
+        "UPDATE listings SET price_eur=0, classification='PENDING' "
+        "WHERE source='topreality' AND price_eur > 0 AND price_eur < ?",
+        (_PRICE_MIN,),
+    ).rowcount
+    conn.commit()
+    conn.close()
+    if n:
+        print(f"  ↳ zeroed {n} topreality listings with bogus prices "
+              f"(< €{_PRICE_MIN:,})", flush=True)
+    return n
+
+
 def check_reachable() -> tuple[int, str]:
     try:
         r = get(BASE, timeout=10)
@@ -351,6 +401,7 @@ def run(max_pages: int = 5) -> int:
             "scraper/topreality.py — the link patterns may need updating."
         )
     _deactivate_non_apartments()
+    _zero_bogus_prices()
     print(f"✅ Topreality done. {total} upserted.", flush=True)
     return total
 
