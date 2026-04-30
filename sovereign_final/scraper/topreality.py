@@ -10,6 +10,7 @@ to Playwright if HTTP returns nothing or hits a WAF.
 """
 
 import hashlib, time, re, json
+from urllib.parse import urljoin, urlparse
 from datetime import datetime, timezone
 
 from bs4 import BeautifulSoup
@@ -22,24 +23,36 @@ from scraper._http import get, make_session
 
 BASE = "https://www.topreality.sk"
 
-# Try several search URL formats — first one that returns >0 detail links wins.
-# topreality.sk has reorganised its URL structure several times, so we keep
-# a few candidates rather than hardcoding one.
+# Search URL — confirmed working format from debug_topreality.py output.
+# (Older candidates kept as a fallback list in case the URL scheme changes.)
 SEARCH_URL_CANDIDATES = [
+    BASE + "/vyhladavanie/byty/predaj?page={page}",
     BASE + "/vyhladavanie-byty-predaj/strana-{page}.html",
     BASE + "/byty-predaj.html?strana={page}",
     BASE + "/inzercia.html?type=ponuka&action=predaj&category=byty&strana={page}",
-    BASE + "/vyhladavanie/byty/predaj?page={page}",
 ]
 
-# Patterns that distinguish a listing-detail link from category/footer links
+# topreality.sk uses {slug}-r{6-8 digit ID}.html for every listing page,
+# regardless of property type. We then filter by URL keywords to keep
+# only apartments-for-sale.
 DETAIL_HREF_PATTERNS = [
-    re.compile(r"/byt-[^/]+\.html"),         # e.g. /byt-3-izbovy-bratislava-ID12345.html
-    re.compile(r"/detail-[^/]+\.html"),
-    re.compile(r"/inzerat/\d+"),
-    re.compile(r"/predaj-[^/]*-byt[^/]*\.html"),
-    re.compile(r"/[^/]+-byt-[^/]+\.html"),
+    re.compile(r"-r\d{6,8}\.html(?:$|[?#])"),
 ]
+
+# Skip these — page mixes apartments with rentals / houses / land / commercial.
+EXCLUDE_KEYWORDS = (
+    "prenajom",   # rental
+    "rodinn",     # rodinný dom = house
+    "pozemok",    # land
+    "garaz",      # garage
+    "kancelar",   # office
+    "chal", "chat",  # cottages
+    "obchodn",    # commercial
+    "sklado",     # storage
+    "administr",  # administrative space
+    "statie",     # parking spot
+    "vikend",     # weekend cottage
+)
 
 ENERGY_VALID = {"A0", "A1", "A", "B", "C", "D", "E", "F", "G"}
 
@@ -110,22 +123,28 @@ def _energy_from_text(t: str) -> str:
 def _extract_listing_links(html: str) -> list[str]:
     """Pull all detail-page hrefs from a search results page."""
     soup = BeautifulSoup(html, "lxml")
+
+    # topreality renders relative hrefs like "./foo-r12345.html". A <base href>
+    # tag in the page (or just the site root) tells us how to resolve them.
+    base_tag = soup.find("base")
+    base_href = base_tag.get("href") if base_tag and base_tag.get("href") else BASE + "/"
+
     found: set[str] = set()
     for a in soup.find_all("a", href=True):
-        href = a["href"]
-        if not href:
+        href = a["href"].strip()
+        if not href or href.startswith(("#", "javascript:", "mailto:")):
             continue
-        if href.startswith("/"):
-            full = BASE + href
-        elif href.startswith("http"):
-            full = href
-        else:
-            continue
+        full = urljoin(base_href, href)
         if "topreality.sk" not in full:
             continue
-        path = full.replace(BASE, "")
-        if any(p.search(path) for p in DETAIL_HREF_PATTERNS):
-            found.add(full.split("#")[0].split("?")[0])
+        path = urlparse(full).path
+        if not any(p.search(path) for p in DETAIL_HREF_PATTERNS):
+            continue
+        if any(kw in path.lower() for kw in EXCLUDE_KEYWORDS):
+            continue
+        # Strip query/fragment so the same listing isn't seen twice
+        clean = full.split("#")[0].split("?")[0]
+        found.add(clean)
     return sorted(found)
 
 
