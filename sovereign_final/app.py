@@ -170,9 +170,10 @@ with st.sidebar:
     st.markdown("---")
 
     st.markdown("#### PIPELINE")
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     with c1: do_nehnut = st.button("NEHNUT",  use_container_width=True)
     with c2: do_bazos  = st.button("BAZOS",   use_container_width=True)
+    with c3: do_topreal= st.button("TOPREAL", use_container_width=True)
     do_lv   = st.button("🔒 LV DEBT FILTER", use_container_width=True)
     do_cf   = st.button("💰 CASHFLOW SCORE", use_container_width=True)
     do_loc  = st.button("📍 LOCATION IQ",    use_container_width=True)
@@ -253,6 +254,17 @@ if do_bazos:
             st.success(f"✅ Scraped {n} listings, scored {scored}.")
             st.rerun()
 
+if do_topreal:
+    with st.spinner("Scraping Topreality..."):
+        n, err = _run_scraper_subprocess("topreality")
+        if err:
+            st.error(f"❌ Topreality: {err}")
+        else:
+            from modules.cashflow_runner import run_scoring as _run_cf
+            scored = _run_cf()
+            st.success(f"✅ Scraped {n} listings, scored {scored}.")
+            st.rerun()
+
 if do_lv:
     bar = st.progress(0)
     txt = st.empty()
@@ -284,6 +296,7 @@ if do_test:
     for label, url in [
         ("nehnutelnosti.sk", "https://www.nehnutelnosti.sk/slovensko/byty/predaj/?p[page]=1"),
         ("bazos.sk",          "https://reality.bazos.sk/predaj/byt/"),
+        ("topreality.sk",     "https://www.topreality.sk/vyhladavanie-byty-predaj/strana-1.html"),
     ]:
         try:
             _r = _http_get(url, timeout=12)
