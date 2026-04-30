@@ -303,7 +303,20 @@ def upsert_listing(data: dict):
          :primary_image_url,:image_urls,:classification,:lv_status,:scraped_at,:last_seen_at)
         ON CONFLICT(id) DO UPDATE SET
             last_seen_at=excluded.last_seen_at,
-            price_eur=excluded.price_eur,
+            title=CASE WHEN excluded.title != '' THEN excluded.title ELSE title END,
+            price_eur=CASE WHEN excluded.price_eur > 0 THEN excluded.price_eur ELSE price_eur END,
+            size_m2=CASE WHEN excluded.size_m2 > 0 THEN excluded.size_m2 ELSE size_m2 END,
+            rooms=COALESCE(excluded.rooms, rooms),
+            floor=COALESCE(excluded.floor, floor),
+            year_built=COALESCE(excluded.year_built, year_built),
+            energy_class=CASE WHEN excluded.energy_class != 'UNKNOWN' AND excluded.energy_class != ''
+                              THEN excluded.energy_class ELSE energy_class END,
+            address_raw=CASE WHEN excluded.address_raw != '' THEN excluded.address_raw ELSE address_raw END,
+            district=CASE WHEN excluded.district != '' THEN excluded.district ELSE district END,
+            city=CASE WHEN excluded.city != '' THEN excluded.city ELSE city END,
+            primary_image_url=CASE WHEN excluded.primary_image_url != ''
+                                   THEN excluded.primary_image_url ELSE primary_image_url END,
+            image_urls=CASE WHEN excluded.image_urls != '' THEN excluded.image_urls ELSE image_urls END,
             is_active=1
     """, data)
     conn.commit()
@@ -394,7 +407,7 @@ def get_unscored_cashflow():
         SELECT l.id, l.price_eur, l.size_m2, l.district, l.energy_class
         FROM listings l
         LEFT JOIN cashflow_scores c ON l.id = c.listing_id
-        WHERE l.lv_status='PASS' AND c.listing_id IS NULL
+        WHERE l.lv_status != 'REJECTED' AND c.listing_id IS NULL
           AND l.price_eur > 0 AND l.size_m2 > 0 AND l.is_active=1
     """).fetchall()
     conn.close()

@@ -170,12 +170,14 @@ with st.sidebar:
     st.markdown("---")
 
     st.markdown("#### PIPELINE")
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     with c1: do_nehnut = st.button("NEHNUT",  use_container_width=True)
     with c2: do_bazos  = st.button("BAZOS",   use_container_width=True)
+    with c3: do_topreal= st.button("TOPREAL", use_container_width=True)
     do_lv   = st.button("🔒 LV DEBT FILTER", use_container_width=True)
     do_cf   = st.button("💰 CASHFLOW SCORE", use_container_width=True)
     do_loc  = st.button("📍 LOCATION IQ",    use_container_width=True)
+    do_test = st.button("🔗 TEST SITES",      use_container_width=True)
 
     st.markdown("---")
     st.markdown("#### FILTERS")
@@ -198,13 +200,70 @@ def run_step(label, fn, *args, **kwargs):
         except Exception as e:
             st.error(f"❌ {e}")
 
+def _run_scraper_subprocess(script_name: str) -> tuple[int, str]:
+    """Run a scraper as a fresh subprocess — bypasses Python module cache."""
+    import subprocess, json as _json
+    _dir = os.path.dirname(__file__)
+    wrapper = f"""
+import sys, os, json
+sys.path.insert(0, {repr(_dir)})
+try:
+    import importlib
+    mod = importlib.import_module('scraper.{script_name}')
+    n = mod.run(max_pages=10)
+    print(json.dumps({{"ok": True, "n": n}}))
+except Exception as e:
+    print(json.dumps({{"ok": False, "error": str(e)}}))
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", wrapper],
+        capture_output=True, text=True, timeout=300
+    )
+    for line in (proc.stdout + proc.stderr).strip().splitlines():
+        try:
+            data = _json.loads(line)
+            if data.get("ok"):
+                return data["n"], ""
+            else:
+                return 0, data.get("error", "Unknown error")
+        except Exception:
+            continue
+    stderr = proc.stderr.strip()
+    return 0, stderr or "Scraper produced no output"
+
+
 if do_nehnut:
-    from scraper.nehnutelnosti import run
-    run_step("Scraping Nehnutelnosti", run, max_pages=10)
+    with st.spinner("Scraping Nehnutelnosti..."):
+        n, err = _run_scraper_subprocess("nehnutelnosti")
+        if err:
+            st.error(f"❌ Nehnutelnosti: {err}")
+        else:
+            from modules.cashflow_runner import run_scoring as _run_cf
+            scored = _run_cf()
+            st.success(f"✅ Scraped {n} listings, scored {scored}.")
+            st.rerun()
 
 if do_bazos:
-    from scraper.bazos import run
-    run_step("Scraping Bazos", run, max_pages=10)
+    with st.spinner("Scraping Bazos..."):
+        n, err = _run_scraper_subprocess("bazos")
+        if err:
+            st.error(f"❌ Bazos: {err}")
+        else:
+            from modules.cashflow_runner import run_scoring as _run_cf
+            scored = _run_cf()
+            st.success(f"✅ Scraped {n} listings, scored {scored}.")
+            st.rerun()
+
+if do_topreal:
+    with st.spinner("Scraping Topreality..."):
+        n, err = _run_scraper_subprocess("topreality")
+        if err:
+            st.error(f"❌ Topreality: {err}")
+        else:
+            from modules.cashflow_runner import run_scoring as _run_cf
+            scored = _run_cf()
+            st.success(f"✅ Scraped {n} listings, scored {scored}.")
+            st.rerun()
 
 if do_lv:
     bar = st.progress(0)
@@ -229,6 +288,23 @@ if do_loc:
     from modules.location_iq import run_location_scoring
     n = run_location_scoring(progress_callback=loc_cb)
     bar.empty(); txt.empty(); st.success(f"✅ Location scored {n}"); st.rerun()
+
+if do_test:
+    from scraper._http import get as _http_get, SCRAPER_API_KEY as _sak
+    _proxy_mode = bool(_sak)
+    st.info(f"Proxy mode: {'✅ ScraperAPI' if _proxy_mode else '⚠️ Direct (no SCRAPER_API_KEY set)'}")
+    for label, url in [
+        ("nehnutelnosti.sk", "https://www.nehnutelnosti.sk/slovensko/byty/predaj/?p[page]=1"),
+        ("bazos.sk",          "https://reality.bazos.sk/predaj/byt/"),
+        ("topreality.sk",     "https://www.topreality.sk/vyhladavanie/byty/predaj?page=1"),
+    ]:
+        try:
+            _r = _http_get(url, timeout=12)
+            snippet = _r.text[:80].strip().replace("\n", " ")
+            icon = "✅" if _r.status_code == 200 else "❌"
+            st.info(f"{icon} **{label}** → HTTP {_r.status_code} | `{snippet}`")
+        except Exception as _e:
+            st.error(f"❌ **{label}** → {_e}")
 
 
 # ── Data ──────────────────────────────────────────────────────────────────────
@@ -416,13 +492,18 @@ greens  = sorted([l for l in data if (l.get("cf_class") or l.get("classification
 yellows = sorted([l for l in data if (l.get("cf_class") or l.get("classification")) == "YELLOW"],
                  key=lambda x: x.get("surplus_sro") or 0, reverse=True)
 whites  = [l for l in data if (l.get("cf_class") or l.get("classification")) == "WHITE"]
+pending = [l for l in data if (l.get("cf_class") or l.get("classification") or "PENDING") == "PENDING"
+           and l.get("id","").startswith("d") is False
+           and l.get("id") not in ("d1","d2","d3")]
 
 
 # ── Tab 1: Snag List ──────────────────────────────────────────────────────────
 with t1:
-    if not greens and not yellows:
-        st.info("No scored listings. Run the full pipeline.")
+    if not greens and not yellows and not whites and not pending:
+        st.info("No listings in DB yet — click NEHNUT, BAZOS, or TOPREAL in the sidebar to scrape.")
     else:
+        if not greens and not yellows and not whites and pending:
+            st.info(f"⏳ {len(pending)} listing(s) scraped and pending scoring. Click 💰 CASHFLOW SCORE in the sidebar to classify them.")
         if greens:
             st.markdown(f'<div class="muted" style="margin:14px 0 8px">🟢 GREEN — ALPHA HOLDS ({len(greens)})</div>', unsafe_allow_html=True)
             for l in greens:
@@ -435,6 +516,14 @@ with t1:
             st.markdown(f'<div class="muted" style="margin:18px 0 8px">⚪ WHITE — MARKET / FLIP ({len(whites)})</div>', unsafe_allow_html=True)
             for l in whites:
                 render_card(l)
+        if pending:
+            with st.expander(f"⏳ PENDING SCORING ({len(pending)} listings scraped, not yet classified)"):
+                for l in pending:
+                    title = l.get("title") or l.get("address_raw") or l.get("district") or "—"
+                    price = l.get("price_eur") or 0
+                    size  = l.get("size_m2") or 0
+                    src   = (l.get("source") or "").upper()
+                    st.markdown(f'<div class="brow"><span class="l">{title[:60]}</span><span class="v">€{price:,.0f} · {size:.0f}m² · {src}</span></div>', unsafe_allow_html=True)
 
 
 # ── Tab 2: Satellite Viewer ───────────────────────────────────────────────────
