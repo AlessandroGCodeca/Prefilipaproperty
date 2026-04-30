@@ -51,6 +51,110 @@ def _district(address: str) -> str:
     return parts[-1] if parts else ""
 
 
+# Slovak cities/towns most likely to appear in a nehnutelnosti URL slug.
+# Order matters: longer/more-specific names checked first so "bratislavske"
+# doesn't get matched before "bratislava". Bratislava city parts come before
+# the bare "bratislava" so suburbs resolve to their finer-grained name.
+_SLUG_CITIES = (
+    # Bratislava parts (most specific first)
+    "stare-mesto", "ruzinov", "vrakuna", "podunajske-biskupice", "vajnory",
+    "nove-mesto", "raca", "dubravka", "karlova-ves", "lamac",
+    "zahorska-bystrica", "devinska-nova-ves", "petrzalka", "rusovce",
+    "jarovce", "cunovo",
+    # Bratislava (after parts, so parts get matched first)
+    "bratislava-i", "bratislava-ii", "bratislava-iii", "bratislava-iv",
+    "bratislava-v", "bratislava",
+    # Košice parts and main
+    "kosice-i", "kosice-ii", "kosice-iii", "kosice-iv", "kosice-okolie",
+    "kosice", "tahanovce", "barca", "mestska-cast",
+    # Other major cities
+    "zilina", "nitra", "trnava", "trencin", "presov", "banska-bystrica",
+    "poprad", "martin", "ruzomberok", "liptovsky-mikulas", "zvolen",
+    "lucenec", "spisska-nova-ves", "michalovce", "humenne", "bardejov",
+    "komarno", "levice", "nove-zamky", "sala", "dunajska-streda",
+    "galanta", "piestany", "hlohovec", "senica", "skalica",
+    "povazska-bystrica", "puchov", "partizanske", "bytca", "cadca",
+    "kysucke-nove-mesto", "namestovo", "tvrdosin", "dolny-kubin",
+    "brezno", "rimavska-sobota", "revuca", "rossnava", "roznava",
+    "stropkov", "vranov-nad-toplou", "snina", "stara-lubovna", "kezmarok",
+    "levoca", "sabinov", "trebisov", "sobrance", "topolcany",
+    "zlate-moravce", "vrable", "pezinok", "senec", "malacky", "modra",
+    "stupava",
+)
+
+# Map slug-form (no diacritics, hyphens) → diacritic-correct address form.
+# Used to build a clean address_raw / district even when JSON-LD is missing.
+_SLUG_TO_DIACRITIC = {
+    "kosice": "Košice", "kosice-i": "Košice I", "kosice-ii": "Košice II",
+    "kosice-iii": "Košice III", "kosice-iv": "Košice IV", "kosice-okolie": "Košice-okolie",
+    "zilina": "Žilina", "presov": "Prešov", "trencin": "Trenčín",
+    "ruzomberok": "Ružomberok", "liptovsky-mikulas": "Liptovský Mikuláš",
+    "banska-bystrica": "Banská Bystrica", "spisska-nova-ves": "Spišská Nová Ves",
+    "stara-lubovna": "Stará Ľubovňa", "vranov-nad-toplou": "Vranov nad Topľou",
+    "humenne": "Humenné", "kezmarok": "Kežmarok", "levoca": "Levoča",
+    "trebisov": "Trebišov", "topolcany": "Topoľčany", "zlate-moravce": "Zlaté Moravce",
+    "piestany": "Piešťany", "dunajska-streda": "Dunajská Streda",
+    "povazska-bystrica": "Považská Bystrica", "puchov": "Púchov",
+    "bytca": "Bytča", "cadca": "Čadca", "kysucke-nove-mesto": "Kysucké Nové Mesto",
+    "namestovo": "Námestovo", "tvrdosin": "Tvrdošín", "dolny-kubin": "Dolný Kubín",
+    "rimavska-sobota": "Rimavská Sobota", "revuca": "Revúca", "roznava": "Rožňava",
+    "petrzalka": "Petržalka", "raca": "Rača", "vrakuna": "Vrakuňa",
+    "podunajske-biskupice": "Podunajské Biskupice", "stare-mesto": "Staré Mesto",
+    "nove-mesto": "Nové Mesto", "dubravka": "Dúbravka", "karlova-ves": "Karlova Ves",
+    "lamac": "Lamač", "zahorska-bystrica": "Záhorská Bystrica",
+    "devinska-nova-ves": "Devínska Nová Ves", "rusovce": "Rusovce",
+    "jarovce": "Jarovce", "cunovo": "Čunovo", "ruzinov": "Ružinov",
+    "tahanovce": "Ťahanovce",
+}
+
+
+def _parse_slug(url: str) -> dict:
+    """Pull title + city/district hints out of a nehnutelnosti.sk URL slug.
+
+    URL form: https://www.nehnutelnosti.sk/detail/{id}/{slug}/
+    The slug is SEO-friendly and almost always contains the city + suburb
+    e.g. '3-izbovy-byt-bratislava-ruzinov-trnavska-cesta'.
+
+    Returns dict with optional 'title', 'city', 'district' keys.
+    """
+    out: dict = {}
+    m = re.search(r"/detail/[^/]+/([^/?#]+)", url or "")
+    if not m:
+        return out
+    slug = m.group(1).lower()
+
+    # Title: clean slug → readable text
+    nice = slug.replace("-", " ").strip()
+    # Drop common SEO prefixes
+    nice = re.sub(r"^(predaj|na predaj|byt na predaj|predam)\s+", "", nice)
+    if nice:
+        out["title"] = nice[:1].upper() + nice[1:]
+
+    # City/district: search for known city tokens with hyphen-bounded matching
+    # so "raca" doesn't match "barack" and "kosice" doesn't match "kosicepiece".
+    bordered = "-" + slug + "-"
+    found_parts: list[str] = []
+    for city_slug in _SLUG_CITIES:
+        if ("-" + city_slug + "-") in bordered:
+            nice_name = _SLUG_TO_DIACRITIC.get(
+                city_slug, city_slug.replace("-", " ").title()
+            )
+            if nice_name not in found_parts:
+                found_parts.append(nice_name)
+            if len(found_parts) >= 2:
+                break
+
+    if found_parts:
+        out["address"] = ", ".join(found_parts)
+        # District holds the FULL joined address ("Petržalka, Bratislava")
+        # so engine.get_rent_estimate's fuzzy matcher can find both the
+        # specific suburb (when it's in RENT_PER_M2) and the city anchor
+        # fallback (when the suburb isn't recognised).
+        out["district"] = ", ".join(found_parts)
+
+    return out
+
+
 def _parse_api_item(item: dict, now: str) -> dict | None:
     """Convert one API response object to our DB schema."""
     try:
@@ -400,6 +504,9 @@ def _scrape_detail_page(page, url: str) -> dict:
     return data
 
 
+_GENERIC_TITLES = {"premium", "top", "exclusive", "exkluzivne", "exkluzívne", ""}
+
+
 def _apply_detail(listing: dict, detail: dict) -> None:
     """Overlay enrichment data onto a minimal listing record."""
     if detail.get("title") and not listing.get("title"):
@@ -418,6 +525,17 @@ def _apply_detail(listing: dict, detail: dict) -> None:
     if detail.get("image"):
         listing["primary_image_url"] = detail["image"]
         listing["image_urls"] = detail["image"]
+
+    # Slug fallback — covers "PREMIUM"-titled paid listings and JSON-LD blobs
+    # that omit address. Always runs but only fills empty fields.
+    slug_data = _parse_slug(listing.get("url", ""))
+    cur_title = (listing.get("title") or "").strip().lower()
+    if slug_data.get("title") and cur_title in _GENERIC_TITLES:
+        listing["title"] = slug_data["title"][:200]
+    if slug_data.get("address") and not listing.get("address_raw"):
+        listing["address_raw"] = slug_data["address"]
+    if slug_data.get("district") and not listing.get("district"):
+        listing["district"] = slug_data["district"]
 
 
 def _scrape_page_playwright(page_num: int) -> list[dict]:

@@ -99,31 +99,35 @@ def calc_income_tax_sro(annual_net: float) -> float:
     return max(annual_net * TAX_RATE_SRO, 0)
 
 
+_CITY_ONLY_KEYS = {"bratislava", "košice"}  # used only as last-resort city fallbacks
+
+
 def get_rent_estimate(district: str, size_m2: float) -> float:
     key = district.lower().strip()
 
-    # 1. Exact match
+    # 1. Exact match — including the city-only keys.
     rate = RENT_PER_M2.get(key)
 
-    # 2. A known district name appears inside the address string
-    # e.g. "bratislava - rača" matches "bratislava iv" if "bratislava iv" ⊂ key — no,
-    # but "bratislava" ⊂ key lets us pick the best Bratislava district.
-    # More usefully: "košice" ⊂ "košice-okolie, východné slovensko" → matches "košice i" etc.
+    # 2. A known district name appears inside the address string.
+    # Iterate longest-first so "petržalka" beats "ružinov" when both are
+    # subsumed; suburbs/specific districts are preferred over bare city
+    # names ("bratislava", "košice"), which are reserved as final fallbacks.
+    keys_by_specificity = sorted(
+        (k for k in RENT_PER_M2 if k != "default" and k not in _CITY_ONLY_KEYS),
+        key=len, reverse=True,
+    )
     if rate is None:
-        for known, r in RENT_PER_M2.items():
-            if known == "default":
-                continue
+        for known in keys_by_specificity:
             if known in key:
-                rate = r
+                rate = RENT_PER_M2[known]
                 break
 
-    # 3. Reverse: district token appears in a known key
-    if rate is None:
-        for known, r in RENT_PER_M2.items():
-            if known == "default":
-                continue
-            if key and key in known:
-                rate = r
+    # 3. Reverse: district token appears in a known key (longest-first so
+    # "košice i" wins over plain "košice" when district is just "košice i")
+    if rate is None and key:
+        for known in keys_by_specificity:
+            if key in known:
+                rate = RENT_PER_M2[known]
                 break
 
     # 4. City-name anchor: if a major city appears anywhere in the district string,
