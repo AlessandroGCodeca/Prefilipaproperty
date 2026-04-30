@@ -44,6 +44,7 @@ EXCLUDE_KEYWORDS = (
     "prenajom",   # rental
     "rodinn",     # rodinný dom = house
     "pozemok",    # land
+    "zahrad",     # garden / land plot (záhrada)
     "garaz",      # garage
     "kancelar",   # office
     "chal", "chat",  # cottages
@@ -52,6 +53,11 @@ EXCLUDE_KEYWORDS = (
     "administr",  # administrative space
     "statie",     # parking spot
     "vikend",     # weekend cottage
+    "budov",      # building (budova)
+    "kaviar",     # café (kaviareň)
+    "reštaur",    # restaurant
+    "hotel",      # hotel
+    "penzion",    # guesthouse
 )
 
 ENERGY_VALID = {"A0", "A1", "A", "B", "C", "D", "E", "F", "G"}
