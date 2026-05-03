@@ -43,7 +43,7 @@ DETAIL_HREF_PATTERNS = [
 EXCLUDE_KEYWORDS = (
     "prenajom",   # rental
     "rodinn",     # rodinný dom = house
-    "pozemok",    # land
+    "pozem",      # pozemok/pozemku/pozemky — land plot in any declension
     "zahrad",     # garden / land plot (záhrada)
     "garaz",      # garage
     "kancelar",   # office
