@@ -23,6 +23,11 @@ REGIONAL_MEDIAN_PRICE_PER_M2 = {
 # almost always dev-project starting prices, quoted wrong, or non-residential.
 REGIONAL_PRICE_FLOOR_RATIO = 0.50
 
+# Fallback floor in €/m² used when a listing has no district info. Set at
+# 50% of the cheapest regional median (Nitriansky kraj, ~€1,627/m²) so we
+# only reject listings priced below the cheapest plausible Slovak apartment.
+GLOBAL_BLANK_DISTRICT_FLOOR = 800.0
+
 # Map of city / district / suburb names (lowercased) → kraj code.
 # Built from the same set of Slovak cities used by RENT_PER_M2 in config.py.
 # Substring match: any listing whose district contains one of these wins.
@@ -132,41 +137,38 @@ def kraj_for_district(district: str) -> str | None:
     return None
 
 
-def regional_price_floor(district: str) -> float | None:
-    """Return the per-m² price floor for the listing's region, or None when
-    the kraj can't be determined."""
+def regional_price_floor(district: str) -> float:
+    """Return the per-m² price floor for the listing's region. Falls back to
+    GLOBAL_BLANK_DISTRICT_FLOOR when the kraj can't be determined — anything
+    below that is below the cheapest plausible Slovak apartment anywhere."""
     kraj = kraj_for_district(district)
     if not kraj:
-        return None
+        return GLOBAL_BLANK_DISTRICT_FLOOR
     return REGIONAL_MEDIAN_PRICE_PER_M2[kraj] * REGIONAL_PRICE_FLOOR_RATIO
 
 
 def is_plausible_regional_price(price_eur: float, size_m2: float, district: str) -> bool:
-    """True when price/m² is at or above the regional floor (or when we can't
-    determine the kraj — better to keep the listing than reject it blindly)."""
+    """True when price/m² is at or above the floor for the listing's region
+    (or above the global blank-district floor when the kraj is unknown)."""
     if not price_eur or not size_m2:
         return True
-    floor = regional_price_floor(district)
-    if floor is None:
-        return True
-    return (price_eur / size_m2) >= floor
+    return (price_eur / size_m2) >= regional_price_floor(district)
 
 
 def zero_below_regional_floor(source: str) -> int:
     """Cleanup pass: zero the price (and reset to PENDING) on rows whose
-    €/m² falls below the regional floor. Skips rows where the kraj can't
-    be inferred — those need other validation."""
+    €/m² falls below the regional floor (or the global blank-district floor
+    when we can't determine the kraj)."""
     from database import get_conn
     conn = get_conn()
     rows = conn.execute(
         "SELECT id, district, price_eur, size_m2 FROM listings "
-        "WHERE source=? AND price_eur > 0 AND size_m2 > 0 "
-        "  AND district IS NOT NULL AND district != ''",
+        "WHERE source=? AND price_eur > 0 AND size_m2 > 0",
         (source,),
     ).fetchall()
     flagged: list[str] = []
     for row_id, district, price, size in rows:
-        if not is_plausible_regional_price(price, size, district):
+        if not is_plausible_regional_price(price, size, district or ""):
             flagged.append(row_id)
     if flagged:
         placeholders = ",".join("?" * len(flagged))
@@ -180,6 +182,6 @@ def zero_below_regional_floor(source: str) -> int:
     if flagged:
         print(
             f"  ↳ zeroed {len(flagged)} {source} listings priced below "
-            f"{int(REGIONAL_PRICE_FLOOR_RATIO * 100)}% of regional NBS median"
+            f"regional NBS floor (or €{int(GLOBAL_BLANK_DISTRICT_FLOOR)}/m² when district missing)"
         )
     return len(flagged)

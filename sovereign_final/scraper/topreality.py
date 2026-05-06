@@ -60,6 +60,8 @@ EXCLUDE_KEYWORDS = (
     "penzion",    # guesthouse
     "zrub",       # log cabin / chalet (zrub, zrubu)
     "zastavan",   # "v zastavanom území" — construction-zone/built-up-area plots
+    "dražb",      # dražba — auction (often non-apartment property)
+    "viacúčelov", "viacucelov",  # multi-purpose building, not apartment
 )
 
 ENERGY_VALID = {"A0", "A1", "A", "B", "C", "D", "E", "F", "G"}
