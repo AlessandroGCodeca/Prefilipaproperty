@@ -882,6 +882,8 @@ def run(max_pages: int = 10) -> int:
         )
     _dedupe_canonical_urls()
     _zero_bogus_prices()
+    from engine.regional_prices import zero_below_regional_floor
+    zero_below_regional_floor("nehnutelnosti")
     print(f"✅ Nehnutelnosti done. {total} upserted.", flush=True)
     return total
 

@@ -407,6 +407,8 @@ def run(max_pages: int = 5) -> int:
         )
     _deactivate_non_apartments()
     _zero_bogus_prices()
+    from engine.regional_prices import zero_below_regional_floor
+    zero_below_regional_floor("topreality")
     print(f"✅ Topreality done. {total} upserted.", flush=True)
     return total
 

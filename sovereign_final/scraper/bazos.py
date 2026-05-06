@@ -242,6 +242,8 @@ def run(max_pages: int = 10) -> int:
             "URL or selectors may have changed."
         )
     _zero_bogus_prices()
+    from engine.regional_prices import zero_below_regional_floor
+    zero_below_regional_floor("bazos")
     print(f"✅ Bazos done. {total} upserted.", flush=True)
     return total
 
