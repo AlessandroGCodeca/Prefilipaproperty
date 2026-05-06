@@ -298,27 +298,30 @@ def _detect_search_url(sess) -> str:
 
 
 def _deactivate_non_apartments() -> int:
-    """Mark topreality listings as inactive when the title reveals a non-apartment.
+    """Mark topreality listings as inactive when the title or URL reveals a
+    non-apartment (building plot, house, garage, etc.).
 
-    URL-level filtering catches most cases before scraping, but developer-project
-    pages and assignment-of-ownership listings (postúpenie) can slip through with
-    titles that only become visible after the detail page is fetched.
+    URL-level filtering catches most cases at scrape time, but rows already in
+    the DB from earlier runs need this cleanup pass. Also zero the price and
+    set classification='WHITE' so they drop out of the GREEN/YELLOW lists.
     """
     from database import get_conn
     conn = get_conn()
     clauses = " OR ".join(
-        f"LOWER(title) LIKE '%{kw}%'" for kw in EXCLUDE_KEYWORDS
+        f"LOWER(title) LIKE '%{kw}%' OR LOWER(url) LIKE '%{kw}%'"
+        for kw in EXCLUDE_KEYWORDS
     )
     sql = f"""
-        UPDATE listings SET is_active=0
-        WHERE source='topreality' AND is_active=1
-          AND ({clauses})
+        UPDATE listings
+           SET is_active=0, price_eur=0, classification='WHITE'
+         WHERE source='topreality' AND is_active=1
+           AND ({clauses})
     """
     n = conn.execute(sql).rowcount
     conn.commit()
     conn.close()
     if n:
-        print(f"  ↳ deactivated {n} non-apartment topreality listings by title", flush=True)
+        print(f"  ↳ deactivated {n} non-apartment topreality listings (title/url match)", flush=True)
     return n
 
 

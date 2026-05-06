@@ -802,8 +802,8 @@ def check_reachable() -> tuple[int, str]:
 
 def _zero_bogus_prices() -> int:
     """Reset prices below the plausible-apartment threshold (deposits, monthly
-    rents, "od €X" starting prices, per-m² figures) on existing nehnutelnosti
-    rows so they re-classify as PENDING and stop polluting the GREEN list."""
+    rents, per-m² figures) on existing nehnutelnosti rows so they re-classify
+    as PENDING and stop polluting the GREEN list."""
     from database import get_conn
     conn = get_conn()
     n = conn.execute(
