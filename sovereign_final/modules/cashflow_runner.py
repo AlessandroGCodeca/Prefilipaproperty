@@ -28,7 +28,7 @@ def run_scoring(progress_callback=None) -> int:
             result = analyse(
                 price_eur  = row["price_eur"],
                 size_m2    = row["size_m2"],
-                district   = row.get("district") or "default",
+                district   = row.get("district") or "",
                 listing_id = row["id"],
             )
             db_data = result_to_db_dict(result)
