@@ -183,6 +183,21 @@ with st.sidebar:
     st.markdown("#### FILTERS")
     max_price  = st.slider("Max Price €",  30_000, 600_000, 300_000, 5_000)
     min_size   = st.slider("Min Size m²",  20, 150, 25, 5)
+    classes    = st.multiselect(
+        "Classification",
+        ["GREEN", "YELLOW", "WHITE", "PENDING", "REJECTED"],
+        default=["GREEN", "YELLOW", "WHITE", "PENDING"],
+    )
+    sources    = st.multiselect(
+        "Source",
+        ["nehnutelnosti", "bazos", "topreality"],
+        default=["nehnutelnosti", "bazos", "topreality"],
+    )
+    district_q = st.text_input(
+        "District contains",
+        placeholder="e.g. Bratislava, Petržalka, Košice",
+        help="Case-insensitive substring match. Leave blank to show all.",
+    )
     show_sro   = st.toggle("Show s.r.o. figures", value=True)
     show_demo  = st.toggle("Demo data (no DB)",   value=False)
 
@@ -319,9 +334,13 @@ else:
     data = raw_data
 
 # Apply filters
+district_needle = (district_q or "").strip().lower()
 data = [l for l in data
         if (l.get("price_eur") or 0) <= max_price
-        and (l.get("size_m2")  or 0) >= min_size]
+        and (l.get("size_m2")  or 0) >= min_size
+        and (not classes or (l.get("classification") or "PENDING") in classes)
+        and (not sources or (l.get("source") or "") in sources)
+        and (not district_needle or district_needle in (l.get("district") or "").lower())]
 
 
 # ── Stats bar ─────────────────────────────────────────────────────────────────
