@@ -18,12 +18,16 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: sovereign_final/requirements.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest ruff
+          # Skip playwright/streamlit/curl_cffi — heavy runtime-only deps that
+          # aren't imported anywhere the unit tests reach. scraper/_http.py
+          # uses plain `requests`; bs4 needs lxml at runtime not import time.
+          grep -v -E "^(playwright|streamlit|curl_cffi|psycopg2)" requirements.txt > requirements-test.txt
+          pip install -r requirements-test.txt pytest ruff
 
       - name: Lint with ruff
         run: ruff check . --select=E9,F63,F7,F82 --output-format=github
