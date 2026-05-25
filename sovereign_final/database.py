@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS listings (
     scraped_at        TEXT NOT NULL,
     last_seen_at      TEXT NOT NULL,
     is_active         INTEGER DEFAULT 1,
+    is_dev_project    INTEGER DEFAULT 0,
     notes             TEXT
 );
 
@@ -211,10 +212,78 @@ RENT_COMPS_SEED = [
 ]
 
 
+# Detect dev-project listings (multi-unit projects, not individual buyable
+# apartments). Their "price" field is typically the cheapest unit's starting
+# price ("od €X") rather than a real sale price, so they distort GREEN/YELLOW
+# classification. Detection is conservative — we'd rather miss a few than
+# false-positive on a real apartment.
+_DEV_PROJECT_URL_MARKERS = (
+    "/detail/developersky-projekt/",   # nehnutelnosti explicit dev project path
+    "developersky-projekt",            # other portals occasionally use this slug
+)
+_DEV_PROJECT_TITLE_MARKERS = (
+    "developersky projekt", "developerský projekt",
+    "novy projekt", "nový projekt",
+    "novostavba",
+    "1. fáza", "2. fáza", "3. fáza", "1. etapa", "2. etapa", "i. etapa", "ii. etapa",
+    " od €", " od eur",   # "Predaj bytov od €145 900" pattern — only with leading space
+)
+
+
+def detect_dev_project(url: str, title: str) -> int:
+    """Return 1 if URL or title indicates this is a multi-unit dev project,
+    else 0. Conservative: returns 0 on ambiguous input rather than risk
+    false-positives on real apartments."""
+    u = (url or "").lower()
+    if any(marker in u for marker in _DEV_PROJECT_URL_MARKERS):
+        return 1
+    t = (title or "").lower()
+    if any(marker in t for marker in _DEV_PROJECT_TITLE_MARKERS):
+        return 1
+    return 0
+
+
+def _ensure_dev_project_column(conn):
+    """Add is_dev_project column to existing DBs that pre-date this column.
+    Safe no-op when the column already exists."""
+    if not USE_SQLITE_FALLBACK:
+        return
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(listings)")]
+    if "is_dev_project" not in cols:
+        conn.execute("ALTER TABLE listings ADD COLUMN is_dev_project INTEGER DEFAULT 0")
+        conn.commit()
+
+
+def backfill_dev_project_flags() -> int:
+    """Run detect_dev_project on every active listing and update is_dev_project.
+    Returns the number of rows newly flagged as dev projects."""
+    conn = get_conn()
+    try:
+        _ensure_dev_project_column(conn)
+        rows = conn.execute(
+            "SELECT id, url, title FROM listings WHERE is_dev_project=0"
+        ).fetchall()
+        flagged = []
+        for r in rows:
+            if detect_dev_project(r[1] or "", r[2] or ""):
+                flagged.append(r[0])
+        if flagged:
+            ph = ",".join("?" * len(flagged))
+            conn.execute(
+                f"UPDATE listings SET is_dev_project=1 WHERE id IN ({ph})",
+                flagged,
+            )
+            conn.commit()
+    finally:
+        conn.close()
+    return len(flagged)
+
+
 def init_db():
     conn = get_conn()
     if USE_SQLITE_FALLBACK:
         conn.executescript(SQLITE_SCHEMA)
+        _ensure_dev_project_column(conn)
         now = datetime.now(timezone.utc).isoformat()
         for row in RENT_COMPS_SEED:
             conn.execute("""
@@ -325,15 +394,21 @@ def upsert_listing(data: dict):
         ).fetchone()
         if existing and existing[0] != data["id"]:
             data = {**data, "id": existing[0], "url_hash": existing[0]}
+        # Auto-detect dev-project listings from URL + title at insert time.
+        data = {**data, "is_dev_project": detect_dev_project(
+            data.get("url", ""), data.get("title", ""),
+        )}
         conn.execute("""
             INSERT INTO listings
             (id, source, url, url_hash, title, description, price_eur, size_m2,
              rooms, floor, year_built, energy_class, address_raw, district, city,
-             primary_image_url, image_urls, classification, lv_status, scraped_at, last_seen_at)
+             primary_image_url, image_urls, classification, lv_status, scraped_at,
+             last_seen_at, is_dev_project)
             VALUES
             (:id,:source,:url,:url_hash,:title,:description,:price_eur,:size_m2,
              :rooms,:floor,:year_built,:energy_class,:address_raw,:district,:city,
-             :primary_image_url,:image_urls,:classification,:lv_status,:scraped_at,:last_seen_at)
+             :primary_image_url,:image_urls,:classification,:lv_status,:scraped_at,
+             :last_seen_at,:is_dev_project)
             ON CONFLICT(id) DO UPDATE SET
                 last_seen_at=excluded.last_seen_at,
                 title=CASE WHEN excluded.title != '' THEN excluded.title ELSE title END,
@@ -350,7 +425,8 @@ def upsert_listing(data: dict):
                 primary_image_url=CASE WHEN excluded.primary_image_url != ''
                                        THEN excluded.primary_image_url ELSE primary_image_url END,
                 image_urls=CASE WHEN excluded.image_urls != '' THEN excluded.image_urls ELSE image_urls END,
-                is_active=1
+                is_active=1,
+                is_dev_project=CASE WHEN excluded.is_dev_project=1 THEN 1 ELSE is_dev_project END
         """, data)
         conn.commit()
     finally:

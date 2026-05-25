@@ -107,8 +107,9 @@ div[data-testid="stExpander"] { background:#0b0d14; border:1px solid #151924 !im
 """, unsafe_allow_html=True)
 
 # ── Init ──────────────────────────────────────────────────────────────────────
-from database import init_db, get_all_active, get_rejected, get_stats
+from database import init_db, get_all_active, get_rejected, get_stats, backfill_dev_project_flags
 init_db()
+backfill_dev_project_flags()  # one-shot: flag existing rows by URL/title pattern
 
 # ── Demo data (when DB is empty) ──────────────────────────────────────────────
 DEMO = [
@@ -198,6 +199,12 @@ with st.sidebar:
         "District contains",
         placeholder="e.g. Bratislava, Petržalka, Košice",
         help="Case-insensitive substring match. Leave blank to show all.",
+    )
+    hide_dev   = st.toggle(
+        "Hide dev projects",
+        value=True,
+        help='Dev-project listings (novostavba/developersky-projekt/etc.) quote "od €X" '
+             'starting prices for the cheapest unit and distort cashflow scoring.',
     )
     show_sro   = st.toggle("Show s.r.o. figures", value=True)
     show_demo  = st.toggle("Demo data (no DB)",   value=False)
@@ -350,7 +357,8 @@ data = [l for l in data
         and (l.get("size_m2")  or 0) >= min_size
         and (not classes or (l.get("classification") or "PENDING") in classes)
         and (not sources or (l.get("source") or "") in sources)
-        and (not district_needle or district_needle in (l.get("district") or "").lower())]
+        and (not district_needle or district_needle in (l.get("district") or "").lower())
+        and (not hide_dev or not (l.get("is_dev_project") or 0))]
 
 
 # ── Stats bar ─────────────────────────────────────────────────────────────────
