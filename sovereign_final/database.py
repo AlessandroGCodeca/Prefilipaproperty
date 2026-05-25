@@ -6,7 +6,7 @@ Handles both PostgreSQL (Docker) and SQLite (local fallback).
 import os
 import sqlite3
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from config import DATABASE_URL, USE_SQLITE_FALLBACK, SQLITE_PATH
 
 
@@ -288,6 +288,30 @@ def get_stats():
     """).fetchone()
     conn.close()
     return dict(r) if r else {"total":0,"green":0,"yellow":0,"white":0,"rejected":0,"pending":0}
+
+
+def deactivate_stale_listings(days: int = 21) -> int:
+    """Mark listings as inactive when last_seen_at is older than `days` days.
+
+    Each scraper run touches last_seen_at on every listing it sees, so any
+    listing not re-seen for ~3 weeks has likely been removed from the source
+    site (sold, withdrawn, or expired). Keeping them active inflates GREEN
+    counts and shows the user listings that no longer exist.
+
+    Returns the number of rows deactivated.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    conn = get_conn()
+    try:
+        n = conn.execute(
+            "UPDATE listings SET is_active=0 "
+            "WHERE is_active=1 AND last_seen_at < ?",
+            (cutoff,),
+        ).rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return n
 
 
 def upsert_listing(data: dict):

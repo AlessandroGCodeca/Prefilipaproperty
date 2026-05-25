@@ -174,10 +174,11 @@ with st.sidebar:
     with c1: do_nehnut = st.button("NEHNUT",  use_container_width=True)
     with c2: do_bazos  = st.button("BAZOS",   use_container_width=True)
     with c3: do_topreal= st.button("TOPREAL", use_container_width=True)
-    do_lv   = st.button("🔒 LV DEBT FILTER", use_container_width=True)
-    do_cf   = st.button("💰 CASHFLOW SCORE", use_container_width=True)
-    do_loc  = st.button("📍 LOCATION IQ",    use_container_width=True)
-    do_test = st.button("🔗 TEST SITES",      use_container_width=True)
+    do_lv    = st.button("🔒 LV DEBT FILTER", use_container_width=True)
+    do_cf    = st.button("💰 CASHFLOW SCORE", use_container_width=True)
+    do_loc   = st.button("📍 LOCATION IQ",    use_container_width=True)
+    do_stale = st.button("🧹 CLEAN STALE (21d)", use_container_width=True)
+    do_test  = st.button("🔗 TEST SITES",      use_container_width=True)
 
     st.markdown("---")
     st.markdown("#### FILTERS")
@@ -303,6 +304,15 @@ if do_loc:
     from modules.location_iq import run_location_scoring
     n = run_location_scoring(progress_callback=loc_cb)
     bar.empty(); txt.empty(); st.success(f"✅ Location scored {n}"); st.rerun()
+
+if do_stale:
+    from database import deactivate_stale_listings
+    n = deactivate_stale_listings(days=21)
+    if n:
+        st.success(f"✅ Deactivated {n} stale listings (last seen > 21 days ago)")
+    else:
+        st.info("ℹ️ No stale listings — all active rows seen within the last 21 days")
+    st.rerun()
 
 if do_test:
     from scraper._http import get as _http_get, SCRAPER_API_KEY as _sak
