@@ -1,0 +1,38 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sovereign_final
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest ruff
+
+      - name: Lint with ruff
+        run: ruff check . --select=E9,F63,F7,F82 --output-format=github
+        # Only fail on the four classes that are almost always real bugs:
+        # E9  syntax errors
+        # F63 invalid comparisons
+        # F7  syntax issues
+        # F82 undefined names
+        # Style/import warnings are reported but don't fail the build.
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short

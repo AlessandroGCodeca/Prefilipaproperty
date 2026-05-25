@@ -35,9 +35,11 @@ def _is_plausible_price(v: float) -> bool:
 def _price(text: str) -> float:
     if not text:
         return 0.0
+    has_currency = False
     candidates: list[float] = []
     # Match prices with a € or EUR suffix and either grouped digits or 4–8 plain digits.
     for m in re.finditer(r"(\d{1,3}(?:[\s\xa0  ]\d{3})+|\d{4,8})\s*(?:€|EUR)", text, re.I):
+        has_currency = True
         try:
             v = float(re.sub(r"[\s\xa0  ]", "", m.group(1)))
             if _is_plausible_price(v):
@@ -46,6 +48,11 @@ def _price(text: str) -> float:
             pass
     if candidates:
         return max(candidates)
+    # If currency markers were present but none plausible (e.g. only deposits
+    # and fees), don't fall through to bare-digit strip — that would
+    # concatenate the digits of all rejected matches into one bogus number.
+    if has_currency:
+        return 0.0
     # Fallback: bare digits (no currency symbol) — only accept if plausible.
     digits = re.sub(r"[^\d]", "", text)
     if digits:
