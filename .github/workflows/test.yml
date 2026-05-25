@@ -14,29 +14,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: sovereign_final/requirements.txt
-
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          # Skip playwright/streamlit/curl_cffi — heavy runtime-only deps that
-          # aren't imported anywhere the unit tests reach. scraper/_http.py
-          # uses plain `requests`; bs4 needs lxml at runtime not import time.
+          # Use the pre-installed Python on the runner. Skip the heaviest
+          # runtime-only deps (playwright/streamlit/curl_cffi/psycopg2) that
+          # aren't imported by anything under tests/.
+          python3 -m pip install --upgrade pip --break-system-packages || python3 -m pip install --upgrade pip
           grep -v -E "^(playwright|streamlit|curl_cffi|psycopg2)" requirements.txt > requirements-test.txt
-          pip install -r requirements-test.txt pytest ruff
+          python3 -m pip install --break-system-packages -r requirements-test.txt pytest ruff \
+            || python3 -m pip install -r requirements-test.txt pytest ruff
 
       - name: Lint with ruff
-        run: ruff check . --select=E9,F63,F7,F82 --output-format=github
+        run: python3 -m ruff check . --select=E9,F63,F7,F82 --output-format=github
         # Only fail on the four classes that are almost always real bugs:
-        # E9  syntax errors
-        # F63 invalid comparisons
-        # F7  syntax issues
-        # F82 undefined names
-        # Style/import warnings are reported but don't fail the build.
+        # E9  syntax errors / F63 invalid comparisons / F7 syntax / F82 undefined names
 
       - name: Run tests
-        run: pytest tests/ -v --tb=short
+        run: python3 -m pytest tests/ -v --tb=short
