@@ -306,6 +306,36 @@ def _detect_search_url(sess) -> str:
     return ""
 
 
+def _deactivate_category_pages() -> int:
+    """Older scraper versions saved category-filter pages (URLs ending in
+    -k{ID}.html like 1-izbovy-byt-k102.html) as if they were listings. Real
+    listing URLs end in -r{6-8 digit ID}.html (DETAIL_HREF_PATTERNS). Mark any
+    active topreality row whose URL doesn't match the listing pattern as
+    inactive — they have no price/size/district and just inflate counts."""
+    from database import get_conn
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, url FROM listings WHERE source='topreality' AND is_active=1"
+    ).fetchall()
+    stale = [
+        rid for rid, url in rows
+        if not any(p.search(url or "") for p in DETAIL_HREF_PATTERNS)
+    ]
+    if stale:
+        ph = ",".join("?" * len(stale))
+        conn.execute(
+            f"UPDATE listings SET is_active=0, classification='WHITE' "
+            f"WHERE id IN ({ph})",
+            stale,
+        )
+        conn.commit()
+    conn.close()
+    if stale:
+        print(f"  ↳ deactivated {len(stale)} topreality category-page rows "
+              f"(URL not a -r{{ID}}.html detail page)")
+    return len(stale)
+
+
 def _backfill_blank_districts() -> int:
     """Re-extract district for existing topreality rows with blank district by
     scanning the title / address_raw for a known city or suburb name. The
@@ -442,6 +472,7 @@ def run(max_pages: int = 5) -> int:
             "scraper/topreality.py — the link patterns may need updating."
         )
     _deactivate_non_apartments()
+    _deactivate_category_pages()
     _zero_bogus_prices()
     _backfill_blank_districts()
     from engine.regional_prices import zero_below_regional_floor

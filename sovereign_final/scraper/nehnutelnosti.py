@@ -854,6 +854,47 @@ def _dedupe_canonical_urls() -> int:
     return removed
 
 
+def _backfill_blank_districts() -> int:
+    """Re-run _parse_slug on the stored URL for rows that have a blank district
+    and a generic title. Catches PREMIUM listings whose slug encodes the city
+    name ("3-izbovy-byt-...-velka-maca") but where the slug parser never ran
+    because the row was upserted before the parser was added."""
+    from database import get_conn
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, url, title FROM listings "
+        "WHERE source='nehnutelnosti' AND (district IS NULL OR district='')"
+    ).fetchall()
+    updated = 0
+    for row_id, url, title in rows:
+        slug_data = _parse_slug(url or "")
+        if not slug_data.get("district"):
+            continue
+        # Only overwrite title when the current one is a generic placeholder.
+        cur_title = (title or "").strip().lower()
+        if slug_data.get("title") and cur_title in _GENERIC_TITLES:
+            conn.execute(
+                "UPDATE listings SET district=?, address_raw=?, title=? WHERE id=?",
+                (slug_data["district"],
+                 slug_data.get("address", slug_data["district"]),
+                 slug_data["title"][:200],
+                 row_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE listings SET district=?, address_raw=? WHERE id=?",
+                (slug_data["district"],
+                 slug_data.get("address", slug_data["district"]),
+                 row_id),
+            )
+        updated += 1
+    conn.commit()
+    conn.close()
+    if updated:
+        print(f"  ↳ backfilled district on {updated} nehnutelnosti rows from URL slug")
+    return updated
+
+
 def run(max_pages: int = 10) -> int:
     if not _check_playwright():
         raise RuntimeError(
@@ -882,6 +923,7 @@ def run(max_pages: int = 10) -> int:
         )
     _dedupe_canonical_urls()
     _zero_bogus_prices()
+    _backfill_blank_districts()
     from engine.regional_prices import zero_below_regional_floor
     zero_below_regional_floor("nehnutelnosti")
     print(f"✅ Nehnutelnosti done. {total} upserted.", flush=True)
