@@ -94,25 +94,120 @@ LV_BANK_NAMES = [
 ]
 
 # ── Rent Comps: €/m²/month by district (2026 baseline) ───────────────────────
+# engine/financial.py uses fuzzy substring matching so partial names resolve:
+# "Bratislava - Rača" → "bratislava iv", "okres Žilina" → "žilina" etc.
 RENT_PER_M2 = {
-    "bratislava i":    14.5,
-    "bratislava ii":   11.8,
-    "bratislava iii":  11.2,
-    "bratislava iv":   10.5,
-    "bratislava v":    10.8,
-    "košice i":         8.2,
-    "košice ii":        7.8,
-    "žilina":           7.8,
-    "nitra":            7.2,
-    "trnava":           8.5,
-    "trenčín":          6.8,
-    "prešov":           7.0,
-    "banská bystrica":  6.8,
-    "martin":           6.5,
-    "poprad":           6.2,
-    "ružomberok":       6.0,
-    "liptovský mikuláš":5.8,
-    "default":          6.0,
+    # Bratislava — city-only fallback (used when no district number is known)
+    "bratislava":           11.5,   # weighted average across BA I–V
+    # Bratislava — administrative districts (override city-only above via exact match)
+    "bratislava i":         14.5,
+    "bratislava ii":        11.8,
+    "bratislava iii":       11.2,
+    "bratislava iv":        10.5,
+    "bratislava v":         10.8,
+    # Bratislava — city parts / suburbs (map to nearest district rate)
+    "staré mesto":          13.5,   # BA I
+    "ružinov":              11.5,   # BA II
+    "vrakuňa":               9.2,   # BA II
+    "podunajské":            9.0,   # BA II
+    "vajnory":               9.5,   # BA II
+    "nové mesto":           10.8,   # BA III (Bratislava Nové Mesto)
+    "rača":                 10.0,   # BA III
+    "vajnory":               9.5,   # BA III
+    "dúbravka":             10.0,   # BA IV
+    "karlova ves":          11.0,   # BA IV
+    "lamač":                 9.8,   # BA IV
+    "záhorská":              9.0,   # BA IV
+    "devínska":              9.5,   # BA IV
+    "petržalka":            10.5,   # BA V
+    "rusovce":               9.2,   # BA V
+    "jarovce":               9.0,   # BA V
+    "čunovo":                8.8,   # BA V
+    # Bratislava-okolie (suburbs)
+    "senec":                 8.5,
+    "pezinok":               8.8,
+    "malacky":               7.5,
+    "stupava":               8.0,
+    "modra":                 8.0,
+    # Trnava region
+    "trnava":                8.5,
+    "dunajská streda":       7.0,
+    "galanta":               6.5,
+    "hlohovec":              6.5,
+    "piešťany":              7.5,
+    "senica":                6.0,
+    "skalica":               6.2,
+    # Trenčín region
+    "trenčín":               7.2,
+    "bánovce":               5.8,
+    "ilava":                 6.2,
+    "myjava":                5.5,
+    "nové mesto nad váhom":  6.5,
+    "partizánske":           5.8,
+    "považská bystrica":     6.5,
+    "púchov":                6.5,
+    # Nitra region
+    "nitra":                 7.2,
+    "komárno":               6.2,
+    "levice":                6.0,
+    "nové zámky":            6.2,
+    "šaľa":                  6.2,
+    "topoľčany":             5.8,
+    "zlaté moravce":         5.8,
+    "vráble":                5.5,
+    # Žilina region
+    "žilina":                8.0,
+    "bytča":                 6.5,
+    "čadca":                 6.2,
+    "kysucké nové mesto":    6.5,
+    "liptovský mikuláš":     6.2,
+    "námestovo":             5.8,
+    "ružomberok":            6.5,
+    "turčianske teplice":    5.8,
+    "tvrdošín":              5.8,
+    # Banská Bystrica region
+    "banská bystrica":       7.0,
+    "brezno":                5.8,
+    "detva":                 5.2,
+    "lučenec":               5.8,
+    "revúca":                5.2,
+    "rimavská sobota":       5.2,
+    "veľký krtíš":           5.2,
+    "zvolen":                6.5,
+    "žiar nad hronom":       6.2,
+    "zvolenská":             6.0,
+    # Prešov region
+    "prešov":                7.2,
+    "bardejov":              5.8,
+    "humenné":               5.8,
+    "kežmarok":              6.0,
+    "levoča":                5.8,
+    "medzilaborce":          4.8,
+    "poprad":                6.5,
+    "sabinov":               5.8,
+    "snina":                 5.2,
+    "stará ľubovňa":         5.8,
+    "stropkov":              5.2,
+    "vranov nad topľou":     5.8,
+    # Košice — city-only fallback
+    "košice":                8.0,
+    # Košice region
+    "košice i":              8.5,
+    "košice ii":             8.0,
+    "košice iii":            7.8,
+    "košice iv":             7.5,
+    "košice-okolie":         7.0,
+    "gelnica":               5.2,
+    "michalovce":            6.2,
+    "rožňava":               5.8,
+    "sobrance":              5.0,
+    "spišská nová ves":      6.2,
+    "trebišov":              5.5,
+    # Martin area
+    "martin":                6.8,
+    "turčianske":            6.0,
+    # Default — smaller towns not listed above
+    "default":               6.0,
 }
 
 # ── s.r.o. Setup Cost Estimate ────────────────────────────────────────────────

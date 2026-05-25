@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import SCRAPE_DELAY_SEC
 from database import upsert_listing, init_db
 from scraper._http import get, make_session
+from scraper.nehnutelnosti import _extract_location_from_text
 
 BASE = "https://www.topreality.sk"
 
@@ -43,7 +44,7 @@ DETAIL_HREF_PATTERNS = [
 EXCLUDE_KEYWORDS = (
     "prenajom",   # rental
     "rodinn",     # rodinný dom = house
-    "pozemok",    # land
+    "pozem",      # pozemok/pozemku/pozemky — land plot in any declension
     "zahrad",     # garden / land plot (záhrada)
     "garaz",      # garage
     "kancelar",   # office
@@ -58,15 +59,45 @@ EXCLUDE_KEYWORDS = (
     "reštaur",    # restaurant
     "hotel",      # hotel
     "penzion",    # guesthouse
+    "zrub",       # log cabin / chalet (zrub, zrubu)
+    "zastavan",   # "v zastavanom území" — construction-zone/built-up-area plots
+    "dražb",      # dražba — auction (often non-apartment property)
+    "viacúčelov", "viacucelov",  # multi-purpose building, not apartment
 )
 
 ENERGY_VALID = {"A0", "A1", "A", "B", "C", "D", "E", "F", "G"}
 
 
 # ── Field extraction helpers (mostly cribbed from nehnutelnosti.py) ───────────
+# Plausible apartment sale price range. Numbers below the floor are almost
+# always deposits / monthly fees / per-m² rates, not the actual sale price.
+_PRICE_MIN = 30_000
+_PRICE_MAX = 10_000_000
+
+
+def _is_plausible_price(v: float) -> bool:
+    return _PRICE_MIN <= v <= _PRICE_MAX
+
+
 def _price_from_text(t: str) -> float:
+    """Extract the apartment sale price from rendered text.
+
+    The page often contains other € amounts (deposit, monthly fee, parking
+    spot price, per-m² rate). We take the LARGEST value within a plausible
+    sale-price range to avoid grabbing those.
+    """
     if not t:
         return 0.0
+    candidates: list[float] = []
+    for m in re.finditer(r"(\d{1,3}(?:[\s\xa0  ]\d{3})+|\d{4,8})\s*€", t):
+        try:
+            v = float(re.sub(r"[\s\xa0  ]", "", m.group(1)))
+            if _is_plausible_price(v):
+                candidates.append(v)
+        except Exception:
+            pass
+    return max(candidates) if candidates else 0.0
+
     m = re.search(r"(\d{1,3}(?:[\s\xa0  ]\d{3})+|\d{4,8})\s*€", t)
     if m:
         try:
@@ -192,7 +223,9 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
                 p = offers.get("price") or offers.get("lowPrice")
                 if p and not ld_data.get("price"):
                     try:
-                        ld_data["price"] = float(p)
+                        v = float(p)
+                        if _is_plausible_price(v):
+                            ld_data["price"] = v
                     except Exception:
                         pass
             addr = b.get("address")
@@ -214,6 +247,10 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
     price = ld_data.get("price") or _price_from_text(body_text)
     size = ld_data.get("size") or _size_from_text(body_text)
     address = ld_data.get("address", "")
+    # Fallback when JSON-LD has no address (common on topreality detail pages):
+    # scan rendered body for any known Slovak city/suburb name.
+    if not address:
+        address = _extract_location_from_text(body_text)
 
     # Image
     img = ""
@@ -267,6 +304,115 @@ def _detect_search_url(sess) -> str:
         else:
             print(f"  · {fmt} → HTTP {status}, len={len(html)}", flush=True)
     return ""
+
+
+def _deactivate_category_pages() -> int:
+    """Older scraper versions saved category-filter pages (URLs ending in
+    -k{ID}.html like 1-izbovy-byt-k102.html) as if they were listings. Real
+    listing URLs end in -r{6-8 digit ID}.html (DETAIL_HREF_PATTERNS). Mark any
+    active topreality row whose URL doesn't match the listing pattern as
+    inactive — they have no price/size/district and just inflate counts."""
+    from database import get_conn
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, url FROM listings WHERE source='topreality' AND is_active=1"
+    ).fetchall()
+    stale = [
+        rid for rid, url in rows
+        if not any(p.search(url or "") for p in DETAIL_HREF_PATTERNS)
+    ]
+    if stale:
+        ph = ",".join("?" * len(stale))
+        conn.execute(
+            f"UPDATE listings SET is_active=0, classification='WHITE' "
+            f"WHERE id IN ({ph})",
+            stale,
+        )
+        conn.commit()
+    conn.close()
+    if stale:
+        print(f"  ↳ deactivated {len(stale)} topreality category-page rows "
+              f"(URL not a -r{{ID}}.html detail page)")
+    return len(stale)
+
+
+def _backfill_blank_districts() -> int:
+    """Re-extract district for existing topreality rows with blank district by
+    scanning the title / address_raw for a known city or suburb name. The
+    location helper requires Slovak diacritics, so the URL slug (ASCII) won't
+    match — title and og:title address_raw normally retain the diacritics."""
+    from database import get_conn
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, title, address_raw FROM listings "
+        "WHERE source='topreality' AND (district IS NULL OR district='')"
+    ).fetchall()
+    updated = 0
+    for row_id, title, addr in rows:
+        for text in (addr, title):
+            matched = _extract_location_from_text(text or "")
+            if matched:
+                conn.execute(
+                    "UPDATE listings SET district=? WHERE id=?",
+                    (matched, row_id),
+                )
+                updated += 1
+                break
+    conn.commit()
+    conn.close()
+    if updated:
+        print(f"  ↳ backfilled district on {updated} topreality rows")
+    return updated
+
+
+def _deactivate_non_apartments() -> int:
+    """Mark topreality listings as inactive when the title or URL reveals a
+    non-apartment (building plot, house, garage, etc.).
+
+    URL-level filtering catches most cases at scrape time, but rows already in
+    the DB from earlier runs need this cleanup pass. Also zero the price and
+    set classification='WHITE' so they drop out of the GREEN/YELLOW lists.
+    """
+    from database import get_conn
+    conn = get_conn()
+    clauses = " OR ".join(
+        f"LOWER(title) LIKE '%{kw}%' OR LOWER(url) LIKE '%{kw}%'"
+        for kw in EXCLUDE_KEYWORDS
+    )
+    sql = f"""
+        UPDATE listings
+           SET is_active=0, price_eur=0, classification='WHITE'
+         WHERE source='topreality' AND is_active=1
+           AND ({clauses})
+    """
+    n = conn.execute(sql).rowcount
+    conn.commit()
+    conn.close()
+    if n:
+        print(f"  ↳ deactivated {n} non-apartment topreality listings (title/url match)", flush=True)
+    return n
+
+
+def _zero_bogus_prices() -> int:
+    """Zero out bogus prices that an older extractor may have stored.
+
+    Listings with price_eur below _PRICE_MIN are deposits / monthly fees /
+    per-m² rates rather than the actual sale price. Setting price_eur=0
+    sends them back to PENDING so they're not classified GREEN on bad data.
+    """
+    from database import get_conn
+    conn = get_conn()
+    n = conn.execute(
+        "UPDATE listings SET price_eur=0, classification='PENDING' "
+        "WHERE source='topreality' AND price_eur > 0 AND price_eur < ?",
+        (_PRICE_MIN,),
+    ).rowcount
+    conn.commit()
+    conn.close()
+    if n:
+        print(f"  ↳ zeroed {n} topreality listings with bogus prices "
+              f"(< €{_PRICE_MIN:,})", flush=True)
+    return n
 
 
 def check_reachable() -> tuple[int, str]:
@@ -325,6 +471,12 @@ def run(max_pages: int = 5) -> int:
             "Topreality: 0 listings parsed. Check DETAIL_HREF_PATTERNS in "
             "scraper/topreality.py — the link patterns may need updating."
         )
+    _deactivate_non_apartments()
+    _deactivate_category_pages()
+    _zero_bogus_prices()
+    _backfill_blank_districts()
+    from engine.regional_prices import zero_below_regional_floor
+    zero_below_regional_floor("topreality")
     print(f"✅ Topreality done. {total} upserted.", flush=True)
     return total
 

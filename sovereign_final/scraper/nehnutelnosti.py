@@ -36,9 +36,30 @@ def _check_playwright() -> bool:
         return False
 
 
+# Plausible apartment sale prices — anything outside this range is treated as
+# a deposit, monthly rent, "od €X" starting price, or per-m² figure rather
+# than a real sale price.
+_PRICE_MIN = 30_000
+_PRICE_MAX = 10_000_000
+
+
+def _is_plausible_price(v) -> bool:
+    try:
+        v = float(v)
+    except Exception:
+        return False
+    return _PRICE_MIN <= v <= _PRICE_MAX
+
+
 def _price(text: str) -> float:
     digits = re.sub(r"[^\d]", "", text or "")
-    return float(digits) if digits else 0.0
+    if not digits:
+        return 0.0
+    try:
+        v = float(digits)
+        return v if _is_plausible_price(v) else 0.0
+    except Exception:
+        return 0.0
 
 
 def _size(text: str) -> float:
@@ -49,6 +70,139 @@ def _size(text: str) -> float:
 def _district(address: str) -> str:
     parts = [p.strip() for p in (address or "").split(",")]
     return parts[-1] if parts else ""
+
+
+def _canonical_url(url: str) -> str:
+    """Strip the trailing marketing slug from a /detail/ URL so that
+    /detail/.../{id}/some-slug and /detail/.../{id}/ hash to the same row.
+    Keeps the unique ID segment (the last non-slug path part) intact.
+    """
+    if not url or "/detail/" not in url:
+        return url
+    base, tail = url.split("/detail/", 1)
+    tail = tail.split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    parts = [p for p in tail.split("/") if p]
+    if not parts:
+        return url
+    # The ID is the last segment that doesn't contain a hyphen (slugs
+    # always have hyphens; IDs are short alphanumeric tokens like Ju9cw3H1PgW).
+    keep: list[str] = []
+    for p in parts:
+        keep.append(p)
+        if "-" not in p and len(p) <= 24:
+            break
+    return f"{base}/detail/" + "/".join(keep)
+
+
+# Slovak cities/towns most likely to appear in a nehnutelnosti URL slug.
+# Order matters: longer/more-specific names checked first so "bratislavske"
+# doesn't get matched before "bratislava". Bratislava city parts come before
+# the bare "bratislava" so suburbs resolve to their finer-grained name.
+_SLUG_CITIES = (
+    # Bratislava parts (most specific first)
+    "stare-mesto", "ruzinov", "vrakuna", "podunajske-biskupice", "vajnory",
+    "nove-mesto", "raca", "dubravka", "karlova-ves", "lamac",
+    "zahorska-bystrica", "devinska-nova-ves", "petrzalka", "rusovce",
+    "jarovce", "cunovo",
+    # Bratislava (after parts, so parts get matched first)
+    "bratislava-i", "bratislava-ii", "bratislava-iii", "bratislava-iv",
+    "bratislava-v", "bratislava",
+    # Košice parts and main
+    "kosice-i", "kosice-ii", "kosice-iii", "kosice-iv", "kosice-okolie",
+    "kosice", "tahanovce", "barca", "mestska-cast",
+    # Other major cities
+    "zilina", "nitra", "trnava", "trencin", "presov", "banska-bystrica",
+    "poprad", "martin", "ruzomberok", "liptovsky-mikulas", "zvolen",
+    "lucenec", "spisska-nova-ves", "michalovce", "humenne", "bardejov",
+    "komarno", "levice", "nove-zamky", "sala", "dunajska-streda",
+    "galanta", "piestany", "hlohovec", "senica", "skalica",
+    "povazska-bystrica", "puchov", "partizanske", "bytca", "cadca",
+    "kysucke-nove-mesto", "namestovo", "tvrdosin", "dolny-kubin",
+    "brezno", "rimavska-sobota", "revuca", "rossnava", "roznava",
+    "stropkov", "vranov-nad-toplou", "snina", "stara-lubovna", "kezmarok",
+    "levoca", "sabinov", "trebisov", "sobrance", "topolcany",
+    "zlate-moravce", "vrable", "pezinok", "senec", "malacky", "modra",
+    "stupava",
+)
+
+# Map slug-form (no diacritics, hyphens) → diacritic-correct address form.
+# Used to build a clean address_raw / district even when JSON-LD is missing.
+_SLUG_TO_DIACRITIC = {
+    "kosice": "Košice", "kosice-i": "Košice I", "kosice-ii": "Košice II",
+    "kosice-iii": "Košice III", "kosice-iv": "Košice IV", "kosice-okolie": "Košice-okolie",
+    "zilina": "Žilina", "presov": "Prešov", "trencin": "Trenčín",
+    "ruzomberok": "Ružomberok", "liptovsky-mikulas": "Liptovský Mikuláš",
+    "banska-bystrica": "Banská Bystrica", "spisska-nova-ves": "Spišská Nová Ves",
+    "stara-lubovna": "Stará Ľubovňa", "vranov-nad-toplou": "Vranov nad Topľou",
+    "humenne": "Humenné", "kezmarok": "Kežmarok", "levoca": "Levoča",
+    "trebisov": "Trebišov", "topolcany": "Topoľčany", "zlate-moravce": "Zlaté Moravce",
+    "piestany": "Piešťany", "dunajska-streda": "Dunajská Streda",
+    "povazska-bystrica": "Považská Bystrica", "puchov": "Púchov",
+    "bytca": "Bytča", "cadca": "Čadca", "kysucke-nove-mesto": "Kysucké Nové Mesto",
+    "namestovo": "Námestovo", "tvrdosin": "Tvrdošín", "dolny-kubin": "Dolný Kubín",
+    "rimavska-sobota": "Rimavská Sobota", "revuca": "Revúca", "roznava": "Rožňava",
+    "petrzalka": "Petržalka", "raca": "Rača", "vrakuna": "Vrakuňa",
+    "podunajske-biskupice": "Podunajské Biskupice", "stare-mesto": "Staré Mesto",
+    "nove-mesto": "Nové Mesto", "dubravka": "Dúbravka", "karlova-ves": "Karlova Ves",
+    "lamac": "Lamač", "zahorska-bystrica": "Záhorská Bystrica",
+    "devinska-nova-ves": "Devínska Nová Ves", "rusovce": "Rusovce",
+    "jarovce": "Jarovce", "cunovo": "Čunovo", "ruzinov": "Ružinov",
+    "tahanovce": "Ťahanovce",
+}
+
+
+def _parse_slug(url: str) -> dict:
+    """Pull title + city/district hints out of a nehnutelnosti.sk URL slug.
+
+    Two URL forms to handle:
+      - /detail/{id}/{slug}                       (regular listings)
+      - /detail/developersky-projekt/{id}/{slug}  (developer-project pages)
+
+    The slug is the LAST hyphenated segment, not the first non-empty one.
+    """
+    out: dict = {}
+    if not url or "/detail/" not in url:
+        return out
+    tail = url.split("/detail/", 1)[1].split("?", 1)[0].split("#", 1)[0]
+    parts = [p for p in tail.split("/") if p]
+    slug = ""
+    for part in reversed(parts):
+        if "-" in part:
+            slug = part.lower()
+            break
+    if not slug:
+        return out
+
+    # Title: clean slug → readable text
+    nice = slug.replace("-", " ").strip()
+    # Drop common SEO prefixes
+    nice = re.sub(r"^(predaj|na predaj|byt na predaj|predam)\s+", "", nice)
+    if nice:
+        out["title"] = nice[:1].upper() + nice[1:]
+
+    # City/district: search for known city tokens with hyphen-bounded matching
+    # so "raca" doesn't match "barack" and "kosice" doesn't match "kosicepiece".
+    bordered = "-" + slug + "-"
+    found_parts: list[str] = []
+    for city_slug in _SLUG_CITIES:
+        if ("-" + city_slug + "-") in bordered:
+            nice_name = _SLUG_TO_DIACRITIC.get(
+                city_slug, city_slug.replace("-", " ").title()
+            )
+            if nice_name not in found_parts:
+                found_parts.append(nice_name)
+            if len(found_parts) >= 2:
+                break
+
+    if found_parts:
+        out["address"] = ", ".join(found_parts)
+        # District holds the FULL joined address ("Petržalka, Bratislava")
+        # so engine.get_rent_estimate's fuzzy matcher can find both the
+        # specific suburb (when it's in RENT_PER_M2) and the city anchor
+        # fallback (when the suburb isn't recognised).
+        out["district"] = ", ".join(found_parts)
+
+    return out
 
 
 def _parse_api_item(item: dict, now: str) -> dict | None:
@@ -66,9 +220,13 @@ def _parse_api_item(item: dict, now: str) -> dict | None:
         price = 0.0
         price_obj = item.get("price") or item.get("priceInfo") or {}
         if isinstance(price_obj, dict):
-            price = float(price_obj.get("value") or price_obj.get("amount") or 0)
+            raw = price_obj.get("value") or price_obj.get("amount") or 0
         elif isinstance(price_obj, (int, float)):
-            price = float(price_obj)
+            raw = price_obj
+        else:
+            raw = 0
+        if _is_plausible_price(raw):
+            price = float(raw)
 
         size = 0.0
         for key in ("usableArea", "floorArea", "area", "size"):
@@ -91,9 +249,10 @@ def _parse_api_item(item: dict, now: str) -> dict | None:
             first = imgs[0]
             img = (first.get("url") or first.get("src") or first) if isinstance(first, dict) else str(first)
 
-        uid = hashlib.md5(url.encode()).hexdigest()
+        canon = _canonical_url(url)
+        uid = hashlib.md5(canon.encode()).hexdigest()
         return {
-            "id": uid, "source": "nehnutelnosti", "url": url, "url_hash": uid,
+            "id": uid, "source": "nehnutelnosti", "url": canon, "url_hash": uid,
             "title": str(title)[:200], "description": "",
             "price_eur": price, "size_m2": size,
             "rooms": None, "floor": None, "year_built": None,
@@ -161,25 +320,27 @@ def _parse_rsc_chunks(html: str) -> list[dict]:
     seen_urls: set[str] = set()
 
     for url in detail_urls:
-        if url not in seen_urls:
-            seen_urls.add(url)
-            uid = hashlib.md5(url.encode()).hexdigest()
-            results.append({"_url": url, "_uid": uid})
+        canon = _canonical_url(url)
+        if canon not in seen_urls:
+            seen_urls.add(canon)
+            uid = hashlib.md5(canon.encode()).hexdigest()
+            results.append({"_url": canon, "_uid": uid})
 
     for path in detail_paths:
-        url = BASE + path
-        if url not in seen_urls:
-            seen_urls.add(url)
-            uid = hashlib.md5(url.encode()).hexdigest()
-            results.append({"_url": url, "_uid": uid})
+        canon = _canonical_url(BASE + path)
+        if canon not in seen_urls:
+            seen_urls.add(canon)
+            uid = hashlib.md5(canon.encode()).hexdigest()
+            results.append({"_url": canon, "_uid": uid})
 
     return results
 
 
 def _minimal_listing(url: str, title: str, now: str) -> dict:
-    uid = hashlib.md5(url.encode()).hexdigest()
+    canon = _canonical_url(url)
+    uid = hashlib.md5(canon.encode()).hexdigest()
     return {
-        "id": uid, "source": "nehnutelnosti", "url": url, "url_hash": uid,
+        "id": uid, "source": "nehnutelnosti", "url": canon, "url_hash": uid,
         "title": title[:200] if title else "", "description": "",
         "price_eur": 0.0, "size_m2": 0.0,
         "rooms": None, "floor": None, "year_built": None,
@@ -218,14 +379,13 @@ def _merge_ld(data: dict, ld) -> None:
     if isinstance(offers, list) and offers:
         offers = offers[0]
     if isinstance(offers, dict):
-        for pkey in ("price", "lowPrice", "highPrice"):
-            p = offers.get(pkey)
-            if p:
-                try:
-                    data["price"] = float(p)
-                    break
-                except Exception:
-                    pass
+        # Only accept the exact "price" field. For developer projects, JSON-LD
+        # often exposes lowPrice/highPrice — those are starting/ceiling unit
+        # prices ("od €143,900"), not a single listing's sale price, so we
+        # skip them and let the visible-text scan handle the real number.
+        p = offers.get("price")
+        if p and _is_plausible_price(p):
+            data["price"] = float(p)
 
     addr = ld.get("address")
     if isinstance(addr, dict):
@@ -315,20 +475,39 @@ def _scrape_detail_page(page, url: str) -> dict:
                 t = re.sub(r'\s*[\|\-]\s*[Nn]ehnute.*$', '', m.group(1)).strip()
                 data["title"] = t[:200]
 
-    # 3. For price/size/energy, regex on rendered visible text — more reliable
-    #    than HTML because these fields are often split across many spans.
+    # 3. For price/size/energy/address, regex on rendered visible text — more
+    #    reliable than HTML because these fields are often split across spans.
     text = ""
-    if not (data.get("price") and data.get("size") and data.get("energy")):
+    if not (data.get("price") and data.get("size") and data.get("energy")
+            and data.get("address")):
         text = _safe_text(page)
 
-    # Price — handle regular space, NBSP (\xa0), narrow NBSP (\u202f), thin space (\u2009)
+    # Address — JSON-LD often omits it on PREMIUM listings. Scan the rendered
+    # text for known cities/suburbs (suburbs win over their parent city).
+    if not data.get("address") and text:
+        addr = _extract_location_from_text(text)
+        if addr:
+            data["address"] = addr
+
+    # Price — handle regular space, NBSP (\xa0), narrow NBSP (\u202f), thin space (\u2009).
+    # Scan ALL prices in the visible text and take the max plausible one. Listings
+    # frequently mention deposits ("rezervačná záloha 1 000 €") and per-m² rates
+    # ("3 273 €/m²") before the actual sale price; using re.search (first match)
+    # would grab those instead.
     if not data.get("price"):
-        m = re.search(r"(\d{1,3}(?:[\s\xa0\u202f\u2009]\d{3})+|\d{4,8})\s*€", text or html)
-        if m:
+        candidates: list[float] = []
+        for m in re.finditer(
+            r"(\d{1,3}(?:[\s\xa0\u202f\u2009]\d{3})+|\d{4,8})\s*€",
+            text or html,
+        ):
             try:
-                data["price"] = float(re.sub(r"[\s\xa0\u202f\u2009]", "", m.group(1)))
+                v = float(re.sub(r"[\s\xa0\u202f\u2009]", "", m.group(1)))
             except Exception:
-                pass
+                continue
+            if _is_plausible_price(v):
+                candidates.append(v)
+        if candidates:
+            data["price"] = max(candidates)
 
     # Size — try labelled patterns first, then fall back to the first
     # plausible "N m²" in the rendered text. Window widened to 120 chars
@@ -400,6 +579,71 @@ def _scrape_detail_page(page, url: str) -> dict:
     return data
 
 
+_GENERIC_TITLES = {"premium", "top", "exclusive", "exkluzivne", "exkluzívne", ""}
+
+# Suburbs (specific) → "Suburb, Parent City" so engine.get_rent_estimate
+# can match either the suburb (Petržalka → 10.5 €/m²) or fall back to the
+# city anchor (Bratislava → BA IV rate). Order matters: longest/most-specific
+# names first so "Devínska Nová Ves" wins over "Bratislava".
+_TEXT_LOCATION_PATTERNS: list[tuple[re.Pattern, str]] = []
+
+
+def _build_location_patterns() -> list[tuple[re.Pattern, str]]:
+    suburb_to_city = {
+        "Devínska Nová Ves": "Bratislava", "Podunajské Biskupice": "Bratislava",
+        "Záhorská Bystrica": "Bratislava", "Karlova Ves": "Bratislava",
+        "Staré Mesto": "Bratislava", "Nové Mesto": "Bratislava",
+        "Petržalka": "Bratislava", "Ružinov": "Bratislava", "Dúbravka": "Bratislava",
+        "Vrakuňa": "Bratislava", "Vajnory": "Bratislava", "Rusovce": "Bratislava",
+        "Jarovce": "Bratislava", "Čunovo": "Bratislava", "Lamač": "Bratislava",
+        "Rača": "Bratislava", "Ťahanovce": "Košice", "Barca": "Košice",
+    }
+    cities = [
+        "Banská Bystrica", "Liptovský Mikuláš", "Spišská Nová Ves",
+        "Považská Bystrica", "Rimavská Sobota", "Vranov nad Topľou",
+        "Bánovce nad Bebravou", "Kysucké Nové Mesto", "Žiar nad Hronom",
+        "Nové Mesto nad Váhom", "Dunajská Streda", "Stará Ľubovňa",
+        "Veľký Krtíš", "Zlaté Moravce", "Bratislava", "Košice", "Žilina",
+        "Nitra", "Trnava", "Trenčín", "Prešov", "Poprad", "Martin",
+        "Ružomberok", "Zvolen", "Trebišov", "Galanta", "Komárno", "Levice",
+        "Nové Zámky", "Pezinok", "Senec", "Malacky", "Modra", "Piešťany",
+        "Hlohovec", "Senica", "Skalica", "Púchov", "Partizánske",
+        "Topoľčany", "Levoča", "Sabinov", "Bardejov", "Humenné", "Snina",
+        "Kežmarok", "Stropkov", "Sobrance", "Michalovce", "Rožňava",
+        "Detva", "Lučenec", "Brezno", "Námestovo", "Tvrdošín", "Dolný Kubín",
+        "Bytča", "Čadca", "Revúca", "Krupina", "Hnúšťa", "Stupava", "Šaľa",
+    ]
+    pats: list[tuple[re.Pattern, str]] = []
+    # Suburbs first (sorted by length desc so multi-word names win)
+    for suburb in sorted(suburb_to_city, key=len, reverse=True):
+        pats.append((
+            re.compile(r"(?<!\w)" + re.escape(suburb) + r"(?!\w)"),
+            f"{suburb}, {suburb_to_city[suburb]}",
+        ))
+    # Then cities (longest first so "Banská Bystrica" wins over "Bystrica")
+    for city in sorted(cities, key=len, reverse=True):
+        pats.append((re.compile(r"(?<!\w)" + re.escape(city) + r"(?!\w)"), city))
+    return pats
+
+
+_TEXT_LOCATION_PATTERNS = _build_location_patterns()
+
+
+def _extract_location_from_text(text: str) -> str:
+    """Find the first known Slovak city/suburb in rendered detail-page text.
+
+    Address is almost always near the top of the page; trim the search window
+    to keep this O(1) per listing.
+    """
+    if not text:
+        return ""
+    snippet = text[:4000]
+    for pattern, address in _TEXT_LOCATION_PATTERNS:
+        if pattern.search(snippet):
+            return address
+    return ""
+
+
 def _apply_detail(listing: dict, detail: dict) -> None:
     """Overlay enrichment data onto a minimal listing record."""
     if detail.get("title") and not listing.get("title"):
@@ -418,6 +662,17 @@ def _apply_detail(listing: dict, detail: dict) -> None:
     if detail.get("image"):
         listing["primary_image_url"] = detail["image"]
         listing["image_urls"] = detail["image"]
+
+    # Slug fallback — covers "PREMIUM"-titled paid listings and JSON-LD blobs
+    # that omit address. Always runs but only fills empty fields.
+    slug_data = _parse_slug(listing.get("url", ""))
+    cur_title = (listing.get("title") or "").strip().lower()
+    if slug_data.get("title") and cur_title in _GENERIC_TITLES:
+        listing["title"] = slug_data["title"][:200]
+    if slug_data.get("address") and not listing.get("address_raw"):
+        listing["address_raw"] = slug_data["address"]
+    if slug_data.get("district") and not listing.get("district"):
+        listing["district"] = slug_data["district"]
 
 
 def _scrape_page_playwright(page_num: int) -> list[dict]:
@@ -545,6 +800,101 @@ def check_reachable() -> tuple[int, str]:
         return 0, str(e)
 
 
+def _zero_bogus_prices() -> int:
+    """Reset prices below the plausible-apartment threshold (deposits, monthly
+    rents, per-m² figures) on existing nehnutelnosti rows so they re-classify
+    as PENDING and stop polluting the GREEN list."""
+    from database import get_conn
+    conn = get_conn()
+    n = conn.execute(
+        "UPDATE listings SET price_eur=0, classification='PENDING' "
+        "WHERE source='nehnutelnosti' AND price_eur > 0 AND price_eur < ?",
+        (_PRICE_MIN,),
+    ).rowcount
+    conn.commit()
+    conn.close()
+    if n:
+        print(f"  ↳ zeroed {n} nehnutelnosti listings with bogus prices (< €{_PRICE_MIN:,})")
+    return n
+
+
+def _dedupe_canonical_urls() -> int:
+    """Collapse pre-existing nehnutelnosti rows whose URLs differ only by the
+    trailing marketing slug (e.g. /detail/.../X/zelene-vlcince vs /detail/.../X/).
+    Keeps the row with the most data (price>0, then size>0) and deletes the rest.
+    """
+    from database import get_conn
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, url, price_eur, size_m2 FROM listings WHERE source='nehnutelnosti'"
+    ).fetchall()
+    groups: dict[str, list[tuple]] = {}
+    for r in rows:
+        canon = _canonical_url(r[1] or "")
+        groups.setdefault(canon, []).append(r)
+    removed = 0
+    for canon, group in groups.items():
+        if len(group) <= 1:
+            continue
+        # Pick winner: most data first (price>0 + size>0 > price>0 > anything).
+        group.sort(key=lambda r: ((r[2] or 0) > 0, (r[3] or 0) > 0), reverse=True)
+        winner = group[0]
+        for loser in group[1:]:
+            conn.execute("DELETE FROM listings WHERE id=?", (loser[0],))
+            removed += 1
+        # Make sure the winner stores the canonical URL.
+        if winner[1] != canon:
+            conn.execute(
+                "UPDATE listings SET url=? WHERE id=?", (canon, winner[0])
+            )
+    conn.commit()
+    conn.close()
+    if removed:
+        print(f"  ↳ removed {removed} nehnutelnosti duplicate-slug rows")
+    return removed
+
+
+def _backfill_blank_districts() -> int:
+    """Re-run _parse_slug on the stored URL for rows that have a blank district
+    and a generic title. Catches PREMIUM listings whose slug encodes the city
+    name ("3-izbovy-byt-...-velka-maca") but where the slug parser never ran
+    because the row was upserted before the parser was added."""
+    from database import get_conn
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, url, title FROM listings "
+        "WHERE source='nehnutelnosti' AND (district IS NULL OR district='')"
+    ).fetchall()
+    updated = 0
+    for row_id, url, title in rows:
+        slug_data = _parse_slug(url or "")
+        if not slug_data.get("district"):
+            continue
+        # Only overwrite title when the current one is a generic placeholder.
+        cur_title = (title or "").strip().lower()
+        if slug_data.get("title") and cur_title in _GENERIC_TITLES:
+            conn.execute(
+                "UPDATE listings SET district=?, address_raw=?, title=? WHERE id=?",
+                (slug_data["district"],
+                 slug_data.get("address", slug_data["district"]),
+                 slug_data["title"][:200],
+                 row_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE listings SET district=?, address_raw=? WHERE id=?",
+                (slug_data["district"],
+                 slug_data.get("address", slug_data["district"]),
+                 row_id),
+            )
+        updated += 1
+    conn.commit()
+    conn.close()
+    if updated:
+        print(f"  ↳ backfilled district on {updated} nehnutelnosti rows from URL slug")
+    return updated
+
+
 def run(max_pages: int = 10) -> int:
     if not _check_playwright():
         raise RuntimeError(
@@ -571,6 +921,11 @@ def run(max_pages: int = 10) -> int:
             "Nehnutelnosti: 0 listings after Playwright scrape.\n"
             "Run debug_playwright.py with headless=False to inspect live page."
         )
+    _dedupe_canonical_urls()
+    _zero_bogus_prices()
+    _backfill_blank_districts()
+    from engine.regional_prices import zero_below_regional_floor
+    zero_below_regional_floor("nehnutelnosti")
     print(f"✅ Nehnutelnosti done. {total} upserted.", flush=True)
     return total
 
