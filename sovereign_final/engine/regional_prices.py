@@ -1,13 +1,60 @@
 """
-engine/regional_prices.py — NBS sale-price regional medians.
+engine/regional_prices.py — Sale-price floor lookup.
 
-Source: NBS "Ceny nehnuteľností na bývanie podľa krajov" (1Q 2026 baseline).
 Used as a sanity filter to flag listings whose price/m² is far below the
-regional median — typically developer-project "od €X" starting prices,
+expected median — typically developer-project "od €X" starting prices,
 quoting errors, or non-apartment listings that slipped past other filters.
+
+Lookup priority (most specific wins):
+  1. Bratislava sub-district (Realitná únia, April 2026)
+  2. Slovak city (Realitná únia, April 2026)
+  3. Kraj fallback (NBS Q1 2026)
+  4. Global blank-district floor
+
+Sources:
+  - Realitná únia SR — Realitný barometer, April 2026:
+    https://www.realitnaunia.sk/realitny-barometer
+  - NBS — Ceny nehnuteľností na bývanie podľa krajov, Q1 2026:
+    https://nbs.sk/statistiky/vybrane-makroekonomicke-ukazovatele/
 """
 
-# Regional sale-price medians in €/m² (1Q 2026)
+# Bratislava sub-district sale-price medians €/m² (Realitná únia, April 2026,
+# staršie 3-izbové byty — the most representative category for typical
+# investor targets; 1-izb and 2-izb run higher per m² in every district).
+BA_DISTRICT_MEDIAN_PRICE_PER_M2 = {
+    "staré mesto":   4_565, "stare mesto":   4_565,
+    "ružinov":       3_973, "ruzinov":       3_973,
+    "nové mesto":    3_842, "nove mesto":    3_842,
+    "petržalka":     3_685, "petrzalka":     3_685,
+    "rača":          3_528, "raca":          3_528,
+    "dúbravka":      3_583, "dubravka":      3_583,
+    "karlova ves":   3_633,
+    "devínska":      3_402, "devinska":      3_402,
+    "podunajské":    3_315, "podunajske":    3_315,
+    "vrakuňa":       3_232, "vrakuna":       3_232,
+}
+
+# City-level sale-price medians €/m² (Realitná únia, April 2026, staršie
+# 3-izbové byty). Used when district matches a city but not a Bratislava
+# sub-district.
+CITY_MEDIAN_PRICE_PER_M2 = {
+    "bratislava":         3_914,
+    "košice":             3_196, "kosice":             3_196,
+    "trnava":             2_616,
+    "žilina":             2_664, "zilina":             2_664,
+    "banská bystrica":    2_631, "banska bystrica":    2_631,
+    "nitra":              2_467,
+    "prešov":             2_482, "presov":             2_482,
+    "trenčín":            2_288, "trencin":            2_288,
+    "senec":              2_827,
+    "pezinok":            2_764,
+    "liptovský mikuláš":  2_483, "liptovsky mikulas":  2_483,
+    "poprad":             2_361,
+}
+
+# Kraj-level fallback (NBS Q1 2026). Used when district matches none of the
+# cities above but matches a kraj via _DISTRICT_TO_KRAJ — covers small towns
+# and villages not listed individually by Realitná únia.
 REGIONAL_MEDIAN_PRICE_PER_M2 = {
     "BA": 3_845,   # Bratislavský kraj
     "TT": 2_015,   # Trnavský kraj
@@ -15,11 +62,11 @@ REGIONAL_MEDIAN_PRICE_PER_M2 = {
     "NR": 1_627,   # Nitriansky kraj
     "ZA": 2_282,   # Žilinský kraj
     "BB": 1_865,   # Banskobystrický kraj
-    "PO": 2_200,   # Prešovský kraj (NBS Q1 2026 estimate)
+    "PO": 2_200,   # Prešovský kraj
     "KE": 2_682,   # Košický kraj
 }
 
-# Floor as a fraction of regional median. Listings priced below this are
+# Floor as a fraction of the lookup median. Listings priced below this are
 # almost always dev-project starting prices, quoted wrong, or non-residential.
 REGIONAL_PRICE_FLOOR_RATIO = 0.50
 
@@ -125,6 +172,14 @@ _DISTRICT_TO_KRAJ = {
 _DISTRICT_KEYS_BY_LENGTH = sorted(_DISTRICT_TO_KRAJ.keys(), key=len, reverse=True)
 
 
+_BA_DISTRICT_KEYS_BY_LENGTH = sorted(
+    BA_DISTRICT_MEDIAN_PRICE_PER_M2.keys(), key=len, reverse=True
+)
+_CITY_KEYS_BY_LENGTH = sorted(
+    CITY_MEDIAN_PRICE_PER_M2.keys(), key=len, reverse=True
+)
+
+
 def kraj_for_district(district: str) -> str | None:
     """Return the kraj code (BA/TT/...) for a district string, or None if
     the district doesn't contain a recognised Slovak place name."""
@@ -138,13 +193,31 @@ def kraj_for_district(district: str) -> str | None:
 
 
 def regional_price_floor(district: str) -> float:
-    """Return the per-m² price floor for the listing's region. Falls back to
-    GLOBAL_BLANK_DISTRICT_FLOOR when the kraj can't be determined — anything
-    below that is below the cheapest plausible Slovak apartment anywhere."""
-    kraj = kraj_for_district(district)
-    if not kraj:
+    """Return the per-m² price floor for the listing's region.
+
+    Lookup chain: Bratislava sub-district → city → kraj → global fallback.
+    The Bratislava sub-district match requires "bratislava" to also appear
+    in the district string, because suburb names like "Staré Mesto" or
+    "Nové Mesto" exist in other Slovak cities too (e.g. Košice).
+    """
+    if not district:
         return GLOBAL_BLANK_DISTRICT_FLOOR
-    return REGIONAL_MEDIAN_PRICE_PER_M2[kraj] * REGIONAL_PRICE_FLOOR_RATIO
+    key = district.lower()
+
+    if "bratislava" in key:
+        for needle in _BA_DISTRICT_KEYS_BY_LENGTH:
+            if needle in key:
+                return BA_DISTRICT_MEDIAN_PRICE_PER_M2[needle] * REGIONAL_PRICE_FLOOR_RATIO
+
+    for needle in _CITY_KEYS_BY_LENGTH:
+        if needle in key:
+            return CITY_MEDIAN_PRICE_PER_M2[needle] * REGIONAL_PRICE_FLOOR_RATIO
+
+    kraj = kraj_for_district(district)
+    if kraj:
+        return REGIONAL_MEDIAN_PRICE_PER_M2[kraj] * REGIONAL_PRICE_FLOOR_RATIO
+
+    return GLOBAL_BLANK_DISTRICT_FLOOR
 
 
 def is_plausible_regional_price(price_eur: float, size_m2: float, district: str) -> bool:
