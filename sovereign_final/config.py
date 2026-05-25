@@ -94,120 +94,130 @@ LV_BANK_NAMES = [
 ]
 
 # ── Rent Comps: €/m²/month by district (2026 baseline) ───────────────────────
+# Sources (updated April–May 2026):
+#   - Deloitte Rent Index Q4 2025 (via SME/Pravda) — city-level + BA districts
+#   - Bencont Group Q1 2026 — Bratislava 17.26 €/m²/mo incl. energies
+#   - Pravda Realitný report Feb 2026 — BA city-parts breakdown
+#   - Government ASPNB 2026 — regulated rent ceilings per kraj (lower bound check)
+#   - trh.sk + nehnutelnosti.sk inzertné štatistiky
+#
+# Values represent BARE rent (without energies) — what the landlord actually
+# receives as income. Lower bound of published ranges to stay conservative for
+# cashflow analysis. With-energies figures run ~3–5 €/m²/mo higher.
+#
 # engine/financial.py uses fuzzy substring matching so partial names resolve:
 # "Bratislava - Rača" → "bratislava iv", "okres Žilina" → "žilina" etc.
 RENT_PER_M2 = {
     # Bratislava — city-only fallback (used when no district number is known)
-    "bratislava":           11.5,   # weighted average across BA I–V
+    "bratislava":           12.5,   # weighted average across BA I–V
     # Bratislava — administrative districts (override city-only above via exact match)
-    "bratislava i":         14.5,
-    "bratislava ii":        11.8,
-    "bratislava iii":       11.2,
-    "bratislava iv":        10.5,
-    "bratislava v":         10.8,
-    # Bratislava — city parts / suburbs (map to nearest district rate)
-    "staré mesto":          13.5,   # BA I
-    "ružinov":              11.5,   # BA II
-    "vrakuňa":               9.2,   # BA II
-    "podunajské":            9.0,   # BA II
-    "vajnory":               9.5,   # BA II
-    "nové mesto":           10.8,   # BA III (Bratislava Nové Mesto)
-    "rača":                 10.0,   # BA III
-    "vajnory":               9.5,   # BA III
-    "dúbravka":             10.0,   # BA IV
-    "karlova ves":          11.0,   # BA IV
-    "lamač":                 9.8,   # BA IV
-    "záhorská":              9.0,   # BA IV
-    "devínska":              9.5,   # BA IV
-    "petržalka":            10.5,   # BA V
-    "rusovce":               9.2,   # BA V
-    "jarovce":               9.0,   # BA V
-    "čunovo":                8.8,   # BA V
+    "bratislava i":         14.5,   # Staré Mesto
+    "bratislava ii":        12.0,   # Ružinov, Vrakuňa, Podunajské Biskupice
+    "bratislava iii":       12.0,   # Nové Mesto, Rača, Vajnory
+    "bratislava iv":        11.0,   # Karlova Ves, Dúbravka, Devínska, Lamač
+    "bratislava v":         11.5,   # Petržalka, Rusovce, Jarovce, Čunovo
+    # Bratislava — city parts / suburbs (Q2 2026 lower-bound rates)
+    "staré mesto":          14.5,   # BA I — 15–19 €/m² range
+    "ružinov":              13.5,   # BA II — 14–17 €/m² range
+    "vrakuňa":              10.0,   # BA II — 10–12 €/m² range
+    "podunajské":           10.0,   # BA II — 10–12 €/m² range
+    "vajnory":              10.0,   # BA III
+    "nové mesto":           13.0,   # BA III — 13–16 €/m² range
+    "rača":                 11.0,   # BA III — 11–13 €/m² range
+    "dúbravka":             11.5,   # BA IV — 11–14 €/m² range
+    "karlova ves":          12.0,   # BA IV — 12–14 €/m² range
+    "lamač":                10.5,   # BA IV
+    "záhorská":             10.0,   # BA IV
+    "devínska":             10.0,   # BA IV — 10–12 €/m² range
+    "petržalka":            12.0,   # BA V — 12–15 €/m² range
+    "rusovce":              10.0,   # BA V
+    "jarovce":              10.0,   # BA V
+    "čunovo":                9.5,   # BA V
     # Bratislava-okolie (suburbs)
-    "senec":                 8.5,
-    "pezinok":               8.8,
+    "senec":                 9.5,   # Top-10 growth city
+    "pezinok":               9.5,   # Top-10 growth city
     "malacky":               7.5,
-    "stupava":               8.0,
+    "stupava":               8.5,
     "modra":                 8.0,
-    # Trnava region
-    "trnava":                8.5,
-    "dunajská streda":       7.0,
-    "galanta":               6.5,
-    "hlohovec":              6.5,
-    "piešťany":              7.5,
-    "senica":                6.0,
-    "skalica":               6.2,
-    # Trenčín region
-    "trenčín":               7.2,
-    "bánovce":               5.8,
+    # Trnava region — Q2 2026: 9–11 €/m²
+    "trnava":               10.0,
+    "dunajská streda":       7.5,
+    "galanta":               7.0,
+    "hlohovec":              7.0,
+    "piešťany":              8.0,
+    "senica":                6.5,
+    "skalica":               6.5,
+    # Trenčín region — Q2 2026: 7–9 €/m²
+    "trenčín":               8.0,
+    "bánovce":               6.0,
     "ilava":                 6.2,
-    "myjava":                5.5,
-    "nové mesto nad váhom":  6.5,
-    "partizánske":           5.8,
-    "považská bystrica":     6.5,
-    "púchov":                6.5,
-    # Nitra region
-    "nitra":                 7.2,
-    "komárno":               6.2,
-    "levice":                6.0,
-    "nové zámky":            6.2,
-    "šaľa":                  6.2,
-    "topoľčany":             5.8,
-    "zlaté moravce":         5.8,
-    "vráble":                5.5,
-    # Žilina region
-    "žilina":                8.0,
-    "bytča":                 6.5,
-    "čadca":                 6.2,
-    "kysucké nové mesto":    6.5,
-    "liptovský mikuláš":     6.2,
-    "námestovo":             5.8,
-    "ružomberok":            6.5,
-    "turčianske teplice":    5.8,
-    "tvrdošín":              5.8,
-    # Banská Bystrica region
-    "banská bystrica":       7.0,
-    "brezno":                5.8,
-    "detva":                 5.2,
-    "lučenec":               5.8,
-    "revúca":                5.2,
-    "rimavská sobota":       5.2,
-    "veľký krtíš":           5.2,
-    "zvolen":                6.5,
-    "žiar nad hronom":       6.2,
-    "zvolenská":             6.0,
-    # Prešov region
-    "prešov":                7.2,
-    "bardejov":              5.8,
-    "humenné":               5.8,
-    "kežmarok":              6.0,
-    "levoča":                5.8,
-    "medzilaborce":          4.8,
-    "poprad":                6.5,
-    "sabinov":               5.8,
-    "snina":                 5.2,
-    "stará ľubovňa":         5.8,
-    "stropkov":              5.2,
-    "vranov nad topľou":     5.8,
-    # Košice — city-only fallback
-    "košice":                8.0,
-    # Košice region
-    "košice i":              8.5,
-    "košice ii":             8.0,
-    "košice iii":            7.8,
-    "košice iv":             7.5,
-    "košice-okolie":         7.0,
-    "gelnica":               5.2,
-    "michalovce":            6.2,
-    "rožňava":               5.8,
-    "sobrance":              5.0,
-    "spišská nová ves":      6.2,
-    "trebišov":              5.5,
+    "myjava":                5.8,
+    "nové mesto nad váhom":  6.8,
+    "partizánske":           6.0,
+    "považská bystrica":     6.8,
+    "púchov":                6.8,
+    # Nitra region — Q2 2026: 8–10 €/m², Jaguar Land Rover demand
+    "nitra":                 8.5,
+    "komárno":               6.5,
+    "levice":                6.2,
+    "nové zámky":            6.5,
+    "šaľa":                  6.5,
+    "topoľčany":             6.0,
+    "zlaté moravce":         6.0,
+    "vráble":                5.8,
+    # Žilina region — Q2 2026: 9–12 €/m², strongest yield-per-cost in SR
+    "žilina":               10.0,
+    "bytča":                 7.0,
+    "čadca":                 6.5,
+    "kysucké nové mesto":    7.0,
+    "liptovský mikuláš":     8.0,   # Top-10 growth city
+    "námestovo":             6.0,
+    "ružomberok":            7.0,
+    "turčianske teplice":    6.0,
+    "tvrdošín":              6.0,
+    # Banská Bystrica region — Q2 2026: 8–10 €/m²
+    "banská bystrica":       8.5,
+    "brezno":                6.0,
+    "detva":                 5.5,
+    "lučenec":               6.0,
+    "revúca":                5.5,
+    "rimavská sobota":       5.5,
+    "veľký krtíš":           5.5,
+    "zvolen":                7.0,
+    "žiar nad hronom":       6.5,
+    "zvolenská":             6.2,
+    # Prešov region — Q2 2026: 8–10 €/m², +12% YoY rent growth (highest in SR)
+    "prešov":                8.5,
+    "bardejov":              6.0,
+    "humenné":               6.0,
+    "kežmarok":              6.5,
+    "levoča":                6.0,
+    "medzilaborce":          5.0,
+    "poprad":                9.5,   # Top-10 growth city, Tatry Airbnb premium
+    "sabinov":               6.0,
+    "snina":                 5.5,
+    "stará ľubovňa":         6.0,
+    "stropkov":              5.5,
+    "vranov nad topľou":     6.0,
+    # Košice — Q2 2026: 10–13 €/m² (#2 market after BA, +7% YoY)
+    "košice":               10.5,
+    # Košice — mestské obvody (data: Košice I 13.5–15, II 12–13, III 10.5–11.8, IV 11.5–12.8)
+    "košice i":             13.5,   # Staré Mesto, Sever
+    "košice ii":            12.0,   # Terasa, Juh, Západ
+    "košice iii":           10.5,   # Dargovských hrdinov, Nad Jazerom
+    "košice iv":            11.5,   # Vyšné Opátske, Barca
+    "košice-okolie":         7.5,
+    "gelnica":               5.5,
+    "michalovce":            6.5,
+    "rožňava":               6.0,
+    "sobrance":              5.2,
+    "spišská nová ves":      6.5,
+    "trebišov":              5.8,
     # Martin area
-    "martin":                6.8,
-    "turčianske":            6.0,
+    "martin":                7.5,
+    "turčianske":            6.5,
     # Default — smaller towns not listed above
-    "default":               6.0,
+    "default":               6.5,
 }
 
 # ── s.r.o. Setup Cost Estimate ────────────────────────────────────────────────
