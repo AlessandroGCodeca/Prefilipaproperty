@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import SCRAPE_DELAY_SEC
 from database import upsert_listing, init_db
 from scraper._http import get, make_session
+from scraper.nehnutelnosti import _extract_location_from_text
 
 BASE = "https://www.topreality.sk"
 
@@ -246,6 +247,10 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
     price = ld_data.get("price") or _price_from_text(body_text)
     size = ld_data.get("size") or _size_from_text(body_text)
     address = ld_data.get("address", "")
+    # Fallback when JSON-LD has no address (common on topreality detail pages):
+    # scan rendered body for any known Slovak city/suburb name.
+    if not address:
+        address = _extract_location_from_text(body_text)
 
     # Image
     img = ""
@@ -299,6 +304,35 @@ def _detect_search_url(sess) -> str:
         else:
             print(f"  · {fmt} → HTTP {status}, len={len(html)}", flush=True)
     return ""
+
+
+def _backfill_blank_districts() -> int:
+    """Re-extract district for existing topreality rows with blank district by
+    scanning the title / address_raw for a known city or suburb name. The
+    location helper requires Slovak diacritics, so the URL slug (ASCII) won't
+    match — title and og:title address_raw normally retain the diacritics."""
+    from database import get_conn
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, title, address_raw FROM listings "
+        "WHERE source='topreality' AND (district IS NULL OR district='')"
+    ).fetchall()
+    updated = 0
+    for row_id, title, addr in rows:
+        for text in (addr, title):
+            matched = _extract_location_from_text(text or "")
+            if matched:
+                conn.execute(
+                    "UPDATE listings SET district=? WHERE id=?",
+                    (matched, row_id),
+                )
+                updated += 1
+                break
+    conn.commit()
+    conn.close()
+    if updated:
+        print(f"  ↳ backfilled district on {updated} topreality rows")
+    return updated
 
 
 def _deactivate_non_apartments() -> int:
@@ -409,6 +443,7 @@ def run(max_pages: int = 5) -> int:
         )
     _deactivate_non_apartments()
     _zero_bogus_prices()
+    _backfill_blank_districts()
     from engine.regional_prices import zero_below_regional_floor
     zero_below_regional_floor("topreality")
     print(f"✅ Topreality done. {total} upserted.", flush=True)
