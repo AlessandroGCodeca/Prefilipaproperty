@@ -1,0 +1,37 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sovereign_final
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: sovereign_final/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Skip playwright/streamlit/curl_cffi/psycopg2 — heavy runtime-only
+          # deps not imported anywhere the unit tests reach.
+          grep -v -E "^(playwright|streamlit|curl_cffi|psycopg2)" requirements.txt > requirements-test.txt
+          pip install -r requirements-test.txt pytest ruff
+
+      - name: Lint with ruff
+        # Only fail on real-bug classes (E9 syntax, F63 invalid comparisons,
+        # F7 syntax issues, F82 undefined names). Style warnings don't fail.
+        run: ruff check . --select=E9,F63,F7,F82 --output-format=github
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short

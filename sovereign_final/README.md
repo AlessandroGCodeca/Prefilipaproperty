@@ -19,7 +19,7 @@ That's it.
 
 ## Tests
 
-Run before pushing changes. From `sovereign_final/`:
+CI runs on every PR. To run locally from `sovereign_final/`:
 
 ```
 python3 -m pytest tests/
