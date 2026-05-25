@@ -79,3 +79,42 @@ class TestSizeScaling:
         rent_60 = get_rent_estimate("Bratislava", 60.0)
         # Should be exactly 2× (same per-m² rate × different size)
         assert rent_60 == pytest.approx(rent_30 * 2, rel=0.01)
+
+
+class TestRoomsMultiplier:
+    """1-izb apartments command higher €/m² rent than 3-izb; flat per-m² rate
+    under-prices small apartments' true cashflow. Multipliers from Q2 2026
+    Deloitte data: 1-izb 1.15×, 2-izb 1.00× (baseline), 3-izb 0.92×, 4+ 0.85×."""
+
+    def test_2izb_is_baseline(self):
+        # 2-izb gets the raw RENT_PER_M2 rate (multiplier = 1.0)
+        baseline = get_rent_estimate("Bratislava", 60.0, rooms=2)
+        no_rooms = get_rent_estimate("Bratislava", 60.0)
+        assert baseline == pytest.approx(no_rooms, rel=0.01)
+
+    def test_1izb_premium(self):
+        rent_1 = get_rent_estimate("Bratislava", 30.0, rooms=1)
+        rent_2 = get_rent_estimate("Bratislava", 30.0, rooms=2)
+        # 1-izb should be ~15% higher per-m² than 2-izb at same size
+        assert rent_1 == pytest.approx(rent_2 * 1.15, rel=0.02)
+
+    def test_3izb_discount(self):
+        rent_3 = get_rent_estimate("Bratislava", 90.0, rooms=3)
+        rent_2 = get_rent_estimate("Bratislava", 90.0, rooms=2)
+        # 3-izb should be ~8% lower per-m² than 2-izb at same size
+        assert rent_3 == pytest.approx(rent_2 * 0.92, rel=0.02)
+
+    def test_4izb_or_more_capped(self):
+        # 4-izb and larger all clamp to the same 0.85× discount
+        rent_4 = get_rent_estimate("Bratislava", 120.0, rooms=4)
+        rent_5 = get_rent_estimate("Bratislava", 120.0, rooms=5)
+        assert rent_4 == pytest.approx(rent_5, rel=0.001)
+
+    def test_invalid_rooms_falls_back_to_baseline(self):
+        # Garbage rooms values shouldn't crash — fall back to 2-izb baseline
+        baseline = get_rent_estimate("Bratislava", 60.0)
+        for bad in [None, 0, -1, "abc"]:
+            rent = get_rent_estimate("Bratislava", 60.0, rooms=bad)
+            assert rent == pytest.approx(baseline, rel=0.01), (
+                f"rooms={bad!r} should fall back to baseline, got {rent}"
+            )
