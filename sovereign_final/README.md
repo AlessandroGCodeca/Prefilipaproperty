@@ -17,6 +17,18 @@ That's it.
 
 ---
 
+## Tests
+
+Run before pushing changes. From `sovereign_final/`:
+
+```
+python3 -m pytest tests/
+```
+
+Expected: ~103 passing, 1 xfailed (known Slovak-declension limitation).
+
+---
+
 ## Files
 
 ```
