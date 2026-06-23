@@ -500,7 +500,8 @@ def render_card(l):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TABS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-t1, t2, t3 = st.tabs([
+t0, t1, t2, t3 = st.tabs([
+    "TRIAGE TABLE",
     "ACTIVE SNAG LIST",
     "SATELLITE VIEWER",
     "ONE-CLICK CLOSE",
@@ -514,6 +515,55 @@ whites  = [l for l in data if (l.get("cf_class") or l.get("classification")) == 
 pending = [l for l in data if (l.get("cf_class") or l.get("classification") or "PENDING") == "PENDING"
            and l.get("id","").startswith("d") is False
            and l.get("id") not in ("d1","d2","d3")]
+
+
+# ── Tab 0: Triage Table ───────────────────────────────────────────────────────
+# Flat, sortable view of every scored listing so you can spot the best
+# surplus / yield in one scan instead of expanding each card individually.
+with t0:
+    import pandas as pd
+
+    scored = greens + yellows + whites
+    if not scored:
+        st.info("No scored listings yet — run the pipeline (NEHNUT / BAZOS / TOPREAL → 💰 CASHFLOW SCORE) to populate this view.")
+    else:
+        emoji_map = {"GREEN": "🟢", "YELLOW": "🟡", "WHITE": "⚪", "PENDING": "⏳"}
+        triage_rows = []
+        for l in scored:
+            cls = (l.get("cf_class") or l.get("classification") or "PENDING").upper()
+            surplus = l.get("surplus_sro") if show_sro else l.get("surplus_personal")
+            triage_rows.append({
+                "": emoji_map.get(cls, ""),
+                "Title":    (l.get("title") or l.get("district") or "—")[:50],
+                "District": l.get("district") or "—",
+                "Src":      (l.get("source") or "").upper()[:5],
+                "Price":    l.get("price_eur")            or 0,
+                "Size":     l.get("size_m2")              or 0,
+                "Rent":     l.get("estimated_rent_eur")   or 0,
+                "Surplus":  surplus if surplus is not None else 0,
+                "Yield":    (l.get("net_rental_yield")    or 0) * 100,
+                "URL":      l.get("url") or "",
+            })
+        df = pd.DataFrame(triage_rows).sort_values("Surplus", ascending=False)
+        st.markdown(
+            f'<div class="muted">{len(df)} scored listings — sorted by '
+            f'{"s.r.o." if show_sro else "personal"} surplus/mo. Click column header to re-sort.</div>',
+            unsafe_allow_html=True,
+        )
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            height=min(600, 40 + 35 * len(df)),
+            column_config={
+                "Price":   st.column_config.NumberColumn(format="€%d"),
+                "Size":    st.column_config.NumberColumn(format="%d m²"),
+                "Rent":    st.column_config.NumberColumn(format="€%d"),
+                "Surplus": st.column_config.NumberColumn(format="€%+d"),
+                "Yield":   st.column_config.NumberColumn(format="%.2f%%"),
+                "URL":     st.column_config.LinkColumn(display_text="open ↗"),
+            },
+        )
 
 
 # ── Tab 1: Snag List ──────────────────────────────────────────────────────────
