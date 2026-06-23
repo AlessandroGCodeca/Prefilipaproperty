@@ -101,8 +101,33 @@ def calc_income_tax_sro(annual_net: float) -> float:
 
 _CITY_ONLY_KEYS = {"bratislava", "košice"}  # used only as last-resort city fallbacks
 
+# Per-m² rates in RENT_PER_M2 represent 2-izb apartments (baseline). Smaller
+# units command a per-m² premium; larger units sell at a discount. Multipliers
+# derived from Q2 2026 Deloitte Rent Index data showing 1-izb at 1.15× and
+# 3-izb at 0.92× of 2-izb per m².
+ROOMS_RENT_MULTIPLIER = {
+    1: 1.15,   # 1-izbový / garsónka
+    2: 1.00,   # 2-izbový (baseline)
+    3: 0.92,   # 3-izbový
+    4: 0.85,   # 4+ izbový
+}
 
-def get_rent_estimate(district: str, size_m2: float) -> float:
+
+def _rooms_multiplier(rooms) -> float:
+    """Return the per-m² rate multiplier for a given room count. Falls back
+    to the 2-izb baseline (1.0) when rooms is None, 0, or non-numeric."""
+    if rooms is None:
+        return 1.0
+    try:
+        r = int(rooms)
+    except (TypeError, ValueError):
+        return 1.0
+    if r <= 0:
+        return 1.0
+    return ROOMS_RENT_MULTIPLIER.get(min(r, 4), 0.85)
+
+
+def get_rent_estimate(district: str, size_m2: float, rooms=None) -> float:
     key = district.lower().strip()
 
     # 1. Exact match — including the city-only keys.
@@ -155,6 +180,7 @@ def get_rent_estimate(district: str, size_m2: float) -> float:
 
     if any(z in key for z in INDUSTRIAL_ZONES):
         rate *= INDUSTRIAL_RENT_PREMIUM
+    rate *= _rooms_multiplier(rooms)
     return round(rate * size_m2, 2)
 
 
@@ -170,11 +196,12 @@ def analyse(
     listing_id: Optional[str] = None,
     rent_override: Optional[float] = None,
     ltv: float = LTV_RATIO,
+    rooms: Optional[int] = None,
 ) -> FinancialResult:
 
     loan_amount     = price_eur * ltv
     equity          = price_eur * (1 - ltv)
-    rent            = rent_override or get_rent_estimate(district, size_m2)
+    rent            = rent_override or get_rent_estimate(district, size_m2, rooms)
 
     # Shared monthly costs
     mortgage_mo     = calc_mortgage(loan_amount)

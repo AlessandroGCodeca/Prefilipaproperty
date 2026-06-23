@@ -30,6 +30,7 @@ def run_scoring(progress_callback=None) -> int:
                 size_m2    = row["size_m2"],
                 district   = row.get("district") or "",
                 listing_id = row["id"],
+                rooms      = row.get("rooms"),
             )
             db_data = result_to_db_dict(result)
             upsert_cashflow(db_data)
