@@ -109,7 +109,13 @@ div[data-testid="stExpander"] { background:#0b0d14; border:1px solid #151924 !im
 # ── Init ──────────────────────────────────────────────────────────────────────
 from database import init_db, get_all_active, get_rejected, get_stats, backfill_dev_project_flags
 init_db()
-backfill_dev_project_flags()  # one-shot: flag existing rows by URL/title pattern
+
+@st.cache_resource
+def _startup_backfill():
+    # Flag existing rows by URL/title pattern. cache_resource runs this once per
+    # session instead of on every Streamlit rerun (every widget interaction).
+    return backfill_dev_project_flags()
+_startup_backfill()
 
 # ── Demo data (when DB is empty) ──────────────────────────────────────────────
 DEMO = [
@@ -461,8 +467,7 @@ def render_card(l):
              if deal_grade != "—" else "") +
             f'<span class="badge bo">{"s.r.o." if opt=="SRO" else "PERSONAL"}</span>' + " " +
             tier_badge(loc_tier) +
-            (f' <span class="badge bg">⚙️ INDUSTRIAL</span>' if ind else "") +
-            (f' <span class="badge bg">🏭 NITRA/ŽILINA</span>' if ind and "nitra" in district.lower() or "žilina" in district.lower() else "")
+            (f' <span class="badge bg">⚙️ INDUSTRIAL</span>' if ind else "")
         )
         st.markdown(badges, unsafe_allow_html=True)
 
@@ -701,11 +706,12 @@ with t2:
         note = st.text_input("Note", placeholder="e.g. Great location, needs new windows...")
         if st.button("SAVE ANNOTATION", use_container_width=True):
             import uuid as _uuid
+            from datetime import datetime as _dt, timezone as _tz
             conn = __import__("database").get_conn()
             conn.execute(
-                "INSERT OR REPLACE INTO annotations (id, listing_id, note, vibe_score, created_at) VALUES (?,?,?,?,?)",
+                "INSERT INTO annotations (id, listing_id, note, vibe_score, created_at) VALUES (?,?,?,?,?)",
                 (str(_uuid.uuid4()), sel["id"], note, vibe,
-                 __import__("datetime").datetime.utcnow().isoformat())
+                 _dt.now(_tz.utc).isoformat())
             )
             conn.commit(); conn.close()
             st.success(f"✅ Vibe {vibe}/10 saved.")
