@@ -3,7 +3,15 @@ modules/debt_bot.py — Sovereign Investor Dashboard
 Module D: LV (List Vlastníctva) Debt-Bot
 
 Hard stop: any non-bank lien, execution, or lawsuit = instant REJECTED.
-Optional: DMR (Mistral) for plain-language LV analysis.
+
+Decision layers (most reliable first):
+  1. Claude analyze_lv() — schema-validated risk read, authoritative when an
+     ANTHROPIC_API_KEY is set and real LV text is available. It reliably tells a
+     normal bank záložné právo apart from a private lien / exekúcia / konkurz,
+     which the substring scan often gets wrong.
+  2. Substring scan (query_lv_api/_parse_lv) — the always-on baseline and the
+     fallback whenever Claude is disabled, has no LV text, or is unsure.
+Optional: DMR (Mistral) for a fully-local plain-language summary.
 """
 
 import time, uuid, random
@@ -18,6 +26,7 @@ from config import (
     LV_REJECT_FLAGS, LV_BANK_NAMES, DMR_ENDPOINT, LLM_MODEL,
 )
 from database import get_pending_lv, set_lv_status, get_conn, init_db
+from modules.llm_enrichment import is_enabled as claude_enabled, analyze_lv as claude_analyze_lv
 
 CADASTRAL_BASE = "https://kataster.skgeodesy.sk/PortalOGC/rest/services/vgi_kn"
 
@@ -90,6 +99,10 @@ def llm_analyse_lv(lv_text: str) -> dict:
     Use local Mistral (Docker Model Runner) to analyse LV document text.
     Returns plain-language summary and risk level.
     Data stays fully local — never sent externally.
+
+    Optional, privacy-first alternative to the Claude path in _decide_lv: the
+    PASS/REJECT decision uses Claude when ANTHROPIC_API_KEY is set, but callers
+    that must keep sensitive LV data on-prem can use this for a local summary.
     """
     try:
         resp = requests.post(
@@ -124,6 +137,55 @@ def llm_analyse_lv(lv_text: str) -> dict:
         return {"llm_analysis": f"DMR unavailable: {e}", "llm_risk_level": "UNKNOWN"}
 
 
+# ── Unified LV decision (Claude-authoritative, substring fallback) ────────────
+def _decide_lv(api_result: dict) -> dict:
+    """Refine a raw query_lv_api result with Claude's structured LV analysis.
+
+    The substring scan in `api_result` is the baseline. When Claude enrichment
+    is enabled AND we have real LV text (`raw`), its schema-validated read is
+    authoritative: it can both REJECT something the substring scan missed and
+    PASS a normal bank lien the substring scan would wrongly flag. Claude's
+    summary/risk_level/flags are merged in for transparency.
+
+    Degrades gracefully — returns the original substring decision untouched when
+    Claude is disabled, there's no LV text, the call fails, or it returns an
+    UNKNOWN risk level. So the hard-stop safety net is never weaker than before.
+    """
+    if not claude_enabled():
+        return api_result
+    raw = api_result.get("raw")
+    if not raw:
+        return api_result
+
+    analysis = claude_analyze_lv(str(raw))
+    if not analysis or analysis.get("risk_level") == "UNKNOWN":
+        return api_result  # fall back to the substring decision
+
+    flags = analysis.get("flags") or []
+    summary = (analysis.get("summary") or "").strip()
+    level = analysis.get("risk_level")
+    note = f"[Claude {level}] {summary}".strip()
+
+    decided = {
+        "raw": raw,
+        "llm_risk_level": level,
+        "llm_analysis": summary,
+        "llm_flags": flags,
+    }
+    if not analysis.get("is_safe_to_proceed") or level == "HIGH":
+        decided.update({
+            "status": "REJECT",
+            "flag": flags[0] if flags else "LV_RISK",
+            "detail": note or api_result.get("detail", "LV risk flagged by Claude"),
+        })
+    else:
+        decided.update({
+            "status": "PASS",
+            "detail": note or api_result.get("detail", "Clean title"),
+        })
+    return decided
+
+
 # ── Main Runner ───────────────────────────────────────────────────────────────
 def run_debt_filter(progress_callback=None) -> tuple[int, int]:
     pending = get_pending_lv()
@@ -144,11 +206,8 @@ def run_debt_filter(progress_callback=None) -> tuple[int, int]:
             progress_callback(i + 1, len(pending), addr)
 
         result = query_lv_api(cid, area)
-
-        # Optional DMR analysis
-        llm_data = {}
-        if result.get("raw"):
-            llm_data = llm_analyse_lv(str(result["raw"]))
+        # Claude-authoritative refinement (no-op when disabled / no LV text).
+        result = _decide_lv(result)
 
         if result["status"] == "REJECT":
             set_lv_status(lid, "REJECTED", result.get("flag","DEBT_FLAG"), result["detail"])
@@ -176,6 +235,7 @@ def reverify(listing_id: str) -> dict:
     if not row:
         return {"status": "ERROR", "detail": "Not found"}
     result = query_lv_api(row[0] or "", row[1] or "")
+    result = _decide_lv(result)
     status = "REJECTED" if result["status"] == "REJECT" else "PASS"
     set_lv_status(listing_id, status,
                   result.get("flag",""), result.get("detail",""),
