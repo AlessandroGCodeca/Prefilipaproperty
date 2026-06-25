@@ -109,7 +109,13 @@ div[data-testid="stExpander"] { background:#0b0d14; border:1px solid #151924 !im
 # ── Init ──────────────────────────────────────────────────────────────────────
 from database import init_db, get_all_active, get_rejected, get_stats, backfill_dev_project_flags
 init_db()
-backfill_dev_project_flags()  # one-shot: flag existing rows by URL/title pattern
+
+@st.cache_resource
+def _startup_backfill():
+    # Flag existing rows by URL/title pattern. cache_resource runs this once per
+    # session instead of on every Streamlit rerun (every widget interaction).
+    return backfill_dev_project_flags()
+_startup_backfill()
 
 # ── Demo data (when DB is empty) ──────────────────────────────────────────────
 DEMO = [
@@ -177,6 +183,9 @@ with st.sidebar:
     with c3: do_topreal= st.button("TOPREAL", use_container_width=True)
     do_lv    = st.button("🔒 LV DEBT FILTER", use_container_width=True)
     do_cf    = st.button("💰 CASHFLOW SCORE", use_container_width=True)
+    do_rescore = st.button("♻️ RESCORE ALL",  use_container_width=True,
+                           help="Clear all cashflow scores and re-run scoring from "
+                                "scratch. Use after updating rent/tax assumptions.")
     do_loc   = st.button("📍 LOCATION IQ",    use_container_width=True)
     do_stale = st.button("🧹 CLEAN STALE (21d)", use_container_width=True)
     do_test  = st.button("🔗 TEST SITES",      use_container_width=True)
@@ -305,6 +314,17 @@ if do_cf:
     n = run_scoring(progress_callback=cf_cb)
     bar.empty(); st.success(f"✅ Scored {n} listings"); st.rerun()
 
+if do_rescore:
+    from database import clear_cashflow_scores
+    from modules.cashflow_runner import run_scoring
+    cleared = clear_cashflow_scores()
+    bar = st.progress(0)
+    def rescore_cb(i, n): bar.progress(i/n)
+    n = run_scoring(progress_callback=rescore_cb)
+    bar.empty()
+    st.success(f"✅ Cleared {cleared} old scores, re-scored {n} listings")
+    st.rerun()
+
 if do_loc:
     bar = st.progress(0); txt = st.empty()
     def loc_cb(i, n, a=""): bar.progress(i/n); txt.text(f"Location {i}/{n}: {a}")
@@ -428,19 +448,26 @@ def render_card(l):
             st.metric("Surplus/mo",   surplus_str)
             st.metric("Self-Fund",    fp(ratio))
         with c4:
+            st.metric("Cap Rate",   fp(l.get("cap_rate")))
             st.metric("CoC Return", fp(l.get("cash_on_cash")))
             st.metric("Net Yield",  fp(l.get("net_rental_yield")))
         with c5:
             st.metric("Location",   f"{l.get('location_score','—')}/100")
             st.metric("Transit",    f"{transit:.0f}m" if transit else "—")
 
+        # Composite deal grade (financial + location + energy + risk)
+        from engine.financial import compute_deal_score
+        deal_score, deal_grade = compute_deal_score(l)
+        grade_css = {"A": "bg", "B": "bs", "C": "by", "D": "bw"}.get(deal_grade, "bw")
+
         # Badges
         badges = (
             badge(css_cls, cls) + " " +
+            (f'<span class="badge {grade_css}">GRADE {deal_grade} · {deal_score}</span> '
+             if deal_grade != "—" else "") +
             f'<span class="badge bo">{"s.r.o." if opt=="SRO" else "PERSONAL"}</span>' + " " +
             tier_badge(loc_tier) +
-            (f' <span class="badge bg">⚙️ INDUSTRIAL</span>' if ind else "") +
-            (f' <span class="badge bg">🏭 NITRA/ŽILINA</span>' if ind and "nitra" in district.lower() or "žilina" in district.lower() else "")
+            (f' <span class="badge bg">⚙️ INDUSTRIAL</span>' if ind else "")
         )
         st.markdown(badges, unsafe_allow_html=True)
 
@@ -452,13 +479,14 @@ def render_card(l):
         with bc1:
             st.markdown(f'<div class="muted">COST BREAKDOWN — {struct}</div>', unsafe_allow_html=True)
             rows = [
-                ("Mortgage",      l.get("mortgage_monthly")),
-                ("HOA",           l.get("hoa_monthly")),
-                ("Property Tax",  l.get("property_tax_monthly")),
-                ("Vacancy 5%",    l.get("vacancy_cost")),
-                ("Maintenance",   l.get("maintenance_monthly")),
-                ("Income Tax",    l.get("income_tax_sro") if show_sro else l.get("income_tax_personal")),
-                ("Health Levy",   l.get("health_levy_sro") if show_sro else l.get("health_levy_personal")),
+                ("Mortgage",        l.get("mortgage_monthly")),
+                ("HOA (incl. fond opráv)", l.get("hoa_monthly")),
+                ("Property Tax",    l.get("property_tax_monthly")),
+                ("Vacancy 5%",      l.get("vacancy_cost")),
+                ("Owner reserve",   l.get("maintenance_monthly")),
+                ("Management",      l.get("management_monthly")),
+                ("Income Tax",      l.get("income_tax_sro") if show_sro else l.get("income_tax_personal")),
+                ("Health Levy",     l.get("health_levy_sro") if show_sro else l.get("health_levy_personal")),
             ]
             html = ""
             for lbl, val in rows:
@@ -545,13 +573,17 @@ with t0:
     if not scored:
         st.info("No scored listings yet — run the pipeline (NEHNUT / BAZOS / TOPREAL → 💰 CASHFLOW SCORE) to populate this view.")
     else:
+        from engine.financial import compute_deal_score
         emoji_map = {"GREEN": "🟢", "YELLOW": "🟡", "WHITE": "⚪", "PENDING": "⏳"}
         triage_rows = []
         for l in scored:
             cls = (l.get("cf_class") or l.get("classification") or "PENDING").upper()
             surplus = l.get("surplus_sro") if show_sro else l.get("surplus_personal")
+            score, grade = compute_deal_score(l)
             triage_rows.append({
                 "": emoji_map.get(cls, ""),
+                "Grade":    grade,
+                "Score":    score,
                 "Title":    (l.get("title") or l.get("district") or "—")[:50],
                 "District": l.get("district") or "—",
                 "Src":      (l.get("source") or "").upper()[:5],
@@ -559,13 +591,17 @@ with t0:
                 "Size":     l.get("size_m2")              or 0,
                 "Rent":     l.get("estimated_rent_eur")   or 0,
                 "Surplus":  surplus if surplus is not None else 0,
+                "Cap%":     (l.get("cap_rate")            or 0) * 100,
                 "Yield":    (l.get("net_rental_yield")    or 0) * 100,
                 "URL":      l.get("url") or "",
             })
-        df = pd.DataFrame(triage_rows).sort_values("Surplus", ascending=False)
+        df = pd.DataFrame(triage_rows).sort_values(
+            ["Score", "Surplus"], ascending=[False, False]
+        )
         st.markdown(
-            f'<div class="muted">{len(df)} scored listings — sorted by '
-            f'{"s.r.o." if show_sro else "personal"} surplus/mo. Click column header to re-sort.</div>',
+            f'<div class="muted">{len(df)} scored listings — sorted by composite deal '
+            f'grade (financial + location + energy + risk), then '
+            f'{"s.r.o." if show_sro else "personal"} surplus. Click any header to re-sort.</div>',
             unsafe_allow_html=True,
         )
         st.dataframe(
@@ -574,10 +610,12 @@ with t0:
             hide_index=True,
             height=min(600, 40 + 35 * len(df)),
             column_config={
+                "Score":   st.column_config.NumberColumn(format="%d", help="0–100 composite deal score"),
                 "Price":   st.column_config.NumberColumn(format="€%d"),
                 "Size":    st.column_config.NumberColumn(format="%d m²"),
                 "Rent":    st.column_config.NumberColumn(format="€%d"),
                 "Surplus": st.column_config.NumberColumn(format="€%+d"),
+                "Cap%":    st.column_config.NumberColumn(format="%.2f%%"),
                 "Yield":   st.column_config.NumberColumn(format="%.2f%%"),
                 "URL":     st.column_config.LinkColumn(display_text="open ↗"),
             },
@@ -668,11 +706,12 @@ with t2:
         note = st.text_input("Note", placeholder="e.g. Great location, needs new windows...")
         if st.button("SAVE ANNOTATION", use_container_width=True):
             import uuid as _uuid
+            from datetime import datetime as _dt, timezone as _tz
             conn = __import__("database").get_conn()
             conn.execute(
-                "INSERT OR REPLACE INTO annotations (id, listing_id, note, vibe_score, created_at) VALUES (?,?,?,?,?)",
+                "INSERT INTO annotations (id, listing_id, note, vibe_score, created_at) VALUES (?,?,?,?,?)",
                 (str(_uuid.uuid4()), sel["id"], note, vibe,
-                 __import__("datetime").datetime.utcnow().isoformat())
+                 _dt.now(_tz.utc).isoformat())
             )
             conn.commit(); conn.close()
             st.success(f"✅ Vibe {vibe}/10 saved.")
@@ -708,6 +747,12 @@ with t3:
                 st.error("Enter buyer name first.")
             else:
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                # Pre-format optional numeric fields — an f-string format spec
+                # can't contain a conditional, so build these strings first.
+                _surplus = sel3.get("surplus_sro")
+                _saving  = sel3.get("annual_sro_saving")
+                surplus_str = f"€{_surplus:,.0f}" if isinstance(_surplus, (int, float)) else "—"
+                saving_str  = f"€{_saving:,.0f}"  if isinstance(_saving,  (int, float)) else "—"
                 draft = f"""
 ╔══════════════════════════════════════════════════════════╗
 ║         KÚPNA ZMLUVA — DRAFT / NÁVRH ZMLUVY             ║
@@ -777,8 +822,8 @@ Miesto:  [Doplniť]
 
 FINANČNÁ ANALÝZA (pre interné účely):
 
-s.r.o. surplus/mo:  €{sel3.get('surplus_sro','—'):,.0f if isinstance(sel3.get('surplus_sro'),float) else '—'}
-Ročná úspora s.r.o.: €{sel3.get('annual_sro_saving','—'):,.0f if isinstance(sel3.get('annual_sro_saving'),float) else '—'}
+s.r.o. surplus/mo:  {surplus_str}
+Ročná úspora s.r.o.: {saving_str}
 Net Yield:           {(sel3.get('net_rental_yield',0) or 0)*100:.2f}%
 LV overenie:        {sel3.get('lv_status','PENDING')} — OVERIŤ 48H PRED PODPISOM
 

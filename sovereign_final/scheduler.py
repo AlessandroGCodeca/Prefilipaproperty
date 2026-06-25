@@ -43,7 +43,7 @@ def run_pipeline():
 
     # Step 1 — Nehnutelnosti
     try:
-        log.info("Step 1/5 — Nehnutelnosti.sk")
+        log.info("Step 1/7 — Nehnutelnosti.sk")
         from scraper.nehnutelnosti import run as s1
         n = s1(max_pages=10)
         log.info(f"   ✅ {n} listings")
@@ -52,34 +52,53 @@ def run_pipeline():
 
     # Step 2 — Bazos
     try:
-        log.info("Step 2/5 — Bazos.sk")
+        log.info("Step 2/7 — Bazos.sk")
         from scraper.bazos import run as s2
         n = s2(max_pages=10)
         log.info(f"   ✅ {n} listings")
     except Exception as e:
         log.error(f"   ❌ {e}")
 
-    # Step 3 — LV Debt Filter
+    # Step 3 — Topreality
     try:
-        log.info("Step 3/5 — LV Debt Filter")
+        log.info("Step 3/7 — Topreality.sk")
+        from scraper.topreality import run as s3
+        n = s3(max_pages=10)
+        log.info(f"   ✅ {n} listings")
+    except Exception as e:
+        log.error(f"   ❌ {e}")
+
+    # Step 4 — Housekeeping (stale-listing deactivation + dev-project flagging)
+    try:
+        log.info("Step 4/7 — Housekeeping")
+        from database import deactivate_stale_listings, backfill_dev_project_flags
+        stale = deactivate_stale_listings(days=21)
+        dev   = backfill_dev_project_flags()
+        log.info(f"   ✅ Deactivated {stale} stale | flagged {dev} dev projects")
+    except Exception as e:
+        log.error(f"   ❌ {e}")
+
+    # Step 5 — LV Debt Filter
+    try:
+        log.info("Step 5/7 — LV Debt Filter")
         from modules.debt_bot import run_debt_filter
         p, r = run_debt_filter()
         log.info(f"   ✅ Passed: {p} | Rejected: {r}")
     except Exception as e:
         log.error(f"   ❌ {e}")
 
-    # Step 4 — Cash-Flow Scoring
+    # Step 6 — Cash-Flow Scoring
     try:
-        log.info("Step 4/5 — Cash-Flow Scoring")
+        log.info("Step 6/7 — Cash-Flow Scoring")
         from modules.cashflow_runner import run_scoring
         n = run_scoring()
         log.info(f"   ✅ {n} scored")
     except Exception as e:
         log.error(f"   ❌ {e}")
 
-    # Step 5 — Location IQ
+    # Step 7 — Location IQ
     try:
-        log.info("Step 5/5 — Location IQ")
+        log.info("Step 7/7 — Location IQ")
         from modules.location_iq import run_location_scoring
         n = run_location_scoring()
         log.info(f"   ✅ {n} scored")

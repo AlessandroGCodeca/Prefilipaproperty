@@ -43,14 +43,17 @@ sovereign_final/
 ├── requirements.txt
 ├── .env.example              ← Copy to .env
 ├── scraper/
-│   ├── nehnutelnosti.py      ← Nehnutelnosti.sk scraper
-│   └── bazos.py              ← Bazos.sk scraper
+│   ├── nehnutelnosti.py      ← Nehnutelnosti.sk scraper (Playwright)
+│   ├── bazos.py              ← Bazos.sk scraper
+│   └── topreality.py         ← Topreality.sk scraper
 ├── engine/
-│   └── financial.py          ← 2026 Slovak tax engine
-└── modules/
-    ├── debt_bot.py           ← LV title deed checker + Mistral LLM
-    ├── cashflow_runner.py    ← Financial scoring runner
-    └── location_iq.py        ← Google Places location scorer
+│   ├── financial.py          ← 2026 Slovak tax + cashflow engine
+│   └── regional_prices.py    ← Sale-price floor (dev-project filter)
+├── modules/
+│   ├── debt_bot.py           ← LV title deed checker + Mistral LLM
+│   ├── cashflow_runner.py    ← Financial scoring runner
+│   └── location_iq.py        ← Google Places location scorer
+└── dev/                      ← One-off debug/exploration scripts (not runtime)
 ```
 
 ---
@@ -59,21 +62,30 @@ sovereign_final/
 
 | Tab | What it does |
 |-----|-------------|
+| TRIAGE TABLE | Flat, sortable view of every scored listing — composite grade, cap rate, surplus, yield. Default sort: best deal grade first |
 | ACTIVE SNAG LIST | 🟢🟡 deals with full cost breakdown, location IQ, one-click LV re-verify |
 | SATELLITE VIEWER | Listing photo vs Google satellite + Street View + vibe score |
-| s.r.o. vs PERSONAL | Live 2026 tax calculator — both structures side by side |
 | ONE-CLICK CLOSE | Pre-filled Slovak notary contract draft with download |
+
+Each listing also gets a **composite deal grade (A–D)** blending financial
+(cap rate + self-funding ratio), location, energy class and risk flags — so a
+GREEN deal in a poor location doesn't outrank a genuinely solid one.
 
 ---
 
 ## Pipeline (Sidebar Buttons)
 
 ```
-NEHNUT → BAZOS → LV DEBT FILTER → CASHFLOW SCORE → LOCATION IQ
+NEHNUT → BAZOS → TOPREAL → housekeeping → LV DEBT FILTER → CASHFLOW SCORE → LOCATION IQ
 ```
 
+Housekeeping = deactivate stale listings (>21d unseen) + flag dev projects.
 Runs automatically every morning at 06:00 CET via scheduler container.
 Or click buttons in sidebar to run manually anytime.
+
+Changed the rent/tax assumptions in `config.py`? Click **♻️ RESCORE ALL** to
+clear existing scores and re-run scoring (the plain CASHFLOW SCORE button only
+processes listings that have never been scored).
 
 ---
 
@@ -90,11 +102,18 @@ Or click buttons in sidebar to run manually anytime.
 
 ## 2026 Slovak Tax Rates (config.py)
 
-| | Personal | s.r.o. |
+| | Personal (FO) | s.r.o. |
 |--|---------|--------|
-| Income Tax | 19% / 25% | 21% flat |
-| Health Levy | 16% | 0% ← Key saving |
-| Mortgage | 3.4% p.a. | 3.4% p.a. |
+| Income Tax | 19% / 25% | 10% reduced (≤€100k rev) / 21% |
+| Health Levy | **0%** — passive §6(3) rental is exempt from zdravotné odvody | 0% |
+| Dividend tax on distribution | n/a | 10% (→ effective double taxation) |
+| Mortgage | 3.8% p.a. | 3.8% p.a. |
+
+> The personal health levy was previously modelled at 16%, which wrongly
+> over-favoured the s.r.o. route. Passive rental income under §6 ods. 3 of zákon
+> 595/2003 is exempt from health/social contributions; the first €500 is also
+> tax-exempt. s.r.o. deducts mortgage interest (personal §6(3) does not) but
+> pays corporate **and** dividend tax. Confirm specifics with an účtovník.
 
 **Update `config.py` every January.**
 

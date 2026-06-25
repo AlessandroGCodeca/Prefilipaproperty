@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS cashflow_scores (
     property_tax_monthly  REAL,
     vacancy_cost          REAL,
     maintenance_monthly   REAL,
+    management_monthly    REAL,
     income_tax_personal   REAL,
     health_levy_personal  REAL,
     total_costs_personal  REAL,
@@ -83,9 +84,16 @@ CREATE TABLE IF NOT EXISTS cashflow_scores (
     total_costs_sro       REAL,
     surplus_sro           REAL,
     ratio_sro             REAL,
+    noi_monthly           REAL,
+    cap_rate              REAL,
     cash_on_cash          REAL,
     net_rental_yield      REAL,
     gross_yield           REAL,
+    principal_paydown_monthly REAL,
+    total_return_annual   REAL,
+    total_roi             REAL,
+    acquisition_costs     REAL,
+    total_cash_invested   REAL,
     optimal_structure     TEXT,
     classification        TEXT,
     annual_sro_saving     REAL,
@@ -279,11 +287,38 @@ def backfill_dev_project_flags() -> int:
     return len(flagged)
 
 
+# New cashflow_scores columns added with the P1 model overhaul (NOI/cap rate,
+# amortization split, total return, acquisition costs). ALTER existing DBs so
+# upsert_cashflow's INSERT doesn't fail on a missing column.
+_CASHFLOW_NEW_COLUMNS = {
+    "management_monthly":        "REAL",
+    "noi_monthly":               "REAL",
+    "cap_rate":                  "REAL",
+    "principal_paydown_monthly": "REAL",
+    "total_return_annual":       "REAL",
+    "total_roi":                 "REAL",
+    "acquisition_costs":         "REAL",
+    "total_cash_invested":       "REAL",
+}
+
+
+def _ensure_cashflow_columns(conn):
+    """Add P1 cashflow_scores columns to pre-existing DBs. No-op when present."""
+    if not USE_SQLITE_FALLBACK:
+        return
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(cashflow_scores)")]
+    for name, sqltype in _CASHFLOW_NEW_COLUMNS.items():
+        if name not in cols:
+            conn.execute(f"ALTER TABLE cashflow_scores ADD COLUMN {name} {sqltype}")
+    conn.commit()
+
+
 def init_db():
     conn = get_conn()
     if USE_SQLITE_FALLBACK:
         conn.executescript(SQLITE_SCHEMA)
         _ensure_dev_project_column(conn)
+        _ensure_cashflow_columns(conn)
         now = datetime.now(timezone.utc).isoformat()
         for row in RENT_COMPS_SEED:
             conn.execute("""
@@ -309,12 +344,16 @@ def get_all_active():
                c.ratio_personal,       c.ratio_sro,
                c.cash_on_cash,         c.net_rental_yield,
                c.gross_yield,          c.optimal_structure,
+               c.noi_monthly,          c.cap_rate,
+               c.principal_paydown_monthly, c.total_return_annual,
+               c.total_roi,            c.total_cash_invested,
                c.estimated_rent_eur,   c.total_costs_personal,
                c.total_costs_sro,      c.annual_sro_saving,
                c.sro_break_even_months,
                c.mortgage_monthly,     c.hoa_monthly,
                c.property_tax_monthly, c.vacancy_cost,
-               c.maintenance_monthly,  c.income_tax_personal,
+               c.maintenance_monthly,  c.management_monthly,
+               c.income_tax_personal,
                c.health_levy_personal, c.income_tax_sro,
                lc.location_score,      lc.location_tier,
                lc.nearest_transit_m,   lc.walkability_score,
@@ -383,6 +422,28 @@ def deactivate_stale_listings(days: int = 21) -> int:
     return n
 
 
+def clear_cashflow_scores() -> int:
+    """Delete all cashflow scores and reset scored listings back to PENDING so
+    the next 💰 CASHFLOW SCORE run re-scores every listing from scratch.
+
+    Needed whenever the engine's assumptions change (RENT_PER_M2, tax rates,
+    mortgage rate, cost model) — get_unscored_cashflow() only picks up listings
+    with no existing score, so without this the updated figures never reach
+    already-scored rows. Returns the number of score rows removed.
+    """
+    conn = get_conn()
+    try:
+        n = conn.execute("DELETE FROM cashflow_scores").rowcount
+        conn.execute(
+            "UPDATE listings SET classification='PENDING' "
+            "WHERE classification IN ('GREEN','YELLOW','WHITE')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return n
+
+
 def upsert_listing(data: dict):
     conn = get_conn()
     try:
@@ -438,23 +499,29 @@ def upsert_cashflow(data: dict):
     conn.execute("""
         INSERT OR REPLACE INTO cashflow_scores
         (listing_id, estimated_rent_eur, mortgage_monthly, hoa_monthly,
-         property_tax_monthly, vacancy_cost, maintenance_monthly,
+         property_tax_monthly, vacancy_cost, maintenance_monthly, management_monthly,
          income_tax_personal, health_levy_personal, total_costs_personal,
          surplus_personal, ratio_personal,
          income_tax_sro, health_levy_sro, total_costs_sro,
          surplus_sro, ratio_sro,
+         noi_monthly, cap_rate,
          cash_on_cash, net_rental_yield, gross_yield,
+         principal_paydown_monthly, total_return_annual, total_roi,
+         acquisition_costs, total_cash_invested,
          optimal_structure, classification,
          annual_sro_saving, sro_break_even_months,
          scored_at, mortgage_rate_used, ltv_used, loan_term_years)
         VALUES
         (:listing_id,:estimated_rent_eur,:mortgage_monthly,:hoa_monthly,
-         :property_tax_monthly,:vacancy_cost,:maintenance_monthly,
+         :property_tax_monthly,:vacancy_cost,:maintenance_monthly,:management_monthly,
          :income_tax_personal,:health_levy_personal,:total_costs_personal,
          :surplus_personal,:ratio_personal,
          :income_tax_sro,:health_levy_sro,:total_costs_sro,
          :surplus_sro,:ratio_sro,
+         :noi_monthly,:cap_rate,
          :cash_on_cash,:net_rental_yield,:gross_yield,
+         :principal_paydown_monthly,:total_return_annual,:total_roi,
+         :acquisition_costs,:total_cash_invested,
          :optimal_structure,:classification,
          :annual_sro_saving,:sro_break_even_months,
          :scored_at,:mortgage_rate_used,:ltv_used,:loan_term_years)
@@ -514,7 +581,7 @@ def get_pending_lv():
 def get_unscored_cashflow():
     conn = get_conn()
     rows = conn.execute("""
-        SELECT l.id, l.price_eur, l.size_m2, l.district, l.energy_class
+        SELECT l.id, l.price_eur, l.size_m2, l.district, l.energy_class, l.rooms
         FROM listings l
         LEFT JOIN cashflow_scores c ON l.id = c.listing_id
         WHERE l.lv_status != 'REJECTED' AND c.listing_id IS NULL

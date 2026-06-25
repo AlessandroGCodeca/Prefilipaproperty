@@ -98,14 +98,6 @@ def _price_from_text(t: str) -> float:
             pass
     return max(candidates) if candidates else 0.0
 
-    m = re.search(r"(\d{1,3}(?:[\s\xa0  ]\d{3})+|\d{4,8})\s*€", t)
-    if m:
-        try:
-            return float(re.sub(r"[\s\xa0  ]", "", m.group(1)))
-        except Exception:
-            pass
-    return 0.0
-
 
 def _size_from_text(t: str) -> float:
     if not t:

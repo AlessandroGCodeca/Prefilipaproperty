@@ -17,8 +17,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
     MORTGAGE_RATE_PA, LOAN_TERM_YEARS, LTV_RATIO,
     TAX_RATE_PERSONAL_LOW, TAX_RATE_PERSONAL_HIGH, TAX_THRESHOLD_PERSONAL,
-    TAX_RATE_SRO, HEALTH_LEVY_PERSONAL, HEALTH_LEVY_SRO,
-    PROPERTY_TAX_RATE_PA, VACANCY_RATE, MAINTENANCE_RATE,
+    RENTAL_INCOME_EXEMPTION,
+    TAX_RATE_SRO, TAX_RATE_SRO_REDUCED, SRO_REDUCED_REVENUE_LIMIT,
+    DIVIDEND_TAX_RATE,
+    HEALTH_LEVY_PERSONAL, HEALTH_LEVY_SRO,
+    PROPERTY_TAX_RATE_PA, VACANCY_RATE, OWNER_RESERVE_RATE, PROPERTY_MGMT_RATE,
+    ACQUISITION_COST_RATE,
     HOA_SMALL, HOA_MEDIUM, HOA_LARGE, HOA_PREMIUM,
     GREEN_RATIO, YELLOW_RATIO, SRO_SETUP_COST,
     RENT_PER_M2, INDUSTRIAL_ZONES, INDUSTRIAL_RENT_PREMIUM,
@@ -33,14 +37,19 @@ class FinancialResult:
     district:               str
     loan_amount:            float
     equity_invested:        float
+    acquisition_costs:      float
+    total_cash_invested:    float
     estimated_rent:         float
 
     # Shared costs
     mortgage_monthly:       float
+    mortgage_interest_monthly:  float
+    mortgage_principal_monthly: float
     hoa_monthly:            float
     property_tax_monthly:   float
     vacancy_cost:           float
     maintenance_monthly:    float
+    management_monthly:     float
 
     # Personal scenario
     income_tax_personal:    float
@@ -57,9 +66,14 @@ class FinancialResult:
     ratio_sro:              float
 
     # Key metrics
-    cash_on_cash:           float
+    noi_monthly:            float   # net operating income (unlevered, pre-tax)
+    cap_rate:               float   # NOI / price — unlevered yardstick
+    cash_on_cash:           float   # levered cashflow / total cash invested
     net_rental_yield:       float
     gross_yield:            float
+    principal_paydown_monthly: float
+    total_return_annual:    float   # cashflow + principal paydown (excl. appreciation)
+    total_roi:              float   # total return / total cash invested
 
     # Decision
     optimal_structure:      str
@@ -79,6 +93,28 @@ def calc_mortgage(principal: float,
     return principal * (r * (1 + r) ** n) / ((1 + r) ** n - 1)
 
 
+def first_year_amortization(principal: float,
+                            rate: float = MORTGAGE_RATE_PA,
+                            years: int = LOAN_TERM_YEARS) -> tuple[float, float]:
+    """Return (avg monthly interest, avg monthly principal) over the first 12
+    months of an annuity loan. Splitting the payment matters because principal
+    repayment is equity buildup, not a true expense — it shouldn't be counted
+    against the property's return the way interest is."""
+    if principal <= 0:
+        return 0.0, 0.0
+    payment = calc_mortgage(principal, rate, years)
+    r = rate / 12
+    bal = principal
+    interest_total = 0.0
+    for _ in range(12):
+        i = bal * r
+        bal -= (payment - i)
+        interest_total += i
+    interest_mo = interest_total / 12
+    principal_mo = payment - interest_mo
+    return interest_mo, principal_mo
+
+
 def calc_hoa(size_m2: float) -> float:
     if size_m2 < 40:   return HOA_SMALL
     if size_m2 <= 70:  return HOA_MEDIUM
@@ -95,8 +131,20 @@ def calc_income_tax_personal(annual_net: float) -> float:
             (annual_net - TAX_THRESHOLD_PERSONAL) * TAX_RATE_PERSONAL_HIGH)
 
 
-def calc_income_tax_sro(annual_net: float) -> float:
-    return max(annual_net * TAX_RATE_SRO, 0)
+def sro_corporate_rate(annual_revenue: float) -> float:
+    """Reduced corporate rate applies below the small-company revenue limit."""
+    return TAX_RATE_SRO_REDUCED if annual_revenue <= SRO_REDUCED_REVENUE_LIMIT else TAX_RATE_SRO
+
+
+def calc_tax_sro(annual_taxable: float, annual_revenue: float) -> float:
+    """Combined s.r.o. tax on rental profit: corporate income tax PLUS dividend
+    withholding tax on the distributed remainder (the double-taxation that makes
+    s.r.o. less of a slam-dunk than a flat corporate rate suggests)."""
+    if annual_taxable <= 0:
+        return 0.0
+    corp = annual_taxable * sro_corporate_rate(annual_revenue)
+    dividend = max(annual_taxable - corp, 0) * DIVIDEND_TAX_RATE
+    return corp + dividend
 
 
 _CITY_ONLY_KEYS = {"bratislava", "košice"}  # used only as last-resort city fallbacks
@@ -201,29 +249,47 @@ def analyse(
 
     loan_amount     = price_eur * ltv
     equity          = price_eur * (1 - ltv)
+    acquisition     = price_eur * ACQUISITION_COST_RATE
+    cash_invested   = equity + acquisition
     rent            = rent_override or get_rent_estimate(district, size_m2, rooms)
+    annual_rent     = rent * 12
 
-    # Shared monthly costs
+    # Mortgage (annuity) split into interest vs principal — principal is equity
+    # buildup, not an expense, so it's tracked separately for total-return math.
     mortgage_mo     = calc_mortgage(loan_amount)
+    interest_mo, principal_mo = first_year_amortization(loan_amount)
+
+    # ── Operating expenses (exclude debt service & income tax) ────
+    # HOA already includes the fond opráv (building shell); the owner reserve
+    # covers only in-flat capex, so the two don't double-count.
     hoa_mo          = calc_hoa(size_m2)
     prop_tax_mo     = (price_eur * PROPERTY_TAX_RATE_PA) / 12
     vacancy_mo      = rent * VACANCY_RATE
-    maintenance_mo  = (price_eur * MAINTENANCE_RATE) / 12
-    operating_mo    = mortgage_mo + hoa_mo + prop_tax_mo + vacancy_mo + maintenance_mo
+    owner_reserve_mo = rent * OWNER_RESERVE_RATE
+    mgmt_mo         = rent * PROPERTY_MGMT_RATE
+    opex_mo         = hoa_mo + prop_tax_mo + vacancy_mo + owner_reserve_mo + mgmt_mo
 
-    pre_tax_annual  = (rent - operating_mo) * 12
+    # ── NOI & cap rate (unlevered — independent of financing) ─────
+    noi_mo          = rent - opex_mo
+    noi_annual      = noi_mo * 12
+    cap_rate        = noi_annual / price_eur if price_eur > 0 else 0
 
-    # ── Personal scenario ─────────────────────────────────────────
-    tax_p_annual    = calc_income_tax_personal(max(pre_tax_annual, 0))
-    levy_p_annual   = max(pre_tax_annual, 0) * HEALTH_LEVY_PERSONAL
+    # Cash cost of carrying the loan each month (interest + principal).
+    operating_mo    = opex_mo + mortgage_mo
+
+    # ── Personal scenario (passive §6(3): no health levy, €500 exempt) ──
+    taxable_p       = max(noi_annual - RENTAL_INCOME_EXEMPTION, 0)
+    tax_p_annual    = calc_income_tax_personal(taxable_p)
+    levy_p_annual   = taxable_p * HEALTH_LEVY_PERSONAL  # 0 for passive rental
     tax_p_mo        = tax_p_annual / 12
     levy_p_mo       = levy_p_annual / 12
     total_p_mo      = operating_mo + tax_p_mo + levy_p_mo
     surplus_p       = rent - total_p_mo
     ratio_p         = rent / total_p_mo if total_p_mo > 0 else 0
 
-    # ── s.r.o. scenario ───────────────────────────────────────────
-    tax_s_annual    = calc_income_tax_sro(max(pre_tax_annual, 0))
+    # ── s.r.o. scenario (deducts interest; corporate tax + dividend tax) ──
+    taxable_s       = max(noi_annual - interest_mo * 12, 0)
+    tax_s_annual    = calc_tax_sro(taxable_s, annual_rent)
     levy_s_annual   = 0.0  # Exempt
     tax_s_mo        = tax_s_annual / 12
     levy_s_mo       = 0.0
@@ -231,11 +297,15 @@ def analyse(
     surplus_s       = rent - total_s_mo
     ratio_s         = rent / total_s_mo if total_s_mo > 0 else 0
 
-    # ── Key metrics (use s.r.o. as primary — better structure) ────
+    # ── Key metrics (use s.r.o. as primary — usually better structure) ────
     annual_cf_sro   = surplus_s * 12
-    coc             = annual_cf_sro / equity if equity > 0 else 0
+    coc             = annual_cf_sro / cash_invested if cash_invested > 0 else 0
     net_yield       = annual_cf_sro / price_eur if price_eur > 0 else 0
-    gross_yield     = (rent * 12) / price_eur if price_eur > 0 else 0
+    gross_yield     = annual_rent / price_eur if price_eur > 0 else 0
+    principal_paydown_annual = principal_mo * 12
+    # Total return adds equity built via amortization (appreciation NOT modelled).
+    total_return_annual = annual_cf_sro + principal_paydown_annual
+    total_roi       = total_return_annual / cash_invested if cash_invested > 0 else 0
 
     # ── Decision ──────────────────────────────────────────────────
     annual_sro_saving   = (surplus_s - surplus_p) * 12
@@ -276,12 +346,17 @@ def analyse(
         district              = district,
         loan_amount           = loan_amount,
         equity_invested       = equity,
+        acquisition_costs     = round(acquisition, 2),
+        total_cash_invested   = round(cash_invested, 2),
         estimated_rent        = rent,
         mortgage_monthly      = round(mortgage_mo, 2),
+        mortgage_interest_monthly  = round(interest_mo, 2),
+        mortgage_principal_monthly = round(principal_mo, 2),
         hoa_monthly           = round(hoa_mo, 2),
         property_tax_monthly  = round(prop_tax_mo, 2),
         vacancy_cost          = round(vacancy_mo, 2),
-        maintenance_monthly   = round(maintenance_mo, 2),
+        maintenance_monthly   = round(owner_reserve_mo, 2),
+        management_monthly    = round(mgmt_mo, 2),
         income_tax_personal   = round(tax_p_mo, 2),
         health_levy_personal  = round(levy_p_mo, 2),
         total_costs_personal  = round(total_p_mo, 2),
@@ -292,15 +367,85 @@ def analyse(
         total_costs_sro       = round(total_s_mo, 2),
         surplus_sro           = round(surplus_s, 2),
         ratio_sro             = round(ratio_s, 4),
+        noi_monthly           = round(noi_mo, 2),
+        cap_rate              = round(cap_rate, 4),
         cash_on_cash          = round(coc, 4),
         net_rental_yield      = round(net_yield, 4),
         gross_yield           = round(gross_yield, 4),
+        principal_paydown_monthly = round(principal_mo, 2),
+        total_return_annual   = round(total_return_annual, 2),
+        total_roi             = round(total_roi, 4),
         optimal_structure     = optimal,
         annual_sro_saving     = round(annual_sro_saving, 2),
         sro_break_even_months = break_even,
         classification        = cls,
         recommendation        = " ".join(parts),
     )
+
+
+def compute_deal_score(row: dict) -> tuple[int, str]:
+    """Blend financial + location + energy + risk into a single 0–100 deal score
+    and an A–D grade, so ranking reflects more than just financing-sensitive
+    cashflow (a GREEN deal in a POOR location shouldn't outrank a solid one).
+
+    Each component contributes points out of its own max; only components with
+    data are counted, and the score is rescaled to 100 over the available maxima
+    so a missing location score (no Google API) doesn't unfairly sink the grade.
+
+    Components & weights:
+      Financial (50): cap rate (25) + self-funding ratio (25)
+      Location  (30): location_score / 100
+      Energy    (10): A→10, B→7, C→4, else partial
+      Risk      (10): clean LV / no construction / no noise
+
+    Returns (score 0–100, grade in {A,B,C,D}). Returns (0, "—") when there's no
+    financial data to score at all.
+    """
+    points = 0.0
+    max_pts = 0.0
+
+    # ── Financial (cap rate + self-funding ratio) ──
+    cap = row.get("cap_rate")
+    ratio = row.get("ratio_sro")
+    if cap is not None or ratio is not None:
+        if cap is not None:
+            points += max(0.0, min(cap / 0.06, 1.0)) * 25   # 6%+ cap = full marks
+            max_pts += 25
+        if ratio is not None:
+            # 0.80 ratio → 0 pts, 1.15+ (GREEN) → full 25
+            points += max(0.0, min((ratio - 0.80) / 0.35, 1.0)) * 25
+            max_pts += 25
+    else:
+        return 0, "—"
+
+    # ── Location ──
+    loc = row.get("location_score")
+    if loc is not None:
+        points += max(0.0, min(loc / 100.0, 1.0)) * 30
+        max_pts += 30
+
+    # ── Energy class ──
+    energy = (row.get("energy_class") or "").upper()
+    if energy and energy != "UNKNOWN":
+        energy_pts = {"A0": 10, "A1": 10, "A": 10, "B": 7, "C": 4,
+                      "D": 2, "E": 1, "F": 0, "G": 0}.get(energy, 0)
+        points += energy_pts
+        max_pts += 10
+
+    # ── Risk (LV / construction / noise) ──
+    risk_pts = 10
+    if row.get("construction_risk"):
+        risk_pts -= 4
+    if row.get("noise_flag"):
+        risk_pts -= 4
+    if row.get("lv_status") not in ("PASS", "CLEAN", None):
+        risk_pts -= 2
+    points += max(0, risk_pts)
+    max_pts += 10
+
+    score = round(points / max_pts * 100) if max_pts else 0
+    grade = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D"
+    return score, grade
 
 
 def result_to_db_dict(r: FinancialResult) -> dict:
@@ -313,6 +458,7 @@ def result_to_db_dict(r: FinancialResult) -> dict:
         "property_tax_monthly":   r.property_tax_monthly,
         "vacancy_cost":           r.vacancy_cost,
         "maintenance_monthly":    r.maintenance_monthly,
+        "management_monthly":     r.management_monthly,
         "income_tax_personal":    r.income_tax_personal,
         "health_levy_personal":   r.health_levy_personal,
         "total_costs_personal":   r.total_costs_personal,
@@ -323,9 +469,16 @@ def result_to_db_dict(r: FinancialResult) -> dict:
         "total_costs_sro":        r.total_costs_sro,
         "surplus_sro":            r.surplus_sro,
         "ratio_sro":              r.ratio_sro,
+        "noi_monthly":            r.noi_monthly,
+        "cap_rate":               r.cap_rate,
         "cash_on_cash":           r.cash_on_cash,
         "net_rental_yield":       r.net_rental_yield,
         "gross_yield":            r.gross_yield,
+        "principal_paydown_monthly": r.principal_paydown_monthly,
+        "total_return_annual":    r.total_return_annual,
+        "total_roi":              r.total_roi,
+        "acquisition_costs":      r.acquisition_costs,
+        "total_cash_invested":    r.total_cash_invested,
         "optimal_structure":      r.optimal_structure,
         "classification":         r.classification,
         "annual_sro_saving":      r.annual_sro_saving,
