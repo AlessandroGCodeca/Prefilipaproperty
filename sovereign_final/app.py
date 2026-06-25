@@ -442,6 +442,7 @@ def render_card(l):
             st.metric("Surplus/mo",   surplus_str)
             st.metric("Self-Fund",    fp(ratio))
         with c4:
+            st.metric("Cap Rate",   fp(l.get("cap_rate")))
             st.metric("CoC Return", fp(l.get("cash_on_cash")))
             st.metric("Net Yield",  fp(l.get("net_rental_yield")))
         with c5:
@@ -466,13 +467,14 @@ def render_card(l):
         with bc1:
             st.markdown(f'<div class="muted">COST BREAKDOWN — {struct}</div>', unsafe_allow_html=True)
             rows = [
-                ("Mortgage",      l.get("mortgage_monthly")),
-                ("HOA",           l.get("hoa_monthly")),
-                ("Property Tax",  l.get("property_tax_monthly")),
-                ("Vacancy 5%",    l.get("vacancy_cost")),
-                ("Maintenance",   l.get("maintenance_monthly")),
-                ("Income Tax",    l.get("income_tax_sro") if show_sro else l.get("income_tax_personal")),
-                ("Health Levy",   l.get("health_levy_sro") if show_sro else l.get("health_levy_personal")),
+                ("Mortgage",        l.get("mortgage_monthly")),
+                ("HOA (incl. fond opráv)", l.get("hoa_monthly")),
+                ("Property Tax",    l.get("property_tax_monthly")),
+                ("Vacancy 5%",      l.get("vacancy_cost")),
+                ("Owner reserve",   l.get("maintenance_monthly")),
+                ("Management",      l.get("management_monthly")),
+                ("Income Tax",      l.get("income_tax_sro") if show_sro else l.get("income_tax_personal")),
+                ("Health Levy",     l.get("health_levy_sro") if show_sro else l.get("health_levy_personal")),
             ]
             html = ""
             for lbl, val in rows:
@@ -573,6 +575,7 @@ with t0:
                 "Size":     l.get("size_m2")              or 0,
                 "Rent":     l.get("estimated_rent_eur")   or 0,
                 "Surplus":  surplus if surplus is not None else 0,
+                "Cap%":     (l.get("cap_rate")            or 0) * 100,
                 "Yield":    (l.get("net_rental_yield")    or 0) * 100,
                 "URL":      l.get("url") or "",
             })
@@ -592,6 +595,7 @@ with t0:
                 "Size":    st.column_config.NumberColumn(format="%d m²"),
                 "Rent":    st.column_config.NumberColumn(format="€%d"),
                 "Surplus": st.column_config.NumberColumn(format="€%+d"),
+                "Cap%":    st.column_config.NumberColumn(format="%.2f%%"),
                 "Yield":   st.column_config.NumberColumn(format="%.2f%%"),
                 "URL":     st.column_config.LinkColumn(display_text="open ↗"),
             },

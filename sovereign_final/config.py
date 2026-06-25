@@ -12,32 +12,70 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 USE_SQLITE_FALLBACK = not DATABASE_URL  # True when no Postgres available
 
 # ── 2026 Slovak Financial Rates ───────────────────────────────────────────────
-MORTGAGE_RATE_PA       = 0.034   # 3.4% per annum — NBS average Q1 2026
-LOAN_TERM_YEARS        = 25
-LTV_RATIO              = 0.80    # 80% financing assumed
+# Mortgage: NBS new-housing-loan average sat ~3.5% in 2026, bank offers ~3.4–4.0%
+# (sources: NBS avg lending rates; financnykompas.sk; finsider.sk). 3.8% is a
+# representative mid-market figure for a well-qualified borrower at ≤80% LTV.
+MORTGAGE_RATE_PA       = 0.038   # 3.8% per annum — NBS-consistent 2026 average
+LOAN_TERM_YEARS        = 25      # conservative; 30y is the more common max (NBS cap)
+LTV_RATIO              = 0.80    # 80% standard NBS cap for owner-occupied/1st-2nd
+# From 1 Oct 2026 NBS tightens the LTV cap to 70% for a 3rd-and-subsequent
+# residential property (i.e. most pure investors). Use this when modelling an
+# investor who already owns ≥2 properties.
+LTV_RATIO_INVESTOR     = 0.70
 
-# Income tax — Fyzická osoba (personal)
+# Income tax — Fyzická osoba (personal), passive rental under §6 ods. 3
 TAX_RATE_PERSONAL_LOW  = 0.19   # 19% up to threshold
 TAX_RATE_PERSONAL_HIGH = 0.25   # 25% above threshold
-TAX_THRESHOLD_PERSONAL = 41_445 # Annual € threshold 2026
+TAX_THRESHOLD_PERSONAL = 41_445 # Annual € threshold 2026 (verify each January)
+# §9 ods. 1 písm. g): the first €500 of rental income is exempt; expenses are
+# reduced proportionally. Modelled here as a flat €500 deduction from the base.
+RENTAL_INCOME_EXEMPTION = 500
 
-# Income tax — s.r.o.
-TAX_RATE_SRO           = 0.21   # 21% corporate flat rate
+# Income tax — s.r.o. (corporate)
+TAX_RATE_SRO           = 0.21   # 21% standard corporate rate
+# Reduced rate for small companies whose taxable revenue is under the limit.
+# A single rental's gross rent is far below the limit, so this rate normally
+# applies. (2026 figures — verify with an účtovník; rates shifted under the
+# consolidation package.)
+TAX_RATE_SRO_REDUCED       = 0.10
+SRO_REDUCED_REVENUE_LIMIT  = 100_000
+# Withholding tax on dividends when company profit is distributed to the owner.
+# This is what creates s.r.o. double taxation (corporate tax + dividend tax).
+DIVIDEND_TAX_RATE      = 0.10
 
-# Health insurance levy
-HEALTH_LEVY_PERSONAL   = 0.16   # 16% on net rental income (FO)
-HEALTH_LEVY_SRO        = 0.00   # 0% — company exempt
+# Health insurance levy.
+# IMPORTANT: passive rental income under §6 ods. 3 of zákon 595/2003 is NOT
+# subject to health (zdravotné odvody) or social contributions for an
+# individual without a živnosť — so the personal levy is 0, not 16%. The old
+# 16% figure structurally over-recommended the s.r.o. route. (Confirm with an
+# účtovník for your specific situation.)
+HEALTH_LEVY_PERSONAL   = 0.00   # passive rental: exempt from zdravotné odvody
+HEALTH_LEVY_SRO        = 0.00   # company exempt
 
 # Property tax
 PROPERTY_TAX_RATE_PA   = 0.004  # ~0.4% of value annually
 
-# Operating cost estimates
+# Operating cost estimates.
+# HOA = správa + fond opráv. By Act 182/1993 §10 the fond opráv already funds
+# the building shell (roof, facade, elevator, risers, renovation), so we do NOT
+# also charge a value-based building-maintenance reserve on top (that would
+# double-count). Instead OWNER_RESERVE_RATE covers only the owner's in-flat
+# capex (appliances, interior fittings, flooring, paint).
 HOA_SMALL              = 35     # < 40 m²
 HOA_MEDIUM             = 60     # 40–70 m²
 HOA_LARGE              = 90     # > 70 m²
 HOA_PREMIUM            = 130    # > 120 m²
-VACANCY_RATE           = 0.05   # 5%
-MAINTENANCE_RATE       = 0.01   # 1% of value annually
+VACANCY_RATE           = 0.05   # 5% (≈18 days/yr; conservative — BA runs 2–4%)
+OWNER_RESERVE_RATE     = 0.05   # 5% of rent — in-flat capex/appliance reserve
+# Property management fee if the unit is NOT self-managed (~8–10% of rent in SK,
+# plus a ~1-month finder fee). Default 0 = self-managed.
+PROPERTY_MGMT_RATE     = 0.00
+# One-off buyer acquisition costs as a fraction of price, added to the cash
+# invested for an honest cash-on-cash. Slovakia has NO transfer tax; buyer pays
+# cadastre (€50–100), legal/contract (€150–400), valuation (€150–300) and any
+# mortgage fee → ~1% all-in. Agent commission (~2–5%) is normally seller-paid/
+# embedded in the price, so it is not added here by default.
+ACQUISITION_COST_RATE  = 0.01
 
 # ── Classification Thresholds ─────────────────────────────────────────────────
 GREEN_RATIO            = 1.15   # Rent >= 115% of costs
@@ -59,10 +97,13 @@ PRIME_THRESHOLD        = 75
 SOLID_THRESHOLD        = 45
 
 # ── Industrial Zones (worker demand premium) ──────────────────────────────────
+# Only smaller towns built around a single large employer go here. The big
+# cities (Žilina, Nitra, Trnava, Košice, Prešov) were removed: their RENT_PER_M2
+# base rates already reflect local industrial demand, so applying the premium on
+# top double-counted it.
 INDUSTRIAL_ZONES = [
-    "žilina", "nitra", "trnava", "voderady", "šurany",
-    "bytča", "kysucké nové mesto", "nové mesto nad váhom",
-    "košice", "prešov",
+    "voderady", "šurany", "bytča",
+    "kysucké nové mesto", "nové mesto nad váhom",
 ]
 INDUSTRIAL_RENT_PREMIUM = 1.12  # 12% above base comps
 
