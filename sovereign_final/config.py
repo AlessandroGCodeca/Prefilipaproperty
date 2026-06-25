@@ -117,6 +117,7 @@ INDUSTRIAL_RENT_PREMIUM = 1.12  # 12% above base comps
 PARKING_RENT_PREMIUM    = 1.05   # garage / dedicated parking spot: +5%
 FURNISHED_RENT_PREMIUM  = 1.10   # fully furnished: +10%
 SEMI_FURNISHED_PREMIUM  = 1.05   # partially furnished: +5%
+BALCONY_RENT_PREMIUM    = 1.03   # balcony / loggia / terrace: +3% (common, modest)
 
 # ── APIs ──────────────────────────────────────────────────────────────────────
 GOOGLE_API_KEY    = os.getenv("GOOGLE_PLACES_API_KEY", "")

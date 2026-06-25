@@ -27,6 +27,7 @@ from config import (
     GREEN_RATIO, YELLOW_RATIO, SRO_SETUP_COST,
     RENT_PER_M2, INDUSTRIAL_ZONES, INDUSTRIAL_RENT_PREMIUM,
     PARKING_RENT_PREMIUM, FURNISHED_RENT_PREMIUM, SEMI_FURNISHED_PREMIUM,
+    BALCONY_RENT_PREMIUM,
 )
 
 
@@ -189,7 +190,7 @@ def _furnished_multiplier(furnished) -> float:
 
 
 def get_rent_estimate(district: str, size_m2: float, rooms=None,
-                      parking=None, furnished=None) -> float:
+                      parking=None, furnished=None, balcony=None) -> float:
     key = district.lower().strip()
 
     # 1. Exact match — including the city-only keys.
@@ -244,10 +245,13 @@ def get_rent_estimate(district: str, size_m2: float, rooms=None,
         rate *= INDUSTRIAL_RENT_PREMIUM
     rate *= _rooms_multiplier(rooms)
     # Description-derived premiums (only when the description was parsed; a
-    # falsy parking flag and unfurnished/unknown furnishing leave rate untouched).
+    # falsy parking/balcony flag and unfurnished/unknown furnishing leave rate
+    # untouched).
     if parking:
         rate *= PARKING_RENT_PREMIUM
     rate *= _furnished_multiplier(furnished)
+    if balcony:
+        rate *= BALCONY_RENT_PREMIUM
     return round(rate * size_m2, 2)
 
 
@@ -266,6 +270,7 @@ def analyse(
     rooms: Optional[int] = None,
     parking=None,
     furnished=None,
+    balcony=None,
 ) -> FinancialResult:
 
     loan_amount     = price_eur * ltv
@@ -273,7 +278,7 @@ def analyse(
     acquisition     = price_eur * ACQUISITION_COST_RATE
     cash_invested   = equity + acquisition
     rent            = rent_override or get_rent_estimate(
-        district, size_m2, rooms, parking, furnished)
+        district, size_m2, rooms, parking, furnished, balcony)
     annual_rent     = rent * 12
 
     # Mortgage (annuity) split into interest vs principal — principal is equity
@@ -367,6 +372,8 @@ def analyse(
             parts.append("🅿️ Parking premium applied.")
         if _furnished_multiplier(furnished) > 1.0:
             parts.append(f"🛋️ Furnished premium applied ({furnished}).")
+        if balcony:
+            parts.append("🌿 Balcony premium applied.")
 
     return FinancialResult(
         listing_id            = listing_id,

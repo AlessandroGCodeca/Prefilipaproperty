@@ -11,6 +11,7 @@ import pytest
 
 from config import (
     PARKING_RENT_PREMIUM, FURNISHED_RENT_PREMIUM, SEMI_FURNISHED_PREMIUM,
+    BALCONY_RENT_PREMIUM,
 )
 from engine.financial import get_rent_estimate, analyse
 
@@ -52,11 +53,29 @@ class TestFurnishedPremium:
             _base() * FURNISHED_RENT_PREMIUM, rel=0.001)
 
 
+class TestBalconyPremium:
+    def test_balcony_adds_premium(self):
+        assert get_rent_estimate(*BASE_ARGS, balcony=True) == pytest.approx(
+            _base() * BALCONY_RENT_PREMIUM, rel=0.001)
+
+    def test_no_balcony_is_neutral(self):
+        for falsy in (None, 0, False):
+            assert get_rent_estimate(*BASE_ARGS, balcony=falsy) == pytest.approx(
+                _base(), rel=0.001)
+
+
 class TestPremiumComposition:
     def test_parking_and_furnished_compound(self):
         rent = get_rent_estimate(*BASE_ARGS, parking=True, furnished="furnished")
         assert rent == pytest.approx(
             _base() * PARKING_RENT_PREMIUM * FURNISHED_RENT_PREMIUM, rel=0.001)
+
+    def test_all_three_signals_compound(self):
+        rent = get_rent_estimate(*BASE_ARGS, parking=True, furnished="furnished",
+                                 balcony=True)
+        assert rent == pytest.approx(
+            _base() * PARKING_RENT_PREMIUM * FURNISHED_RENT_PREMIUM
+            * BALCONY_RENT_PREMIUM, rel=0.001)
 
     def test_premiums_stack_on_rooms_multiplier(self):
         # 1-izb premium (1.15×) and a parking premium should multiply, not
