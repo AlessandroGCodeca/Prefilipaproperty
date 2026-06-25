@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS listings (
     condition         TEXT,
     desc_parsed       INTEGER DEFAULT 0,
     addr_normalized   INTEGER DEFAULT 0,
+    lv_risk_level     TEXT,
+    lv_summary        TEXT,
     notes             TEXT
 );
 
@@ -320,12 +322,14 @@ def _ensure_cashflow_columns(conn):
 
 
 # Optional LLM-enrichment columns on `listings` (modules/llm_enrichment via the
-# modules/*_enrichment runners). Each *_parsed/*_normalized flag gates the LLM
-# so it's called at most once per listing:
+# modules/*_enrichment runners and modules/debt_bot). Each *_parsed/*_normalized
+# flag gates the LLM so it's called at most once per listing:
 #   - has_parking + furnished feed the rent premium in engine/financial;
 #     desc_parsed gates parse_description().
 #   - addr_normalized gates normalize_address(), which fills a blank district/
 #     city so the rent estimate stops defaulting to the €6.50/m² floor.
+#   - lv_risk_level + lv_summary persist modules/debt_bot's Claude analyze_lv
+#     read so the dashboard can show WHY a title deed passed/failed.
 _ENRICHMENT_COLUMNS = {
     "has_parking":     "INTEGER",
     "has_balcony":     "INTEGER",
@@ -333,6 +337,8 @@ _ENRICHMENT_COLUMNS = {
     "condition":       "TEXT",
     "desc_parsed":     "INTEGER DEFAULT 0",
     "addr_normalized": "INTEGER DEFAULT 0",
+    "lv_risk_level":   "TEXT",
+    "lv_summary":      "TEXT",
 }
 
 
@@ -603,6 +609,22 @@ def set_lv_status(listing_id: str, status: str, reason: str = "", detail: str = 
               datetime.now(timezone.utc).isoformat()))
     conn.commit()
     conn.close()
+
+
+def set_lv_analysis(listing_id: str, risk_level: str, summary: str = ""):
+    """Persist Claude's analyze_lv read (modules/debt_bot._decide_lv) so the
+    dashboard can show the title-deed risk level and rationale. Previously this
+    was computed and discarded. No-op-safe on older DBs via the column migration."""
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        conn.execute(
+            "UPDATE listings SET lv_risk_level=?, lv_summary=? WHERE id=?",
+            (risk_level or None, (summary or "")[:1000] or None, listing_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def get_pending_lv():
