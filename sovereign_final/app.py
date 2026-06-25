@@ -188,6 +188,11 @@ with st.sidebar:
                               "extract parking / furnished / condition. Needs "
                               "ANTHROPIC_API_KEY. Re-score afterwards to apply the "
                               "parking & furnished rent premiums.")
+    do_addr  = st.button("🗺️ NORM ADDR", use_container_width=True,
+                         help="Run Claude on listings with a blank district to "
+                              "resolve city/district from the raw address, so rent "
+                              "stops defaulting to €6.50/m². Needs ANTHROPIC_API_KEY. "
+                              "Re-score afterwards to apply.")
     do_rescore = st.button("♻️ RESCORE ALL",  use_container_width=True,
                            help="Clear all cashflow scores and re-run scoring from "
                                 "scratch. Use after updating rent/tax assumptions.")
@@ -275,6 +280,8 @@ if do_nehnut:
         if err:
             st.error(f"❌ Nehnutelnosti: {err}")
         else:
+            from modules.address_enrichment import run_address_enrichment
+            run_address_enrichment()
             from modules.description_enrichment import run_description_enrichment
             run_description_enrichment()
             from modules.cashflow_runner import run_scoring as _run_cf
@@ -288,6 +295,8 @@ if do_bazos:
         if err:
             st.error(f"❌ Bazos: {err}")
         else:
+            from modules.address_enrichment import run_address_enrichment
+            run_address_enrichment()
             from modules.description_enrichment import run_description_enrichment
             run_description_enrichment()
             from modules.cashflow_runner import run_scoring as _run_cf
@@ -301,6 +310,8 @@ if do_topreal:
         if err:
             st.error(f"❌ Topreality: {err}")
         else:
+            from modules.address_enrichment import run_address_enrichment
+            run_address_enrichment()
             from modules.description_enrichment import run_description_enrichment
             run_description_enrichment()
             from modules.cashflow_runner import run_scoring as _run_cf
@@ -336,6 +347,19 @@ if do_desc:
     else:
         st.info("ℹ️ Nothing parsed — set ANTHROPIC_API_KEY, or no new descriptions "
                 "to parse.")
+    st.rerun()
+
+if do_addr:
+    bar = st.progress(0)
+    def addr_cb(i, n): bar.progress(i / n)
+    from modules.address_enrichment import run_address_enrichment
+    n = run_address_enrichment(progress_callback=addr_cb)
+    bar.empty()
+    if n:
+        st.success(f"✅ Resolved {n} blank districts. Re-score to apply rent rates.")
+    else:
+        st.info("ℹ️ Nothing normalized — set ANTHROPIC_API_KEY, or no blank "
+                "districts with an address to resolve.")
     st.rerun()
 
 if do_rescore:

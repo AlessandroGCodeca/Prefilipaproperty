@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS listings (
     furnished         TEXT,
     condition         TEXT,
     desc_parsed       INTEGER DEFAULT 0,
+    addr_normalized   INTEGER DEFAULT 0,
     notes             TEXT
 );
 
@@ -318,26 +319,29 @@ def _ensure_cashflow_columns(conn):
     conn.commit()
 
 
-# Structured features parsed out of each listing's free-text description by
-# modules/llm_enrichment.parse_description (wired in via
-# modules/description_enrichment). has_parking + furnished feed the rent
-# premium in engine/financial; desc_parsed gates re-parsing so the LLM is
-# called at most once per listing.
-_DESCRIPTION_COLUMNS = {
-    "has_parking": "INTEGER",
-    "has_balcony": "INTEGER",
-    "furnished":   "TEXT",
-    "condition":   "TEXT",
-    "desc_parsed": "INTEGER DEFAULT 0",
+# Optional LLM-enrichment columns on `listings` (modules/llm_enrichment via the
+# modules/*_enrichment runners). Each *_parsed/*_normalized flag gates the LLM
+# so it's called at most once per listing:
+#   - has_parking + furnished feed the rent premium in engine/financial;
+#     desc_parsed gates parse_description().
+#   - addr_normalized gates normalize_address(), which fills a blank district/
+#     city so the rent estimate stops defaulting to the €6.50/m² floor.
+_ENRICHMENT_COLUMNS = {
+    "has_parking":     "INTEGER",
+    "has_balcony":     "INTEGER",
+    "furnished":       "TEXT",
+    "condition":       "TEXT",
+    "desc_parsed":     "INTEGER DEFAULT 0",
+    "addr_normalized": "INTEGER DEFAULT 0",
 }
 
 
-def _ensure_description_columns(conn):
-    """Add description-enrichment columns to pre-existing DBs. No-op when present."""
+def _ensure_enrichment_columns(conn):
+    """Add optional LLM-enrichment columns to pre-existing DBs. No-op when present."""
     if not USE_SQLITE_FALLBACK:
         return
     cols = [row[1] for row in conn.execute("PRAGMA table_info(listings)")]
-    for name, sqltype in _DESCRIPTION_COLUMNS.items():
+    for name, sqltype in _ENRICHMENT_COLUMNS.items():
         if name not in cols:
             conn.execute(f"ALTER TABLE listings ADD COLUMN {name} {sqltype}")
     conn.commit()
@@ -349,7 +353,7 @@ def init_db():
         conn.executescript(SQLITE_SCHEMA)
         _ensure_dev_project_column(conn)
         _ensure_cashflow_columns(conn)
-        _ensure_description_columns(conn)
+        _ensure_enrichment_columns(conn)
         now = datetime.now(timezone.utc).isoformat()
         for row in RENT_COMPS_SEED:
             conn.execute("""
@@ -633,7 +637,7 @@ def get_unparsed_descriptions(limit: int = 200):
     parse, so transient enrichment failures get retried on a later run."""
     conn = get_conn()
     try:
-        _ensure_description_columns(conn)
+        _ensure_enrichment_columns(conn)
         rows = conn.execute("""
             SELECT id, description
             FROM listings
@@ -653,7 +657,7 @@ def update_description_features(listing_id: str, features: dict):
     `features` keys: has_parking, has_balcony, furnished, condition."""
     conn = get_conn()
     try:
-        _ensure_description_columns(conn)
+        _ensure_enrichment_columns(conn)
         conn.execute("""
             UPDATE listings SET
                 has_parking = ?, has_balcony = ?,
@@ -667,6 +671,53 @@ def update_description_features(listing_id: str, features: dict):
             features.get("condition"),
             listing_id,
         ))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_unnormalized_addresses(limit: int = 200):
+    """Active listings that have a raw address but a blank district (so the rent
+    estimate falls to the €6.50/m² default) and haven't been normalized yet.
+    addr_normalized stays 0 until a normalize_address() call returns (success or
+    a definitive empty result), so only transient failures get retried."""
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        rows = conn.execute("""
+            SELECT id, address_raw
+            FROM listings
+            WHERE is_active=1
+              AND address_raw IS NOT NULL AND address_raw != ''
+              AND (district IS NULL OR district = '')
+              AND (addr_normalized IS NULL OR addr_normalized = 0)
+            ORDER BY scraped_at DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_address(listing_id: str, district: str, city: str):
+    """Persist a normalized district/city and mark the row normalized.
+
+    Only fills blanks: district is set when a non-empty value was resolved; city
+    is set only when it was previously blank — so a good scraped city is never
+    clobbered. addr_normalized is set regardless (even on an empty resolution)
+    so an unresolvable address isn't re-sent to the LLM every run.
+    """
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        conn.execute("""
+            UPDATE listings SET
+                district = CASE WHEN ? != '' THEN ? ELSE district END,
+                city = CASE WHEN (city IS NULL OR city = '') AND ? != ''
+                            THEN ? ELSE city END,
+                addr_normalized = 1
+            WHERE id = ?
+        """, (district, district, city, city, listing_id))
         conn.commit()
     finally:
         conn.close()
