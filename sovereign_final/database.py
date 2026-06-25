@@ -383,6 +383,28 @@ def deactivate_stale_listings(days: int = 21) -> int:
     return n
 
 
+def clear_cashflow_scores() -> int:
+    """Delete all cashflow scores and reset scored listings back to PENDING so
+    the next 💰 CASHFLOW SCORE run re-scores every listing from scratch.
+
+    Needed whenever the engine's assumptions change (RENT_PER_M2, tax rates,
+    mortgage rate, cost model) — get_unscored_cashflow() only picks up listings
+    with no existing score, so without this the updated figures never reach
+    already-scored rows. Returns the number of score rows removed.
+    """
+    conn = get_conn()
+    try:
+        n = conn.execute("DELETE FROM cashflow_scores").rowcount
+        conn.execute(
+            "UPDATE listings SET classification='PENDING' "
+            "WHERE classification IN ('GREEN','YELLOW','WHITE')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return n
+
+
 def upsert_listing(data: dict):
     conn = get_conn()
     try:
@@ -514,7 +536,7 @@ def get_pending_lv():
 def get_unscored_cashflow():
     conn = get_conn()
     rows = conn.execute("""
-        SELECT l.id, l.price_eur, l.size_m2, l.district, l.energy_class
+        SELECT l.id, l.price_eur, l.size_m2, l.district, l.energy_class, l.rooms
         FROM listings l
         LEFT JOIN cashflow_scores c ON l.id = c.listing_id
         WHERE l.lv_status != 'REJECTED' AND c.listing_id IS NULL

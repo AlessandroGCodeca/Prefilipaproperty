@@ -177,6 +177,9 @@ with st.sidebar:
     with c3: do_topreal= st.button("TOPREAL", use_container_width=True)
     do_lv    = st.button("🔒 LV DEBT FILTER", use_container_width=True)
     do_cf    = st.button("💰 CASHFLOW SCORE", use_container_width=True)
+    do_rescore = st.button("♻️ RESCORE ALL",  use_container_width=True,
+                           help="Clear all cashflow scores and re-run scoring from "
+                                "scratch. Use after updating rent/tax assumptions.")
     do_loc   = st.button("📍 LOCATION IQ",    use_container_width=True)
     do_stale = st.button("🧹 CLEAN STALE (21d)", use_container_width=True)
     do_test  = st.button("🔗 TEST SITES",      use_container_width=True)
@@ -304,6 +307,17 @@ if do_cf:
     from modules.cashflow_runner import run_scoring
     n = run_scoring(progress_callback=cf_cb)
     bar.empty(); st.success(f"✅ Scored {n} listings"); st.rerun()
+
+if do_rescore:
+    from database import clear_cashflow_scores
+    from modules.cashflow_runner import run_scoring
+    cleared = clear_cashflow_scores()
+    bar = st.progress(0)
+    def rescore_cb(i, n): bar.progress(i/n)
+    n = run_scoring(progress_callback=rescore_cb)
+    bar.empty()
+    st.success(f"✅ Cleared {cleared} old scores, re-scored {n} listings")
+    st.rerun()
 
 if do_loc:
     bar = st.progress(0); txt = st.empty()
@@ -708,6 +722,12 @@ with t3:
                 st.error("Enter buyer name first.")
             else:
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                # Pre-format optional numeric fields — an f-string format spec
+                # can't contain a conditional, so build these strings first.
+                _surplus = sel3.get("surplus_sro")
+                _saving  = sel3.get("annual_sro_saving")
+                surplus_str = f"€{_surplus:,.0f}" if isinstance(_surplus, (int, float)) else "—"
+                saving_str  = f"€{_saving:,.0f}"  if isinstance(_saving,  (int, float)) else "—"
                 draft = f"""
 ╔══════════════════════════════════════════════════════════╗
 ║         KÚPNA ZMLUVA — DRAFT / NÁVRH ZMLUVY             ║
@@ -777,8 +797,8 @@ Miesto:  [Doplniť]
 
 FINANČNÁ ANALÝZA (pre interné účely):
 
-s.r.o. surplus/mo:  €{sel3.get('surplus_sro','—'):,.0f if isinstance(sel3.get('surplus_sro'),float) else '—'}
-Ročná úspora s.r.o.: €{sel3.get('annual_sro_saving','—'):,.0f if isinstance(sel3.get('annual_sro_saving'),float) else '—'}
+s.r.o. surplus/mo:  {surplus_str}
+Ročná úspora s.r.o.: {saving_str}
 Net Yield:           {(sel3.get('net_rental_yield',0) or 0)*100:.2f}%
 LV overenie:        {sel3.get('lv_status','PENDING')} — OVERIŤ 48H PRED PODPISOM
 
