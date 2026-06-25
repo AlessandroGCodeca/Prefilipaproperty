@@ -449,9 +449,16 @@ def render_card(l):
             st.metric("Location",   f"{l.get('location_score','—')}/100")
             st.metric("Transit",    f"{transit:.0f}m" if transit else "—")
 
+        # Composite deal grade (financial + location + energy + risk)
+        from engine.financial import compute_deal_score
+        deal_score, deal_grade = compute_deal_score(l)
+        grade_css = {"A": "bg", "B": "bs", "C": "by", "D": "bw"}.get(deal_grade, "bw")
+
         # Badges
         badges = (
             badge(css_cls, cls) + " " +
+            (f'<span class="badge {grade_css}">GRADE {deal_grade} · {deal_score}</span> '
+             if deal_grade != "—" else "") +
             f'<span class="badge bo">{"s.r.o." if opt=="SRO" else "PERSONAL"}</span>' + " " +
             tier_badge(loc_tier) +
             (f' <span class="badge bg">⚙️ INDUSTRIAL</span>' if ind else "") +
@@ -561,13 +568,17 @@ with t0:
     if not scored:
         st.info("No scored listings yet — run the pipeline (NEHNUT / BAZOS / TOPREAL → 💰 CASHFLOW SCORE) to populate this view.")
     else:
+        from engine.financial import compute_deal_score
         emoji_map = {"GREEN": "🟢", "YELLOW": "🟡", "WHITE": "⚪", "PENDING": "⏳"}
         triage_rows = []
         for l in scored:
             cls = (l.get("cf_class") or l.get("classification") or "PENDING").upper()
             surplus = l.get("surplus_sro") if show_sro else l.get("surplus_personal")
+            score, grade = compute_deal_score(l)
             triage_rows.append({
                 "": emoji_map.get(cls, ""),
+                "Grade":    grade,
+                "Score":    score,
                 "Title":    (l.get("title") or l.get("district") or "—")[:50],
                 "District": l.get("district") or "—",
                 "Src":      (l.get("source") or "").upper()[:5],
@@ -579,10 +590,13 @@ with t0:
                 "Yield":    (l.get("net_rental_yield")    or 0) * 100,
                 "URL":      l.get("url") or "",
             })
-        df = pd.DataFrame(triage_rows).sort_values("Surplus", ascending=False)
+        df = pd.DataFrame(triage_rows).sort_values(
+            ["Score", "Surplus"], ascending=[False, False]
+        )
         st.markdown(
-            f'<div class="muted">{len(df)} scored listings — sorted by '
-            f'{"s.r.o." if show_sro else "personal"} surplus/mo. Click column header to re-sort.</div>',
+            f'<div class="muted">{len(df)} scored listings — sorted by composite deal '
+            f'grade (financial + location + energy + risk), then '
+            f'{"s.r.o." if show_sro else "personal"} surplus. Click any header to re-sort.</div>',
             unsafe_allow_html=True,
         )
         st.dataframe(
@@ -591,6 +605,7 @@ with t0:
             hide_index=True,
             height=min(600, 40 + 35 * len(df)),
             column_config={
+                "Score":   st.column_config.NumberColumn(format="%d", help="0–100 composite deal score"),
                 "Price":   st.column_config.NumberColumn(format="€%d"),
                 "Size":    st.column_config.NumberColumn(format="%d m²"),
                 "Rent":    st.column_config.NumberColumn(format="€%d"),

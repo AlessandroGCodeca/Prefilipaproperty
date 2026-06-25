@@ -383,6 +383,71 @@ def analyse(
     )
 
 
+def compute_deal_score(row: dict) -> tuple[int, str]:
+    """Blend financial + location + energy + risk into a single 0–100 deal score
+    and an A–D grade, so ranking reflects more than just financing-sensitive
+    cashflow (a GREEN deal in a POOR location shouldn't outrank a solid one).
+
+    Each component contributes points out of its own max; only components with
+    data are counted, and the score is rescaled to 100 over the available maxima
+    so a missing location score (no Google API) doesn't unfairly sink the grade.
+
+    Components & weights:
+      Financial (50): cap rate (25) + self-funding ratio (25)
+      Location  (30): location_score / 100
+      Energy    (10): A→10, B→7, C→4, else partial
+      Risk      (10): clean LV / no construction / no noise
+
+    Returns (score 0–100, grade in {A,B,C,D}). Returns (0, "—") when there's no
+    financial data to score at all.
+    """
+    points = 0.0
+    max_pts = 0.0
+
+    # ── Financial (cap rate + self-funding ratio) ──
+    cap = row.get("cap_rate")
+    ratio = row.get("ratio_sro")
+    if cap is not None or ratio is not None:
+        if cap is not None:
+            points += max(0.0, min(cap / 0.06, 1.0)) * 25   # 6%+ cap = full marks
+            max_pts += 25
+        if ratio is not None:
+            # 0.80 ratio → 0 pts, 1.15+ (GREEN) → full 25
+            points += max(0.0, min((ratio - 0.80) / 0.35, 1.0)) * 25
+            max_pts += 25
+    else:
+        return 0, "—"
+
+    # ── Location ──
+    loc = row.get("location_score")
+    if loc is not None:
+        points += max(0.0, min(loc / 100.0, 1.0)) * 30
+        max_pts += 30
+
+    # ── Energy class ──
+    energy = (row.get("energy_class") or "").upper()
+    if energy and energy != "UNKNOWN":
+        energy_pts = {"A0": 10, "A1": 10, "A": 10, "B": 7, "C": 4,
+                      "D": 2, "E": 1, "F": 0, "G": 0}.get(energy, 0)
+        points += energy_pts
+        max_pts += 10
+
+    # ── Risk (LV / construction / noise) ──
+    risk_pts = 10
+    if row.get("construction_risk"):
+        risk_pts -= 4
+    if row.get("noise_flag"):
+        risk_pts -= 4
+    if row.get("lv_status") not in ("PASS", "CLEAN", None):
+        risk_pts -= 2
+    points += max(0, risk_pts)
+    max_pts += 10
+
+    score = round(points / max_pts * 100) if max_pts else 0
+    grade = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D"
+    return score, grade
+
+
 def result_to_db_dict(r: FinancialResult) -> dict:
     """Convert FinancialResult to flat dict for database insertion."""
     return {
