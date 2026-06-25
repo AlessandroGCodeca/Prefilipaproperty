@@ -219,6 +219,22 @@ with st.sidebar:
         placeholder="e.g. Bratislava, Petržalka, Košice",
         help="Case-insensitive substring match. Leave blank to show all.",
     )
+    cond_filter = st.multiselect(
+        "Condition",
+        ["new", "renovated", "good", "original", "poor"],
+        default=[],
+        help="Renovation state parsed from the description. "
+             "Empty = show all (including unparsed/unknown).",
+    )
+    req_parking = st.toggle(
+        "🅿️ Parking only", value=False,
+        help="Show only listings with a garage or parking spot "
+             "(parsed from the description).",
+    )
+    req_furnished = st.toggle(
+        "🛋️ Furnished only", value=False,
+        help="Show only fully or semi-furnished listings.",
+    )
     hide_dev   = st.toggle(
         "Hide dev projects",
         value=True,
@@ -426,6 +442,9 @@ data = [l for l in data
         and (not classes or (l.get("classification") or "PENDING") in classes)
         and (not sources or (l.get("source") or "") in sources)
         and (not district_needle or district_needle in (l.get("district") or "").lower())
+        and (not cond_filter or (l.get("condition") or "").lower() in cond_filter)
+        and (not req_parking or (l.get("has_parking") or 0))
+        and (not req_furnished or (l.get("furnished") or "") in ("furnished", "semi"))
         and (not hide_dev or not (l.get("is_dev_project") or 0))]
 
 
@@ -524,15 +543,23 @@ def render_card(l):
         grade_css = {"A": "bg", "B": "bs", "C": "by", "D": "bw"}.get(deal_grade, "bw")
 
         # Badges
+        lv_risk = (l.get("lv_risk_level") or "").upper()
+        lv_css  = {"LOW": "bg", "MEDIUM": "by", "HIGH": "br"}.get(lv_risk, "bw")
         badges = (
             badge(css_cls, cls) + " " +
             (f'<span class="badge {grade_css}">GRADE {deal_grade} · {deal_score}</span> '
              if deal_grade != "—" else "") +
             f'<span class="badge bo">{"s.r.o." if opt=="SRO" else "PERSONAL"}</span>' + " " +
             tier_badge(loc_tier) +
-            (f' <span class="badge bg">⚙️ INDUSTRIAL</span>' if ind else "")
+            (f' <span class="badge bg">⚙️ INDUSTRIAL</span>' if ind else "") +
+            (f' <span class="badge {lv_css}">⚖️ LV {lv_risk}</span>' if lv_risk else "")
         )
         st.markdown(badges, unsafe_allow_html=True)
+        if l.get("lv_summary"):
+            st.markdown(
+                f'<div class="muted" style="margin-top:6px">⚖️ LV: {l["lv_summary"]}</div>',
+                unsafe_allow_html=True,
+            )
 
         st.markdown('<hr class="div">', unsafe_allow_html=True)
 
@@ -650,6 +677,7 @@ with t0:
                 "Title":    (l.get("title") or l.get("district") or "—")[:50],
                 "District": l.get("district") or "—",
                 "Features": _features_label(l),
+                "LV":       l.get("lv_risk_level") or "—",
                 "Src":      (l.get("source") or "").upper()[:5],
                 "Price":    l.get("price_eur")            or 0,
                 "Size":     l.get("size_m2")              or 0,

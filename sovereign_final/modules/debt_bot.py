@@ -25,7 +25,7 @@ from config import (
     CADASTRAL_API_KEY, CADASTRAL_DELAY_SEC, CADASTRAL_BACKOFF_MAX,
     LV_REJECT_FLAGS, LV_BANK_NAMES, DMR_ENDPOINT, LLM_MODEL,
 )
-from database import get_pending_lv, set_lv_status, get_conn, init_db
+from database import get_pending_lv, set_lv_status, set_lv_analysis, get_conn, init_db
 from modules.llm_enrichment import is_enabled as claude_enabled, analyze_lv as claude_analyze_lv
 
 CADASTRAL_BASE = "https://kataster.skgeodesy.sk/PortalOGC/rest/services/vgi_kn"
@@ -209,6 +209,10 @@ def run_debt_filter(progress_callback=None) -> tuple[int, int]:
         # Claude-authoritative refinement (no-op when disabled / no LV text).
         result = _decide_lv(result)
 
+        # Persist Claude's risk read (when it ran) for the dashboard.
+        if result.get("llm_risk_level"):
+            set_lv_analysis(lid, result["llm_risk_level"], result.get("llm_analysis", ""))
+
         if result["status"] == "REJECT":
             set_lv_status(lid, "REJECTED", result.get("flag","DEBT_FLAG"), result["detail"])
             rejected += 1
@@ -236,6 +240,8 @@ def reverify(listing_id: str) -> dict:
         return {"status": "ERROR", "detail": "Not found"}
     result = query_lv_api(row[0] or "", row[1] or "")
     result = _decide_lv(result)
+    if result.get("llm_risk_level"):
+        set_lv_analysis(listing_id, result["llm_risk_level"], result.get("llm_analysis", ""))
     status = "REJECTED" if result["status"] == "REJECT" else "PASS"
     set_lv_status(listing_id, status,
                   result.get("flag",""), result.get("detail",""),
