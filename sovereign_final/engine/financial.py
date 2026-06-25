@@ -425,6 +425,8 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
       Financial (50): cap rate (25) + self-funding ratio (25)
       Location  (30): location_score / 100
       Energy    (10): A→10, B→7, C→4, else partial
+      Condition (10): new→10, renovated→8, good→5, original→2, poor→0
+                      (parsed from the listing description; skipped when unknown)
       Risk      (10): clean LV / no construction / no noise
 
     Returns (score 0–100, grade in {A,B,C,D}). Returns (0, "—") when there's no
@@ -459,6 +461,15 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
         energy_pts = {"A0": 10, "A1": 10, "A": 10, "B": 7, "C": 4,
                       "D": 2, "E": 1, "F": 0, "G": 0}.get(energy, 0)
         points += energy_pts
+        max_pts += 10
+
+    # ── Condition (renovation state parsed from the description) ──
+    # Mirrors the energy component: only counted when a real condition is known,
+    # so listings without a parsed description aren't penalised or rescaled.
+    condition = (row.get("condition") or "").lower()
+    cond_pts = {"new": 10, "renovated": 8, "good": 5, "original": 2, "poor": 0}
+    if condition in cond_pts:
+        points += cond_pts[condition]
         max_pts += 10
 
     # ── Risk (LV / construction / noise) ──
