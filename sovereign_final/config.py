@@ -117,6 +117,16 @@ LLM_MODEL         = os.getenv("LLM_MODEL", "mistral:7b-instruct-q4_k_m")
 # from a server/cloud environment. Free tier: https://www.scraperapi.com
 SCRAPER_API_KEY   = os.getenv("SCRAPER_API_KEY", "")
 
+# Anthropic Claude — optional cloud LLM for listing enrichment (parsing Slovak
+# free-text descriptions, normalising blank districts, structured LV analysis).
+# NEVER hard-code the key here. It is read from the .env file (gitignored), so
+# the secret never lands in the repository. Leave blank to disable — every
+# enrichment helper degrades gracefully when no key is set.
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+# Sonnet is the cost-appropriate default for high-volume enrichment; override
+# via the ANTHROPIC_MODEL env var if you want a different tier.
+ANTHROPIC_MODEL   = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+
 # ── Scraper ───────────────────────────────────────────────────────────────────
 SCRAPE_DELAY_SEC       = 2.5
 CADASTRAL_DELAY_SEC    = 1.5
