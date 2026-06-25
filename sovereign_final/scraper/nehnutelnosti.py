@@ -367,6 +367,10 @@ def _merge_ld(data: dict, ld) -> None:
     if name and not data.get("title"):
         data["title"] = str(name)[:200]
 
+    desc = ld.get("description")
+    if desc and not data.get("description"):
+        data["description"] = str(desc)
+
     img = ld.get("image")
     if img and not data.get("image"):
         if isinstance(img, list) and img:
@@ -474,6 +478,15 @@ def _scrape_detail_page(page, url: str) -> dict:
             if m:
                 t = re.sub(r'\s*[\|\-]\s*[Nn]ehnute.*$', '', m.group(1)).strip()
                 data["title"] = t[:200]
+
+    # Description — JSON-LD carries the full free text when present; fall back
+    # to the meta description (truncated, but enough for feature extraction).
+    if not data.get("description"):
+        m = re.search(r'<meta\s+property="og:description"\s+content="([^"]+)"', html)
+        if not m:
+            m = re.search(r'<meta\s+name="description"\s+content="([^"]+)"', html)
+        if m:
+            data["description"] = m.group(1)
 
     # 3. For price/size/energy/address, regex on rendered visible text — more
     #    reliable than HTML because these fields are often split across spans.
@@ -648,6 +661,10 @@ def _apply_detail(listing: dict, detail: dict) -> None:
     """Overlay enrichment data onto a minimal listing record."""
     if detail.get("title") and not listing.get("title"):
         listing["title"] = detail["title"][:200]
+    if detail.get("description") and not listing.get("description"):
+        # Stored for modules/description_enrichment to parse later; capped so a
+        # pathological listing can't bloat the row.
+        listing["description"] = detail["description"][:8000]
     if detail.get("price"):
         listing["price_eur"] = detail["price"]
     if detail.get("size"):

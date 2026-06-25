@@ -208,6 +208,8 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
                 continue
             if not title and b.get("name"):
                 title = str(b["name"])
+            if b.get("description") and not ld_data.get("description"):
+                ld_data["description"] = str(b["description"])
             offers = b.get("offers")
             if isinstance(offers, list) and offers:
                 offers = offers[0]
@@ -252,6 +254,15 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
 
     energy = _energy_from_text(body_text)
 
+    # Description for modules/description_enrichment — JSON-LD first, then the
+    # meta description as a (truncated) fallback.
+    description = ld_data.get("description", "")
+    if not description:
+        og_desc = soup.find("meta", attrs={"property": "og:description"}) \
+            or soup.find("meta", attrs={"name": "description"})
+        if og_desc and og_desc.get("content"):
+            description = og_desc["content"]
+
     if not (price or size):
         # Listing has no usable data — likely an archived page or category link
         return None
@@ -259,7 +270,7 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
     uid = hashlib.md5(url.encode()).hexdigest()
     return {
         "id": uid, "source": "topreality", "url": url, "url_hash": uid,
-        "title": (title or "")[:200], "description": "",
+        "title": (title or "")[:200], "description": (description or "")[:8000],
         "price_eur": float(price or 0.0), "size_m2": float(size or 0.0),
         "rooms": None, "floor": None, "year_built": None,
         "energy_class": energy,

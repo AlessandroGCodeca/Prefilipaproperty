@@ -31,6 +31,8 @@ def run_scoring(progress_callback=None) -> int:
                 district   = row.get("district") or "",
                 listing_id = row["id"],
                 rooms      = row.get("rooms"),
+                parking    = row.get("has_parking"),
+                furnished  = row.get("furnished"),
             )
             db_data = result_to_db_dict(result)
             upsert_cashflow(db_data)
