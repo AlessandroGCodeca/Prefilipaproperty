@@ -107,6 +107,17 @@ INDUSTRIAL_ZONES = [
 ]
 INDUSTRIAL_RENT_PREMIUM = 1.12  # 12% above base comps
 
+# ── Description-derived rent premiums ─────────────────────────────────────────
+# Features parsed out of the free-text listing description by
+# modules/llm_enrichment.parse_description() that materially raise achievable
+# rent. Conservative, multiplicative on top of the base €/m² rate, and applied
+# only when the description was actually parsed (otherwise neutral). Sources:
+# Bencont/Deloitte rent splits showing dedicated parking and furnished units
+# rent at a premium across Slovak cities.
+PARKING_RENT_PREMIUM    = 1.05   # garage / dedicated parking spot: +5%
+FURNISHED_RENT_PREMIUM  = 1.10   # fully furnished: +10%
+SEMI_FURNISHED_PREMIUM  = 1.05   # partially furnished: +5%
+
 # ── APIs ──────────────────────────────────────────────────────────────────────
 GOOGLE_API_KEY    = os.getenv("GOOGLE_PLACES_API_KEY", "")
 CADASTRAL_API_KEY = os.getenv("CADASTRAL_API_KEY", "")

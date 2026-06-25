@@ -26,6 +26,7 @@ from config import (
     HOA_SMALL, HOA_MEDIUM, HOA_LARGE, HOA_PREMIUM,
     GREEN_RATIO, YELLOW_RATIO, SRO_SETUP_COST,
     RENT_PER_M2, INDUSTRIAL_ZONES, INDUSTRIAL_RENT_PREMIUM,
+    PARKING_RENT_PREMIUM, FURNISHED_RENT_PREMIUM, SEMI_FURNISHED_PREMIUM,
 )
 
 
@@ -175,7 +176,20 @@ def _rooms_multiplier(rooms) -> float:
     return ROOMS_RENT_MULTIPLIER.get(min(r, 4), 0.85)
 
 
-def get_rent_estimate(district: str, size_m2: float, rooms=None) -> float:
+def _furnished_multiplier(furnished) -> float:
+    """Rent multiplier for the furnishing level parsed from the description.
+    'furnished' earns the full premium, 'semi' a partial one; everything else
+    (unfurnished / unknown / None) is neutral."""
+    f = (furnished or "").strip().lower()
+    if f == "furnished":
+        return FURNISHED_RENT_PREMIUM
+    if f == "semi":
+        return SEMI_FURNISHED_PREMIUM
+    return 1.0
+
+
+def get_rent_estimate(district: str, size_m2: float, rooms=None,
+                      parking=None, furnished=None) -> float:
     key = district.lower().strip()
 
     # 1. Exact match — including the city-only keys.
@@ -229,6 +243,11 @@ def get_rent_estimate(district: str, size_m2: float, rooms=None) -> float:
     if any(z in key for z in INDUSTRIAL_ZONES):
         rate *= INDUSTRIAL_RENT_PREMIUM
     rate *= _rooms_multiplier(rooms)
+    # Description-derived premiums (only when the description was parsed; a
+    # falsy parking flag and unfurnished/unknown furnishing leave rate untouched).
+    if parking:
+        rate *= PARKING_RENT_PREMIUM
+    rate *= _furnished_multiplier(furnished)
     return round(rate * size_m2, 2)
 
 
@@ -245,13 +264,16 @@ def analyse(
     rent_override: Optional[float] = None,
     ltv: float = LTV_RATIO,
     rooms: Optional[int] = None,
+    parking=None,
+    furnished=None,
 ) -> FinancialResult:
 
     loan_amount     = price_eur * ltv
     equity          = price_eur * (1 - ltv)
     acquisition     = price_eur * ACQUISITION_COST_RATE
     cash_invested   = equity + acquisition
-    rent            = rent_override or get_rent_estimate(district, size_m2, rooms)
+    rent            = rent_override or get_rent_estimate(
+        district, size_m2, rooms, parking, furnished)
     annual_rent     = rent * 12
 
     # Mortgage (annuity) split into interest vs principal — principal is equity
@@ -338,6 +360,13 @@ def analyse(
 
     if is_industrial_zone(district):
         parts.append(f"⚙️ Industrial zone premium applied ({district}).")
+
+    # Description-derived rent premiums (only when no manual override was given).
+    if rent_override is None:
+        if parking:
+            parts.append("🅿️ Parking premium applied.")
+        if _furnished_multiplier(furnished) > 1.0:
+            parts.append(f"🛋️ Furnished premium applied ({furnished}).")
 
     return FinancialResult(
         listing_id            = listing_id,

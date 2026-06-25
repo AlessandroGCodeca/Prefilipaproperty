@@ -183,6 +183,11 @@ with st.sidebar:
     with c3: do_topreal= st.button("TOPREAL", use_container_width=True)
     do_lv    = st.button("🔒 LV DEBT FILTER", use_container_width=True)
     do_cf    = st.button("💰 CASHFLOW SCORE", use_container_width=True)
+    do_desc  = st.button("📝 PARSE DESC", use_container_width=True,
+                         help="Run Claude on un-parsed listing descriptions to "
+                              "extract parking / furnished / condition. Needs "
+                              "ANTHROPIC_API_KEY. Re-score afterwards to apply the "
+                              "parking & furnished rent premiums.")
     do_rescore = st.button("♻️ RESCORE ALL",  use_container_width=True,
                            help="Clear all cashflow scores and re-run scoring from "
                                 "scratch. Use after updating rent/tax assumptions.")
@@ -270,6 +275,8 @@ if do_nehnut:
         if err:
             st.error(f"❌ Nehnutelnosti: {err}")
         else:
+            from modules.description_enrichment import run_description_enrichment
+            run_description_enrichment()
             from modules.cashflow_runner import run_scoring as _run_cf
             scored = _run_cf()
             st.success(f"✅ Scraped {n} listings, scored {scored}.")
@@ -281,6 +288,8 @@ if do_bazos:
         if err:
             st.error(f"❌ Bazos: {err}")
         else:
+            from modules.description_enrichment import run_description_enrichment
+            run_description_enrichment()
             from modules.cashflow_runner import run_scoring as _run_cf
             scored = _run_cf()
             st.success(f"✅ Scraped {n} listings, scored {scored}.")
@@ -292,6 +301,8 @@ if do_topreal:
         if err:
             st.error(f"❌ Topreality: {err}")
         else:
+            from modules.description_enrichment import run_description_enrichment
+            run_description_enrichment()
             from modules.cashflow_runner import run_scoring as _run_cf
             scored = _run_cf()
             st.success(f"✅ Scraped {n} listings, scored {scored}.")
@@ -313,6 +324,19 @@ if do_cf:
     from modules.cashflow_runner import run_scoring
     n = run_scoring(progress_callback=cf_cb)
     bar.empty(); st.success(f"✅ Scored {n} listings"); st.rerun()
+
+if do_desc:
+    bar = st.progress(0)
+    def desc_cb(i, n): bar.progress(i / n)
+    from modules.description_enrichment import run_description_enrichment
+    n = run_description_enrichment(progress_callback=desc_cb)
+    bar.empty()
+    if n:
+        st.success(f"✅ Parsed {n} descriptions. Re-score to apply rent premiums.")
+    else:
+        st.info("ℹ️ Nothing parsed — set ANTHROPIC_API_KEY, or no new descriptions "
+                "to parse.")
+    st.rerun()
 
 if do_rescore:
     from database import clear_cashflow_scores

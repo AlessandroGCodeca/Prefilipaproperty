@@ -62,6 +62,11 @@ CREATE TABLE IF NOT EXISTS listings (
     last_seen_at      TEXT NOT NULL,
     is_active         INTEGER DEFAULT 1,
     is_dev_project    INTEGER DEFAULT 0,
+    has_parking       INTEGER,
+    has_balcony       INTEGER,
+    furnished         TEXT,
+    condition         TEXT,
+    desc_parsed       INTEGER DEFAULT 0,
     notes             TEXT
 );
 
@@ -313,12 +318,38 @@ def _ensure_cashflow_columns(conn):
     conn.commit()
 
 
+# Structured features parsed out of each listing's free-text description by
+# modules/llm_enrichment.parse_description (wired in via
+# modules/description_enrichment). has_parking + furnished feed the rent
+# premium in engine/financial; desc_parsed gates re-parsing so the LLM is
+# called at most once per listing.
+_DESCRIPTION_COLUMNS = {
+    "has_parking": "INTEGER",
+    "has_balcony": "INTEGER",
+    "furnished":   "TEXT",
+    "condition":   "TEXT",
+    "desc_parsed": "INTEGER DEFAULT 0",
+}
+
+
+def _ensure_description_columns(conn):
+    """Add description-enrichment columns to pre-existing DBs. No-op when present."""
+    if not USE_SQLITE_FALLBACK:
+        return
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(listings)")]
+    for name, sqltype in _DESCRIPTION_COLUMNS.items():
+        if name not in cols:
+            conn.execute(f"ALTER TABLE listings ADD COLUMN {name} {sqltype}")
+    conn.commit()
+
+
 def init_db():
     conn = get_conn()
     if USE_SQLITE_FALLBACK:
         conn.executescript(SQLITE_SCHEMA)
         _ensure_dev_project_column(conn)
         _ensure_cashflow_columns(conn)
+        _ensure_description_columns(conn)
         now = datetime.now(timezone.utc).isoformat()
         for row in RENT_COMPS_SEED:
             conn.execute("""
@@ -473,6 +504,8 @@ def upsert_listing(data: dict):
             ON CONFLICT(id) DO UPDATE SET
                 last_seen_at=excluded.last_seen_at,
                 title=CASE WHEN excluded.title != '' THEN excluded.title ELSE title END,
+                description=CASE WHEN excluded.description IS NOT NULL AND excluded.description != ''
+                                 THEN excluded.description ELSE description END,
                 price_eur=CASE WHEN excluded.price_eur > 0 THEN excluded.price_eur ELSE price_eur END,
                 size_m2=CASE WHEN excluded.size_m2 > 0 THEN excluded.size_m2 ELSE size_m2 END,
                 rooms=COALESCE(excluded.rooms, rooms),
@@ -579,9 +612,12 @@ def get_pending_lv():
 
 
 def get_unscored_cashflow():
+    # SELECT l.* (not an explicit column list) so optional enrichment columns
+    # like has_parking / furnished flow through to the scorer when present,
+    # without a column-list edit each time the schema grows.
     conn = get_conn()
     rows = conn.execute("""
-        SELECT l.id, l.price_eur, l.size_m2, l.district, l.energy_class, l.rooms
+        SELECT l.*
         FROM listings l
         LEFT JOIN cashflow_scores c ON l.id = c.listing_id
         WHERE l.lv_status != 'REJECTED' AND c.listing_id IS NULL
@@ -589,6 +625,51 @@ def get_unscored_cashflow():
     """).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_unparsed_descriptions(limit: int = 200):
+    """Active listings with a stored free-text description that hasn't been
+    parsed into structured features yet. desc_parsed stays 0 until a successful
+    parse, so transient enrichment failures get retried on a later run."""
+    conn = get_conn()
+    try:
+        _ensure_description_columns(conn)
+        rows = conn.execute("""
+            SELECT id, description
+            FROM listings
+            WHERE is_active=1
+              AND description IS NOT NULL AND description != ''
+              AND (desc_parsed IS NULL OR desc_parsed = 0)
+            ORDER BY scraped_at DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_description_features(listing_id: str, features: dict):
+    """Persist parsed description features and mark the row parsed.
+    `features` keys: has_parking, has_balcony, furnished, condition."""
+    conn = get_conn()
+    try:
+        _ensure_description_columns(conn)
+        conn.execute("""
+            UPDATE listings SET
+                has_parking = ?, has_balcony = ?,
+                furnished   = ?, condition   = ?,
+                desc_parsed = 1
+            WHERE id = ?
+        """, (
+            features.get("has_parking"),
+            features.get("has_balcony"),
+            features.get("furnished"),
+            features.get("condition"),
+            listing_id,
+        ))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def get_unscored_location():
