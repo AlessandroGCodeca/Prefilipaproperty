@@ -458,6 +458,21 @@ def tier_badge(tier):
     m = {"PRIME":"bp","SOLID":"bs","STANDARD":"bw","POOR":"br"}
     return f'<span class="badge {m.get(tier,"bw")}">{tier}</span>'
 
+# Compact summary of the signals parsed from the listing description
+# (modules/description_enrichment): parking 🅿️, furnished 🛋️, balcony 🌿, plus a
+# short condition label. "—" when nothing was parsed. All .get with defaults so
+# it never raises on a row that predates enrichment.
+_COND_LABELS = {"new": "New", "renovated": "Renov", "good": "Good",
+                "original": "Orig", "poor": "Poor"}
+
+def _features_label(l):
+    icons = ""
+    if l.get("has_parking"):                          icons += "🅿️"
+    if (l.get("furnished") or "") in ("furnished", "semi"): icons += "🛋️"
+    if l.get("has_balcony"):                          icons += "🌿"
+    cond = _COND_LABELS.get((l.get("condition") or "").lower(), "")
+    return " ".join(p for p in (icons, cond) if p) or "—"
+
 
 def render_card(l):
     cls      = (l.get("cf_class") or l.get("classification") or "PENDING").upper()
@@ -634,6 +649,7 @@ with t0:
                 "Score":    score,
                 "Title":    (l.get("title") or l.get("district") or "—")[:50],
                 "District": l.get("district") or "—",
+                "Features": _features_label(l),
                 "Src":      (l.get("source") or "").upper()[:5],
                 "Price":    l.get("price_eur")            or 0,
                 "Size":     l.get("size_m2")              or 0,
@@ -648,7 +664,7 @@ with t0:
         )
         st.markdown(
             f'<div class="muted">{len(df)} scored listings — sorted by composite deal '
-            f'grade (financial + location + energy + risk), then '
+            f'grade (financial + location + energy + condition + risk), then '
             f'{"s.r.o." if show_sro else "personal"} surplus. Click any header to re-sort.</div>',
             unsafe_allow_html=True,
         )

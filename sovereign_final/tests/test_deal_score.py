@@ -61,6 +61,44 @@ def test_grade_thresholds_monotonic():
     assert low <= mid <= high
 
 
+class TestConditionComponent:
+    """The renovation state parsed from the description (engine wiring of the
+    `condition` field) should reward turnkey flats and penalise originals,
+    without affecting listings whose condition is unknown."""
+
+    BASE = {"cap_rate": 0.05, "ratio_sro": 1.10, "location_score": 70,
+            "energy_class": "B", "lv_status": "PASS",
+            "construction_risk": 0, "noise_flag": 0}
+
+    def test_unknown_condition_is_neutral(self):
+        # No condition, "unknown", and a garbage value all skip the component,
+        # so the score matches the no-condition baseline exactly.
+        base_score = compute_deal_score(self.BASE)[0]
+        for val in (None, "", "unknown", "n/a"):
+            assert compute_deal_score({**self.BASE, "condition": val})[0] == base_score
+
+    def test_new_beats_original(self):
+        new = compute_deal_score({**self.BASE, "condition": "new"})[0]
+        orig = compute_deal_score({**self.BASE, "condition": "original"})[0]
+        assert new > orig
+
+    def test_new_lifts_above_baseline_and_poor_drags_below(self):
+        base = compute_deal_score(self.BASE)[0]
+        new = compute_deal_score({**self.BASE, "condition": "new"})[0]
+        poor = compute_deal_score({**self.BASE, "condition": "poor"})[0]
+        assert new >= base >= poor
+
+    def test_condition_is_case_insensitive(self):
+        a = compute_deal_score({**self.BASE, "condition": "Renovated"})[0]
+        b = compute_deal_score({**self.BASE, "condition": "renovated"})[0]
+        assert a == b
+
+    def test_condition_still_bounded(self):
+        for val in ("new", "renovated", "good", "original", "poor"):
+            score, grade = compute_deal_score({**self.BASE, "condition": val})
+            assert 0 <= score <= 100 and grade in {"A", "B", "C", "D"}
+
+
 def test_score_capped_at_100():
     # Absurdly good inputs still clamp to 0–100 / grade A.
     score, grade = compute_deal_score({
