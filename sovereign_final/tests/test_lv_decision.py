@@ -4,7 +4,6 @@ while degrading gracefully to the substring decision when Claude is unavailable.
 
 All Claude calls are monkeypatched — these tests never hit the network."""
 
-import pytest
 
 import modules.debt_bot as debt_bot
 

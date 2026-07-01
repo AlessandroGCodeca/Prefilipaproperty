@@ -5,7 +5,6 @@ Handles both PostgreSQL (Docker) and SQLite (local fallback).
 
 import os
 import sqlite3
-import json
 from datetime import datetime, timedelta, timezone
 from config import DATABASE_URL, USE_SQLITE_FALLBACK, SQLITE_PATH
 
@@ -353,6 +352,22 @@ def _ensure_enrichment_columns(conn):
     conn.commit()
 
 
+def _backfill_listing_coords(conn):
+    """One-time repair: copy lat/lng from existing location_scores rows onto
+    their listings. upsert_location now mirrors coordinates as it writes, but
+    rows scored before that fix left listings.lat/lng NULL — and the satellite
+    view / MAPS buttons read the listing columns. Idempotent (fills NULLs only)."""
+    conn.execute("""
+        UPDATE listings SET
+            lat = (SELECT lc.lat FROM location_scores lc WHERE lc.listing_id = listings.id),
+            lng = (SELECT lc.lng FROM location_scores lc WHERE lc.listing_id = listings.id)
+        WHERE lat IS NULL
+          AND EXISTS (SELECT 1 FROM location_scores lc
+                      WHERE lc.listing_id = listings.id AND lc.lat IS NOT NULL)
+    """)
+    conn.commit()
+
+
 def init_db():
     conn = get_conn()
     if USE_SQLITE_FALLBACK:
@@ -360,6 +375,7 @@ def init_db():
         _ensure_dev_project_column(conn)
         _ensure_cashflow_columns(conn)
         _ensure_enrichment_columns(conn)
+        _backfill_listing_coords(conn)
         now = datetime.now(timezone.utc).isoformat()
         for row in RENT_COMPS_SEED:
             conn.execute("""
@@ -593,6 +609,12 @@ def upsert_location(data: dict):
          :walkability_score,:industrial_zone,:industrial_zone_name,
          :location_score,:location_tier,:scored_at)
     """, data)
+    # Mirror coordinates onto the listing row — the dashboard (satellite view,
+    # MAPS buttons) reads l["lat"]/l["lng"] via get_all_active's l.*, and
+    # location_scores' lat/lng are not part of that select.
+    if data.get("lat") is not None and data.get("lng") is not None:
+        conn.execute(
+            "UPDATE listings SET lat=:lat, lng=:lng WHERE id=:listing_id", data)
     conn.commit()
     conn.close()
 
@@ -609,6 +631,36 @@ def set_lv_status(listing_id: str, status: str, reason: str = "", detail: str = 
               datetime.now(timezone.utc).isoformat()))
     conn.commit()
     conn.close()
+
+
+def reset_demo_rejections() -> int:
+    """Undo rejections fabricated by the old demo LV mode.
+
+    Before the fix in modules/debt_bot.query_lv_api, listings without a
+    cadastral parcel number (i.e. all of them) were REJECTED with invented
+    "[DEMO] ..." liens — every one sharing the same hash seed — which hid the
+    entire dashboard. Flip those rows back to PENDING and drop their fabricated
+    rejection-log entries so the next debt-filter run re-checks them honestly.
+    Real rejections (no [DEMO] marker) are untouched. Returns rows healed.
+    """
+    conn = get_conn()
+    try:
+        ids = [r[0] for r in conn.execute(
+            "SELECT DISTINCT listing_id FROM rejections_log WHERE detail LIKE '%[DEMO]%'"
+        )]
+        if not ids:
+            return 0
+        ph = ",".join("?" * len(ids))
+        conn.execute(
+            f"UPDATE listings SET lv_status='PENDING' "
+            f"WHERE id IN ({ph}) AND lv_status='REJECTED'", ids)
+        conn.execute(
+            f"DELETE FROM rejections_log WHERE detail LIKE '%[DEMO]%' "
+            f"AND listing_id IN ({ph})", ids)
+        conn.commit()
+    finally:
+        conn.close()
+    return len(ids)
 
 
 def set_lv_analysis(listing_id: str, risk_level: str, summary: str = ""):
@@ -676,7 +728,9 @@ def get_unparsed_descriptions(limit: int = 200):
 
 def update_description_features(listing_id: str, features: dict):
     """Persist parsed description features and mark the row parsed.
-    `features` keys: has_parking, has_balcony, furnished, condition."""
+    `features` keys: has_parking, has_balcony, furnished, condition, and
+    optionally rooms — which only fills in when the listing has none yet
+    (structured scraper data outranks the description's phrasing)."""
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
@@ -684,6 +738,7 @@ def update_description_features(listing_id: str, features: dict):
             UPDATE listings SET
                 has_parking = ?, has_balcony = ?,
                 furnished   = ?, condition   = ?,
+                rooms       = COALESCE(rooms, ?),
                 desc_parsed = 1
             WHERE id = ?
         """, (
@@ -691,6 +746,7 @@ def update_description_features(listing_id: str, features: dict):
             features.get("has_balcony"),
             features.get("furnished"),
             features.get("condition"),
+            features.get("rooms"),
             listing_id,
         ))
         conn.commit()

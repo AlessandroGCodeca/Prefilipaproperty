@@ -29,14 +29,20 @@ def _to_features(parsed: dict) -> dict:
     """Map a parse_description() result onto the DB column shape.
 
     Booleans become 0/1 so the rent-premium check stays a simple truthiness
-    test. The floor/rooms sentinels from the schema aren't stored here — rooms
-    is already captured during scraping and floor isn't used for rent yet.
+    test. rooms uses 0 as the schema's "not stated" sentinel → None here, and
+    update_description_features only fills it when the listing has no rooms
+    yet (structured scraper data wins). floor isn't used for rent yet.
     """
+    try:
+        rooms = int(parsed.get("rooms") or 0)
+    except (TypeError, ValueError):
+        rooms = 0
     return {
         "has_parking": 1 if parsed.get("parking") else 0,
         "has_balcony": 1 if parsed.get("balcony") else 0,
         "furnished":   parsed.get("furnished") or "unknown",
         "condition":   parsed.get("condition") or "unknown",
+        "rooms":       rooms if 1 <= rooms <= 10 else None,
     }
 
 

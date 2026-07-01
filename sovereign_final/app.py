@@ -107,7 +107,7 @@ div[data-testid="stExpander"] { background:#0b0d14; border:1px solid #151924 !im
 """, unsafe_allow_html=True)
 
 # ── Init ──────────────────────────────────────────────────────────────────────
-from database import init_db, get_all_active, get_rejected, get_stats, backfill_dev_project_flags
+from database import init_db, get_all_active, get_stats, backfill_dev_project_flags
 init_db()
 
 @st.cache_resource
@@ -551,7 +551,7 @@ def render_card(l):
              if deal_grade != "—" else "") +
             f'<span class="badge bo">{"s.r.o." if opt=="SRO" else "PERSONAL"}</span>' + " " +
             tier_badge(loc_tier) +
-            (f' <span class="badge bg">⚙️ INDUSTRIAL</span>' if ind else "") +
+            (' <span class="badge bg">⚙️ INDUSTRIAL</span>' if ind else "") +
             (f' <span class="badge {lv_css}">⚖️ LV {lv_risk}</span>' if lv_risk else "")
         )
         st.markdown(badges, unsafe_allow_html=True)

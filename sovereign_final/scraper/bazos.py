@@ -14,6 +14,7 @@ from config import SCRAPE_DELAY_SEC
 from database import upsert_listing, init_db
 from scraper._http import get, make_session
 from scraper.nehnutelnosti import _extract_location_from_text
+from scraper.textparse import rooms_from_title
 
 BASE         = "https://reality.bazos.sk"
 CATEGORY     = "/predam/byt/"
@@ -127,7 +128,8 @@ def _build_listing_from_card(card, link) -> dict | None:
         "id": uid, "source": "bazos", "url": href, "url_hash": uid,
         "title": title[:200], "description": card_text[:500],
         "price_eur": price, "size_m2": size,
-        "rooms": None, "floor": None, "year_built": None,
+        "rooms": rooms_from_title(title) or rooms_from_title(card_text),
+        "floor": None, "year_built": None,
         "energy_class": "UNKNOWN",
         "address_raw": matched or addr or title,
         "district": matched or _district(addr),

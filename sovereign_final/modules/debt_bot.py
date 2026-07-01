@@ -14,8 +14,7 @@ Decision layers (most reliable first):
 Optional: DMR (Mistral) for a fully-local plain-language summary.
 """
 
-import time, uuid, random
-from datetime import datetime, timezone
+import time, random
 
 import requests
 
@@ -25,7 +24,10 @@ from config import (
     CADASTRAL_API_KEY, CADASTRAL_DELAY_SEC, CADASTRAL_BACKOFF_MAX,
     LV_REJECT_FLAGS, LV_BANK_NAMES, DMR_ENDPOINT, LLM_MODEL,
 )
-from database import get_pending_lv, set_lv_status, set_lv_analysis, get_conn, init_db
+from database import (
+    get_pending_lv, set_lv_status, set_lv_analysis, reset_demo_rejections,
+    get_conn, init_db,
+)
 from modules.llm_enrichment import is_enabled as claude_enabled, analyze_lv as claude_analyze_lv
 
 CADASTRAL_BASE = "https://kataster.skgeodesy.sk/PortalOGC/rest/services/vgi_kn"
@@ -35,11 +37,22 @@ CADASTRAL_BASE = "https://kataster.skgeodesy.sk/PortalOGC/rest/services/vgi_kn"
 def query_lv_api(cadastral_id: str, area: str = "") -> dict:
     """
     Query Slovak Cadastral API for LV data.
-    Falls back to DEMO mode if no API key configured.
     Register at: https://www.skgeodesy.sk/en/ugkk/cadastral-portal/
+
+    When the check CANNOT run (no CADASTRAL_API_KEY, or the listing has no
+    parcel number — scrapers don't provide one), the listing PASSES as
+    "unverified" rather than being rejected. The old behaviour fabricated
+    demo rejections here; because every parcel-less listing shared the same
+    fallback hash seed, one scheduler run marked EVERY listing REJECTED and
+    emptied the dashboard. Never fabricate a title-deed verdict.
     """
     if not CADASTRAL_API_KEY or not cadastral_id:
-        return _demo_lv(cadastral_id)
+        return {
+            "status": "PASS", "unverified": True,
+            "detail": "LV unverified — no cadastral API key / parcel number. "
+                      "Verify the title deed manually before purchase.",
+            "raw": {},
+        }
 
     url     = f"{CADASTRAL_BASE}/lv/{cadastral_id}"
     headers = {"Authorization": f"Bearer {CADASTRAL_API_KEY}",
@@ -76,21 +89,6 @@ def _parse_lv(data: dict) -> dict:
                         "raw": data}
     return {"status": "PASS", "detail": "Clean title — no non-bank encumbrances",
             "raw": data}
-
-
-def _demo_lv(cadastral_id: str) -> dict:
-    """Deterministic demo results — 30% rejection rate."""
-    seed = sum(ord(c) for c in (cadastral_id or "demo_seed_1234"))
-    if seed % 10 < 3:
-        flags = [
-            ("záložné právo",  "Non-bank lien detected — private creditor"),
-            ("exekúcia",       "Court execution order registered on title"),
-            ("predkupné právo","3rd-party pre-emption right registered"),
-        ]
-        flag, detail = flags[seed % 3]
-        return {"status": "REJECT", "flag": flag,
-                "detail": f"[DEMO] {detail}", "raw": {}}
-    return {"status": "PASS", "detail": "[DEMO] Clean title — no encumbrances", "raw": {}}
 
 
 # ── DMR LLM Analysis ──────────────────────────────────────────────────────────
@@ -188,13 +186,20 @@ def _decide_lv(api_result: dict) -> dict:
 
 # ── Main Runner ───────────────────────────────────────────────────────────────
 def run_debt_filter(progress_callback=None) -> tuple[int, int]:
+    # Heal rows the old demo mode fabricated: "[DEMO]" rejections hid real
+    # listings behind invented liens. Reset them to PENDING so they get an
+    # honest re-check below. Idempotent — a clean DB is a no-op.
+    healed = reset_demo_rejections()
+    if healed:
+        print(f"♻️  Reset {healed} fabricated [DEMO] rejections back to PENDING.")
+
     pending = get_pending_lv()
     if not pending:
         print("✅ No pending LV checks.")
         return 0, 0
 
     print(f"🔒 Running LV debt filter on {len(pending)} listings...")
-    passed = rejected = 0
+    passed = rejected = unverified = 0
 
     for i, row in enumerate(pending):
         lid   = row["id"]
@@ -220,10 +225,18 @@ def run_debt_filter(progress_callback=None) -> tuple[int, int]:
         else:
             set_lv_status(lid, "PASS")
             passed += 1
-            print(f"  ✅ {addr}")
+            if result.get("unverified"):
+                unverified += 1
+            else:
+                print(f"  ✅ {addr}")
 
-        time.sleep(CADASTRAL_DELAY_SEC)
+        # Rate-limit pause only when a real cadastral API call was made.
+        if CADASTRAL_API_KEY and cid:
+            time.sleep(CADASTRAL_DELAY_SEC)
 
+    if unverified:
+        print(f"  ℹ️  {unverified} passed UNVERIFIED (no cadastral key/parcel) — "
+              f"verify title deeds manually before purchase.")
     print(f"\n✅ LV filter complete. Passed: {passed} | Rejected: {rejected}\n")
     return passed, rejected
 
