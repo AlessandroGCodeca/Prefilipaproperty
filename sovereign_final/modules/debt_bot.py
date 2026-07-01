@@ -14,81 +14,88 @@ Decision layers (most reliable first):
 Optional: DMR (Mistral) for a fully-local plain-language summary.
 """
 
-import time, random
-
 import requests
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
-    CADASTRAL_API_KEY, CADASTRAL_DELAY_SEC, CADASTRAL_BACKOFF_MAX,
     LV_REJECT_FLAGS, LV_BANK_NAMES, DMR_ENDPOINT, LLM_MODEL,
 )
 from database import (
     get_pending_lv, set_lv_status, set_lv_analysis, reset_demo_rejections,
     get_conn, init_db,
 )
+from kataster_scraper import enrich_parcel
 from modules.llm_enrichment import is_enabled as claude_enabled, analyze_lv as claude_analyze_lv
 
-CADASTRAL_BASE = "https://kataster.skgeodesy.sk/PortalOGC/rest/services/vgi_kn"
 
-
-# ── Cadastral API ─────────────────────────────────────────────────────────────
+# ── Cadastre lookup (unofficial scraper — no API/key exists) ─────────────────
 def query_lv_api(cadastral_id: str, area: str = "") -> dict:
     """
-    Query Slovak Cadastral API for LV data.
-    Register at: https://www.skgeodesy.sk/en/ugkk/cadastral-portal/
+    Fetch and screen the LV (list vlastníctva) for a parcel via the unofficial
+    skgeodesy.sk scraper (kataster_scraper.enrich_parcel). There is NO official
+    ÚGKK SR API and no API key — the scraper reads the cadastre portal's OData
+    backend directly, throttles and retries internally, caches results in the
+    cadastre_cache table, and may break if the portal changes.
 
-    When the check CANNOT run (no CADASTRAL_API_KEY, or the listing has no
-    parcel number — scrapers don't provide one), the listing PASSES as
-    "unverified" rather than being rejected. The old behaviour fabricated
-    demo rejections here; because every parcel-less listing shared the same
-    fallback hash seed, one scheduler run marked EVERY listing REJECTED and
-    emptied the dashboard. Never fabricate a title-deed verdict.
+    When the check CANNOT run (listing has no cadastral area / parcel number —
+    scrapers don't provide them — or the portal is unreachable or the parcel
+    isn't found), the listing PASSES as "unverified" rather than being
+    rejected. The old behaviour fabricated demo rejections here; because every
+    parcel-less listing shared the same fallback hash seed, one scheduler run
+    marked EVERY listing REJECTED and emptied the dashboard. Never fabricate a
+    title-deed verdict.
     """
-    if not CADASTRAL_API_KEY or not cadastral_id:
+    if not cadastral_id or not area:
         return {
             "status": "PASS", "unverified": True,
-            "detail": "LV unverified — no cadastral API key / parcel number. "
-                      "Verify the title deed manually before purchase.",
+            "detail": "LV unverified — listing has no cadastral area / parcel "
+                      "number. Verify the title deed manually before purchase.",
             "raw": {},
         }
 
-    url     = f"{CADASTRAL_BASE}/lv/{cadastral_id}"
-    headers = {"Authorization": f"Bearer {CADASTRAL_API_KEY}",
-               "Accept": "application/json"}
-    backoff = 2
+    result = enrich_parcel(area, cadastral_id)
 
-    for attempt in range(5):
-        try:
-            resp = requests.get(url, headers=headers, timeout=15)
-            if resp.status_code == 429:
-                wait = min(backoff + random.uniform(0, 1), CADASTRAL_BACKOFF_MAX)
-                print(f"    Rate limited. Waiting {wait:.1f}s...")
-                time.sleep(wait)
-                backoff = min(backoff * 2, CADASTRAL_BACKOFF_MAX)
-                continue
-            resp.raise_for_status()
-            return _parse_lv(resp.json())
-        except requests.RequestException as e:
-            print(f"    LV API error (attempt {attempt+1}): {e}")
-            time.sleep(backoff)
-            backoff = min(backoff * 2, CADASTRAL_BACKOFF_MAX)
+    if result["status"] != "OK":
+        return {
+            "status": "PASS", "unverified": True,
+            "detail": f"LV unverified — cadastre lookup "
+                      f"{result['status'].lower()}: {result['detail']} "
+                      f"Verify the title deed manually before purchase.",
+            "raw": {},
+        }
 
-    return {"status": "UNKNOWN", "detail": "API unavailable"}
+    lv_text = result.get("lv_text")
+    if not lv_text:
+        # Parcel exists but no LV text (e.g. no folio attached) — nothing to
+        # screen, so pass unverified rather than invent a verdict.
+        return {
+            "status": "PASS", "unverified": True,
+            "detail": f"LV unverified — {result['detail']}. Verify the title "
+                      f"deed manually before purchase.",
+            "raw": {},
+        }
+
+    decision = _parse_lv(lv_text)
+    lv_no = (result.get("lv") or {}).get("no")
+    if lv_no is not None:
+        decision["detail"] = f"LV {lv_no}: {decision['detail']}"
+    return decision
 
 
-def _parse_lv(data: dict) -> dict:
-    raw = str(data).lower()
+def _parse_lv(lv_text) -> dict:
+    """Substring-scan LV text (or any raw payload) for reject flags. `raw`
+    carries the scanned payload through to _decide_lv, where Claude reads it."""
+    raw = str(lv_text).lower()
     for flag in LV_REJECT_FLAGS:
         if flag in raw:
             is_bank = any(b in raw for b in LV_BANK_NAMES)
             if not is_bank:
                 return {"status": "REJECT", "flag": flag,
                         "detail": f"LV encumbrance detected: '{flag}'",
-                        "raw": data}
+                        "raw": lv_text}
     return {"status": "PASS", "detail": "Clean title — no non-bank encumbrances",
-            "raw": data}
+            "raw": lv_text}
 
 
 # ── DMR LLM Analysis ──────────────────────────────────────────────────────────
@@ -230,9 +237,8 @@ def run_debt_filter(progress_callback=None) -> tuple[int, int]:
             else:
                 print(f"  ✅ {addr}")
 
-        # Rate-limit pause only when a real cadastral API call was made.
-        if CADASTRAL_API_KEY and cid:
-            time.sleep(CADASTRAL_DELAY_SEC)
+        # No pause needed here — kataster_scraper throttles its own requests
+        # (CADASTRAL_DELAY_SEC) and cache hits shouldn't wait at all.
 
     if unverified:
         print(f"  ℹ️  {unverified} passed UNVERIFIED (no cadastral key/parcel) — "

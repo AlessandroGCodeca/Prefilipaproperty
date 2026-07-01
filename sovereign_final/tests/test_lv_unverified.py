@@ -1,12 +1,15 @@
-"""Tests for the LV debt-filter fabrication fix.
+"""Tests for the LV debt-filter's honest-verdict behaviour.
 
 The old demo mode invented "[DEMO]" liens for listings without a cadastral
 parcel number — and since scrapers never provide one, every listing shared the
 same fallback hash seed and one run REJECTED them all, emptying the dashboard.
 
-Covers: the unverified-PASS path in query_lv_api, reset_demo_rejections()
-healing fabricated rejections, and a run_debt_filter integration pass over a
-temp DB (heals, passes unverified, persists no fabricated rejections)."""
+query_lv_api now fetches real LV text through the unofficial skgeodesy.sk
+scraper (kataster_scraper.enrich_parcel — no API key exists). Covers: the
+unverified-PASS paths (no parcel data, scraper failure/not-found), the real
+scan paths (clean LV passes, exekúcia rejects, raw text flows to Claude),
+reset_demo_rejections() healing fabricated rejections, and a run_debt_filter
+integration pass over a temp DB."""
 
 import os
 import sqlite3
@@ -19,28 +22,84 @@ import pytest
 import modules.debt_bot as debt_bot
 
 
-class TestUnverifiedPass:
-    def test_no_key_passes_unverified(self, monkeypatch):
-        monkeypatch.setattr(debt_bot, "CADASTRAL_API_KEY", "")
-        res = debt_bot.query_lv_api("123/4")
-        assert res["status"] == "PASS"
-        assert res["unverified"] is True
-        assert "unverified" in res["detail"].lower()
-        assert res["raw"] == {}  # nothing for _decide_lv / Claude to read
+def _scraper_result(status="OK", detail="", lv_text=None, lv_no=4321):
+    """Shape returned by kataster_scraper.enrich_parcel."""
+    return {
+        "status": status, "detail": detail, "source": "live",
+        "query": {}, "cadastral_unit": {"code": 1, "name": "X"},
+        "parcel": {"no": "1/1"}, "lv": {"no": lv_no} if lv_no else None,
+        "owners": [], "lv_text": lv_text, "risk_flags": [],
+        "fetched_at": "2026-01-01T00:00:00+00:00",
+    }
 
-    def test_no_parcel_passes_unverified_even_with_key(self, monkeypatch):
-        monkeypatch.setattr(debt_bot, "CADASTRAL_API_KEY", "real-key")
-        for missing in ("", None):
-            res = debt_bot.query_lv_api(missing)
-            assert res["status"] == "PASS" and res.get("unverified")
+
+class TestUnverifiedPass:
+    def test_no_parcel_or_area_passes_unverified(self, monkeypatch):
+        monkeypatch.setattr(debt_bot, "enrich_parcel",
+                            lambda *a, **k: pytest.fail("scraper must not run"))
+        for cid, area in (("", "Nitra"), (None, "Nitra"),
+                          ("123/4", ""), ("", "")):
+            res = debt_bot.query_lv_api(cid, area)
+            assert res["status"] == "PASS"
+            assert res["unverified"] is True
+            assert "unverified" in res["detail"].lower()
+            assert res["raw"] == {}  # nothing for _decide_lv / Claude to read
+
+    def test_scraper_error_passes_unverified(self, monkeypatch):
+        monkeypatch.setattr(debt_bot, "enrich_parcel", lambda *a, **k:
+                            _scraper_result("ERROR", "portal unreachable"))
+        res = debt_bot.query_lv_api("123/4", "Nitra")
+        assert res["status"] == "PASS" and res["unverified"] is True
+        assert "portal unreachable" in res["detail"]
+
+    def test_parcel_not_found_passes_unverified(self, monkeypatch):
+        monkeypatch.setattr(debt_bot, "enrich_parcel", lambda *a, **k:
+                            _scraper_result("NOT_FOUND", "parcel '123/4' not found"))
+        res = debt_bot.query_lv_api("123/4", "Nitra")
+        assert res["status"] == "PASS" and res["unverified"] is True
+        assert "not found" in res["detail"]
+
+    def test_no_lv_text_passes_unverified(self, monkeypatch):
+        monkeypatch.setattr(debt_bot, "enrich_parcel", lambda *a, **k:
+                            _scraper_result("OK", "parcel found (no LV)",
+                                            lv_text=None, lv_no=None))
+        res = debt_bot.query_lv_api("123/4", "Nitra")
+        assert res["status"] == "PASS" and res["unverified"] is True
 
     def test_two_listings_get_identical_honest_result(self, monkeypatch):
         # Regression: the old code hashed a shared fallback seed, so verdicts
         # were fabricated-but-identical. Now both are the same *honest* PASS.
-        monkeypatch.setattr(debt_bot, "CADASTRAL_API_KEY", "")
-        a = debt_bot.query_lv_api("")
-        b = debt_bot.query_lv_api("999/1")
+        a = debt_bot.query_lv_api("", "")
+        b = debt_bot.query_lv_api("999/1", "")
         assert a["status"] == b["status"] == "PASS"
+
+
+class TestRealLvScan:
+    def test_clean_lv_passes_with_text_for_claude(self, monkeypatch):
+        text = "Výpis z LV 4321. Časť C: Bez tiarch."
+        monkeypatch.setattr(debt_bot, "enrich_parcel",
+                            lambda *a, **k: _scraper_result(lv_text=text))
+        res = debt_bot.query_lv_api("123/4", "Nitra")
+        assert res["status"] == "PASS"
+        assert not res.get("unverified")
+        assert res["raw"] == text          # real LV text flows to _decide_lv
+        assert res["detail"].startswith("LV 4321:")
+
+    def test_exekucia_rejects(self, monkeypatch):
+        text = "Časť C ŤARCHY: Exekúcia EX 55/2021 na podiel vlastníka."
+        monkeypatch.setattr(debt_bot, "enrich_parcel",
+                            lambda *a, **k: _scraper_result(lv_text=text))
+        res = debt_bot.query_lv_api("123/4", "Nitra")
+        assert res["status"] == "REJECT"
+        assert res["flag"] == "exekúcia"
+        assert res["raw"] == text
+
+    def test_bank_lien_passes_substring_scan(self, monkeypatch):
+        text = "Ťarchy: Záložné právo v prospech Tatra banka, a.s."
+        monkeypatch.setattr(debt_bot, "enrich_parcel",
+                            lambda *a, **k: _scraper_result(lv_text=text))
+        res = debt_bot.query_lv_api("123/4", "Nitra")
+        assert res["status"] == "PASS"
 
 
 @pytest.fixture
@@ -115,9 +174,11 @@ class TestResetDemoRejections:
 
 class TestRunDebtFilterIntegration:
     def test_heals_then_passes_unverified(self, temp_db, monkeypatch):
-        # No cadastral key, Claude disabled → every checkable row should end
-        # PASS (unverified), never REJECTED, and demo rows must be healed.
-        monkeypatch.setattr(debt_bot, "CADASTRAL_API_KEY", "")
+        # No cadastral parcel data on any listing, Claude disabled → every
+        # checkable row should end PASS (unverified), never REJECTED, the
+        # scraper must never fire, and demo rows must be healed.
+        monkeypatch.setattr(debt_bot, "enrich_parcel",
+                            lambda *a, **k: pytest.fail("scraper must not run"))
         monkeypatch.setattr(debt_bot, "claude_enabled", lambda: False)
 
         passed, rejected = debt_bot.run_debt_filter()

@@ -1,7 +1,7 @@
-"""Tests for the unofficial Slovak cadastre scraper in backfill_enrichment
-(cadastre mode). All HTTP is faked at the _cadastral_get / requests.get level
-so the OData parsing, pagination, caching, retry and geoblock-fallback logic
-run for real without touching skgeodesy.sk."""
+"""Tests for the unofficial Slovak cadastre scraper (kataster_scraper.py) and
+the cadastre backfill mode in backfill_enrichment. All HTTP is faked at the
+_cadastral_get / requests.get level so the OData parsing, pagination, caching,
+retry and geoblock-fallback logic run for real without touching skgeodesy.sk."""
 
 import json
 import sqlite3
@@ -9,6 +9,7 @@ import sqlite3
 import pytest
 
 import backfill_enrichment as bf
+import kataster_scraper as ks
 import database
 
 
@@ -30,13 +31,17 @@ PARCEL_ROW = {
     "Status": {"Code": "OK"},
 }
 
-# Two pages of participants — exercises @odata.nextLink pagination.
+# Two pages of participants — exercises @odata.nextLink pagination. The first
+# participant carries share-like fields (numerator/denominator), the second
+# (a company) does not — its share must come out None, never invented.
 PARTICIPANTS_PAGE1 = {
-    "value": [{"Id": 1, "Name": "Novák Ján r. Novák", "Subjects": [
+    "value": [{"Id": 1, "Name": "Novák Ján r. Novák",
+               "RatioNumerator": 1, "RatioDenominator": 2,
+               "Subjects": [
         {"Id": 7, "FirstName": "Ján", "Surname": "Novák", "BirthSurname": "Novák",
          "Address": {"Id": 1, "Street": "Hlavná", "HouseNo": "1",
                      "Municipality": "Nitra", "Zip": "949 01", "State": "SR"}}]}],
-    "@odata.nextLink": (bf.PORTAL_ODATA +
+    "@odata.nextLink": (ks.PORTAL_ODATA +
                         "ParcelsC(123)/Kn.Participants?$skiptoken=1"),
 }
 PARTICIPANTS_PAGE2 = {
@@ -48,18 +53,31 @@ PARTICIPANTS_PAGE2 = {
 
 LV_HTML = """<html><head><script>var hidden = "noise";</script></head><body>
 <h1>Výpis z listu vlastníctva č. 4321</h1>
-<p>ČASŤ B: VLASTNÍCI — Novák Ján r. Novák, podiel 1/1</p>
+<p>ČASŤ B: VLASTNÍCI — Novák Ján r. Novák, podiel 1/2</p>
 <p>ČASŤ C: ŤARCHY — Exekúcia EX 123/2020, exekučné záložné právo</p>
 </body></html>"""
 
+IDENTIFY_JSON = {
+    "results": [
+        {"layerId": 1, "layerName": "KN PARCELS C",
+         "displayFieldName": "ID", "value": "123",
+         "attributes": {"ID": "123"}},
+        {"layerId": 9, "layerName": "KN BUILDINGS",
+         "displayFieldName": "ID", "value": "9",
+         "attributes": {"ID": "9"}},
+    ],
+}
+
 
 def make_dispatcher(calls=None, parcels_c=None):
-    """URL-dispatching stand-in for bf._cadastral_get."""
+    """URL-dispatching stand-in for ks._cadastral_get."""
     def dispatch(url, accept="application/json"):
         if calls is not None:
             calls.append(url)
         if "GeneratePrf" in url:
             return LV_HTML
+        if "/identify" in url:
+            return json.dumps(IDENTIFY_JSON)
         if "CadastralUnits" in url:
             if "Vieska" in url:
                 rows = ([] if "Name eq" in url else
@@ -97,15 +115,15 @@ def temp_db(monkeypatch, tmp_path):
         c.row_factory = sqlite3.Row
         return c
     monkeypatch.setattr(database, "get_conn", _conn)
-    monkeypatch.setattr(bf, "_geoblock", {"active": False})
-    monkeypatch.setattr(bf.time, "sleep", lambda s: None)
+    monkeypatch.setattr(ks, "_geoblock", {"active": False})
+    monkeypatch.setattr(ks.time, "sleep", lambda s: None)
     return path
 
 
 # ── happy path ────────────────────────────────────────────────────────────────
 def test_enrich_parcel_full_flow(temp_db, monkeypatch):
-    monkeypatch.setattr(bf, "_cadastral_get", make_dispatcher())
-    res = bf.enrich_parcel("Nitra", "1234/5")
+    monkeypatch.setattr(ks, "_cadastral_get", make_dispatcher())
+    res = ks.enrich_parcel("Nitra", "1234/5")
 
     assert res["status"] == "OK"
     assert res["source"] == "live"
@@ -124,7 +142,9 @@ def test_enrich_parcel_full_flow(temp_db, monkeypatch):
     person, company = res["owners"]
     assert person["name"] == "Novák Ján r. Novák"
     assert person["address"] == "Hlavná 1, 949 01 Nitra, SR"
-    assert company["name"] == "MESTO NITRA"   # built from Surname (no Participant.Name)
+    assert person["share"] == "1/2"          # from Ratio* participant fields
+    assert company["name"] == "MESTO NITRA"  # built from Surname (no Participant.Name)
+    assert company["share"] is None          # absent → None, never invented
 
     # LV HTML stripped to text (script dropped) and flag-scanned.
     assert "listu vlastníctva" in res["lv_text"]
@@ -134,17 +154,62 @@ def test_enrich_parcel_full_flow(temp_db, monkeypatch):
     assert all(f["bank_related"] is False for f in res["risk_flags"])
 
 
+def test_backfill_enrichment_reexports_scraper():
+    # Existing callers import the cadastre helpers from backfill_enrichment;
+    # they must remain the same objects as kataster_scraper's.
+    assert bf.enrich_parcel is ks.enrich_parcel
+    assert bf.CadastreError is ks.CadastreError
+    assert bf.scan_risk_flags is ks.scan_risk_flags
+
+
+# ── ownership share extraction ────────────────────────────────────────────────
+def test_extract_share_variants():
+    assert ks._extract_share({"Citatel": 1, "Menovatel": 3}) == "1/3"
+    assert ks._extract_share({"RatioNumerator": 2, "RatioDenominator": 5}) == "2/5"
+    assert ks._extract_share({"Podiel": "1 / 2"}) == "1/2"
+    assert ks._extract_share({"Name": "X", "Id": 5}) is None
+    # nested/list fields must not confuse the scan
+    assert ks._extract_share({"Subjects": [{"Citatel": 1}], "Id": 1}) is None
+
+
+# ── direct LV lookup ─────────────────────────────────────────────────────────
+def test_enrich_lv_direct(temp_db, monkeypatch):
+    monkeypatch.setattr(ks, "_cadastral_get", make_dispatcher())
+    res = ks.enrich_lv("Nitra", 4321)
+    assert res["status"] == "OK"
+    assert res["lv"]["no"] == 4321
+    assert "prfNumber=4321" in res["lv"]["url"]
+    assert "podiel 1/2" in res["lv_text"]
+    assert any(f["flag"] == "exekúcia" for f in res["risk_flags"])
+    assert res["owners"] == []               # no structured owners by LV number
+    assert "lv_text" in res["detail"]
+
+    # Second call is served from cache.
+    monkeypatch.setattr(ks, "_cadastral_get",
+                        lambda u, accept="application/json": (_ for _ in ()).throw(
+                            AssertionError("network hit")))
+    again = ks.enrich_lv("Nitra", 4321)
+    assert again["source"] == "cache"
+
+
+# ── coordinates → parcels (identify service) ─────────────────────────────────
+def test_identify_parcels_filters_parcel_layers(temp_db, monkeypatch):
+    monkeypatch.setattr(ks, "_cadastral_get", make_dispatcher())
+    hits = ks.identify_parcels(48.1451953, 17.0910016)
+    assert hits == [{"register": "C", "parcel_id": "123"}]
+
+
 # ── caching ───────────────────────────────────────────────────────────────────
 def test_cache_hit_avoids_network(temp_db, monkeypatch):
-    monkeypatch.setattr(bf, "_cadastral_get", make_dispatcher())
-    first = bf.enrich_parcel("Nitra", "1234/5")
+    monkeypatch.setattr(ks, "_cadastral_get", make_dispatcher())
+    first = ks.enrich_parcel("Nitra", "1234/5")
     assert first["source"] == "live"
 
     def no_network(url, accept="application/json"):
         raise AssertionError("network hit on cached parcel")
-    monkeypatch.setattr(bf, "_cadastral_get", no_network)
+    monkeypatch.setattr(ks, "_cadastral_get", no_network)
 
-    second = bf.enrich_parcel("Nitra", "1234/5")
+    second = ks.enrich_parcel("Nitra", "1234/5")
     assert second["source"] == "cache"
     assert second["lv"]["no"] == 4321
     assert len(second["owners"]) == 2
@@ -152,21 +217,21 @@ def test_cache_hit_avoids_network(temp_db, monkeypatch):
 
 def test_refresh_bypasses_cache(temp_db, monkeypatch):
     calls = []
-    monkeypatch.setattr(bf, "_cadastral_get", make_dispatcher(calls=calls))
-    bf.enrich_parcel("Nitra", "1234/5")
+    monkeypatch.setattr(ks, "_cadastral_get", make_dispatcher(calls=calls))
+    ks.enrich_parcel("Nitra", "1234/5")
     before = len(calls)
-    res = bf.enrich_parcel("Nitra", "1234/5", refresh=True)
+    res = ks.enrich_parcel("Nitra", "1234/5", refresh=True)
     assert res["source"] == "live"
     assert len(calls) > before
 
 
 def test_cached_result_without_lv_text_is_a_miss_when_lv_wanted(temp_db, monkeypatch):
     calls = []
-    monkeypatch.setattr(bf, "_cadastral_get", make_dispatcher(calls=calls))
-    lean = bf.enrich_parcel("Nitra", "1234/5", fetch_lv=False)
+    monkeypatch.setattr(ks, "_cadastral_get", make_dispatcher(calls=calls))
+    lean = ks.enrich_parcel("Nitra", "1234/5", fetch_lv=False)
     assert lean["status"] == "OK" and lean["lv_text"] is None
     before = len(calls)
-    full = bf.enrich_parcel("Nitra", "1234/5", fetch_lv=True)
+    full = ks.enrich_parcel("Nitra", "1234/5", fetch_lv=True)
     assert full["source"] == "live"          # cache couldn't serve lv_text
     assert full["lv_text"] is not None
     assert len(calls) > before
@@ -174,22 +239,22 @@ def test_cached_result_without_lv_text_is_a_miss_when_lv_wanted(temp_db, monkeyp
 
 def test_errors_are_not_cached(temp_db, monkeypatch):
     def boom(url, accept="application/json"):
-        raise bf.CadastreError("portal down")
-    monkeypatch.setattr(bf, "_cadastral_get", boom)
-    res = bf.enrich_parcel("Nitra", "1234/5")
+        raise ks.CadastreError("portal down")
+    monkeypatch.setattr(ks, "_cadastral_get", boom)
+    res = ks.enrich_parcel("Nitra", "1234/5")
     assert res["status"] == "ERROR"
     assert "portal down" in res["detail"]
 
     # Portal recovers → next call must go live and succeed.
-    monkeypatch.setattr(bf, "_cadastral_get", make_dispatcher())
-    res = bf.enrich_parcel("Nitra", "1234/5")
+    monkeypatch.setattr(ks, "_cadastral_get", make_dispatcher())
+    res = ks.enrich_parcel("Nitra", "1234/5")
     assert res["status"] == "OK" and res["source"] == "live"
 
 
 # ── not-found and ambiguity ───────────────────────────────────────────────────
 def test_parcel_not_found_tries_both_registers(temp_db, monkeypatch):
-    monkeypatch.setattr(bf, "_cadastral_get", make_dispatcher(parcels_c=[]))
-    res = bf.enrich_parcel("Nitra", "9999/9")
+    monkeypatch.setattr(ks, "_cadastral_get", make_dispatcher(parcels_c=[]))
+    res = ks.enrich_parcel("Nitra", "9999/9")
     assert res["status"] == "NOT_FOUND"
     assert "9999/9" in res["detail"]
     assert "C/E" in res["detail"]
@@ -197,15 +262,15 @@ def test_parcel_not_found_tries_both_registers(temp_db, monkeypatch):
 
 
 def test_unknown_cadastral_unit(temp_db, monkeypatch):
-    monkeypatch.setattr(bf, "_cadastral_get", make_dispatcher())
-    res = bf.enrich_parcel("Neexistujúce Územie", "1/1")
+    monkeypatch.setattr(ks, "_cadastral_get", make_dispatcher())
+    res = ks.enrich_parcel("Neexistujúce Územie", "1/1")
     assert res["status"] == "NOT_FOUND"
     assert "Neexistujúce Územie" in res["detail"]
 
 
 def test_ambiguous_cadastral_unit_is_a_clear_error(temp_db, monkeypatch):
-    monkeypatch.setattr(bf, "_cadastral_get", make_dispatcher())
-    res = bf.enrich_parcel("Vieska", "1/1")
+    monkeypatch.setattr(ks, "_cadastral_get", make_dispatcher())
+    res = ks.enrich_parcel("Vieska", "1/1")
     assert res["status"] == "ERROR"
     assert "ambiguous" in res["detail"]
     assert "Vieska nad Žitavou" in res["detail"]
@@ -222,54 +287,54 @@ def test_geoblock_403_switches_to_zbgis_proxy(temp_db, monkeypatch):
     def fake_get(url, headers=None, timeout=None):
         calls.append(url)
         return _Resp(403, "forbidden") if len(calls) == 1 else _Resp(200, '{"value": []}')
-    monkeypatch.setattr(bf.requests, "get", fake_get)
+    monkeypatch.setattr(ks.requests, "get", fake_get)
 
-    out = bf._cadastral_get(bf.PORTAL_ODATA + "CadastralUnits")
+    out = ks._cadastral_get(ks.PORTAL_ODATA + "CadastralUnits")
     assert out == '{"value": []}'
     assert calls[0].startswith("https://kataster.skgeodesy.sk/")
-    assert calls[1].startswith(bf.GEOBLOCK_PROXY_PREFIX)
+    assert calls[1].startswith(ks.GEOBLOCK_PROXY_PREFIX)
 
 
 def test_rate_limit_exhaustion_raises_clear_error(temp_db, monkeypatch):
     calls = []
     monkeypatch.setattr(
-        bf.requests, "get",
+        ks.requests, "get",
         lambda url, headers=None, timeout=None: (calls.append(url), _Resp(429, "slow down"))[1])
-    with pytest.raises(bf.CadastreError) as ei:
-        bf._cadastral_get(bf.PORTAL_ODATA + "CadastralUnits")
-    assert f"after {bf.MAX_ATTEMPTS} attempts" in str(ei.value)
+    with pytest.raises(ks.CadastreError) as ei:
+        ks._cadastral_get(ks.PORTAL_ODATA + "CadastralUnits")
+    assert f"after {ks.MAX_ATTEMPTS} attempts" in str(ei.value)
     assert "HTTP 429" in str(ei.value)
-    assert len(calls) == bf.MAX_ATTEMPTS
+    assert len(calls) == ks.MAX_ATTEMPTS
 
 
 def test_unexpected_status_fails_fast_with_body(temp_db, monkeypatch):
     monkeypatch.setattr(
-        bf.requests, "get",
+        ks.requests, "get",
         lambda url, headers=None, timeout=None: _Resp(400, "Bad $filter"))
-    with pytest.raises(bf.CadastreError) as ei:
-        bf._cadastral_get(bf.PORTAL_ODATA + "CadastralUnits")
+    with pytest.raises(ks.CadastreError) as ei:
+        ks._cadastral_get(ks.PORTAL_ODATA + "CadastralUnits")
     assert "HTTP 400" in str(ei.value)
     assert "Bad $filter" in str(ei.value)
 
 
 def test_non_json_response_is_a_clear_error(temp_db, monkeypatch):
-    monkeypatch.setattr(bf, "_cadastral_get",
+    monkeypatch.setattr(ks, "_cadastral_get",
                         lambda url, accept="application/json": "<html>maintenance</html>")
-    with pytest.raises(bf.CadastreError) as ei:
-        bf._get_json(bf.PORTAL_ODATA + "CadastralUnits")
+    with pytest.raises(ks.CadastreError) as ei:
+        ks._get_json(ks.PORTAL_ODATA + "CadastralUnits")
     assert "non-JSON" in str(ei.value)
 
 
 # ── risk-flag scan ────────────────────────────────────────────────────────────
 def test_scan_risk_flags_bank_vs_nonbank():
-    bank = bf.scan_risk_flags(
+    bank = ks.scan_risk_flags(
         "Záložné právo v prospech Slovenská sporiteľňa, a.s.")
     assert bank == [{"flag": "záložné právo", "bank_related": True}]
 
-    nonbank = bf.scan_risk_flags("Exekúcia EX 55/2021 na podiel vlastníka")
+    nonbank = ks.scan_risk_flags("Exekúcia EX 55/2021 na podiel vlastníka")
     assert nonbank == [{"flag": "exekúcia", "bank_related": False}]
 
-    assert bf.scan_risk_flags("Bez tiarch a obmedzení") == []
+    assert ks.scan_risk_flags("Bez tiarch a obmedzení") == []
 
 
 # ── DB backfill mode ──────────────────────────────────────────────────────────
@@ -285,6 +350,6 @@ def test_run_cadastre_backfill_counts(temp_db, monkeypatch):
     conn.close()
 
     monkeypatch.setattr(bf, "init_db", lambda: None)
-    monkeypatch.setattr(bf, "_cadastral_get", make_dispatcher())
+    monkeypatch.setattr(ks, "_cadastral_get", make_dispatcher())
     counts = bf.run_cadastre_backfill()
     assert counts == {"processed": 2, "ok": 1, "not_found": 1, "errors": 0}

@@ -124,8 +124,12 @@ processes listings that have never been scored).
 | Key | Where | Enables |
 |-----|-------|---------|
 | GOOGLE_PLACES_API_KEY | console.cloud.google.com | Real location scoring + satellite view |
-| CADASTRAL_API_KEY | skgeodesy.sk dev portal | Real LV debt checking |
 | FINSTAT_API_KEY | finstat.sk/api | Company owner lookup |
+
+> LV debt checking needs **no key**: ÚGKK SR has no public API, so
+> `kataster_scraper.py` scrapes kataster.skgeodesy.sk directly (unofficial —
+> may break if the portal changes; listings without parcel data pass
+> "unverified").
 
 ---
 
