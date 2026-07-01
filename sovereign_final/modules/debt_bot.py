@@ -241,7 +241,7 @@ def run_debt_filter(progress_callback=None) -> tuple[int, int]:
         # (CADASTRAL_DELAY_SEC) and cache hits shouldn't wait at all.
 
     if unverified:
-        print(f"  ℹ️  {unverified} passed UNVERIFIED (no cadastral key/parcel) — "
+        print(f"  ℹ️  {unverified} passed UNVERIFIED (no parcel data / LV unavailable) — "
               f"verify title deeds manually before purchase.")
     print(f"\n✅ LV filter complete. Passed: {passed} | Rejected: {rejected}\n")
     return passed, rejected
