@@ -121,7 +121,8 @@ BALCONY_RENT_PREMIUM    = 1.03   # balcony / loggia / terrace: +3% (common, mode
 
 # ── APIs ──────────────────────────────────────────────────────────────────────
 GOOGLE_API_KEY    = os.getenv("GOOGLE_PLACES_API_KEY", "")
-CADASTRAL_API_KEY = os.getenv("CADASTRAL_API_KEY", "")
+# NOTE: there is no CADASTRAL_API_KEY — ÚGKK SR has no public API or keys.
+# LV checks scrape kataster.skgeodesy.sk directly via kataster_scraper.py.
 FINSTAT_API_KEY   = os.getenv("FINSTAT_API_KEY", "")
 DMR_ENDPOINT      = os.getenv("DMR_ENDPOINT", "http://localhost:12434/v1")
 LLM_MODEL         = os.getenv("LLM_MODEL", "mistral:7b-instruct-q4_k_m")
