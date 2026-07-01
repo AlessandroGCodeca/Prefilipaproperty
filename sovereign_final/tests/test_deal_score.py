@@ -1,7 +1,6 @@
 """Tests for engine/financial.compute_deal_score — the P2 composite grade that
 blends financial + location + energy + risk so ranking isn't purely financial."""
 
-import pytest
 
 from engine.financial import compute_deal_score
 

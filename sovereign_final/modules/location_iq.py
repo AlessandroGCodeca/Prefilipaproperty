@@ -13,7 +13,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
     GOOGLE_API_KEY,
     TRANSIT_WALK_METERS, AMENITY_RADIUS_METERS,
-    NOISE_LIMIT_DB, CONSTRUCTION_RADIUS_M,
     POINTS_TRANSIT, POINTS_AMENITIES, POINTS_CONSTRUCTION,
     POINTS_NOISE, POINTS_ENERGY,
     PRIME_THRESHOLD, SOLID_THRESHOLD,
@@ -111,25 +110,24 @@ def count_amenities(lat: float, lng: float) -> dict:
 def check_construction(lat: float, lng: float) -> bool:
     """
     TODO: Wire to Slovak planning portal (egov.sk) when API is available.
-    Currently deterministic demo — 15% flagged.
+    Until then: no data source = no flag. (Previously this hashed the
+    coordinates into a random 15% construction flag that docked real
+    listings' deal scores — never fabricate risk.)
     """
-    return _demo_bool(lat, lng, threshold=0.15)
+    return False
 
 
 def check_noise(lat: float, lng: float) -> bool:
     """
     TODO: Wire to enviroportal.sk noise map WMS layer.
-    Currently demo — 20% flagged.
+    Until then: no data source = no flag (was a fabricated 20% random flag
+    that forced POOR tiers on real listings).
     """
-    return _demo_bool(lat, lng, threshold=0.20, offset=1)
+    return False
 
 
 def _demo_float(lat, lng, lo, hi) -> float:
     return random.Random(int(lat * 1000 + lng * 1000)).uniform(lo, hi)
-
-
-def _demo_bool(lat, lng, threshold, offset=0) -> bool:
-    return random.Random(int(lat * 10001 + lng * 10001) + offset).random() < threshold
 
 
 def _haversine(lat1, lng1, lat2, lng2) -> float:
@@ -170,6 +168,17 @@ def compute_score(transit_m, amenity_counts, construction, noise, energy) -> tup
 
 # ── Main Runner ───────────────────────────────────────────────────────────────
 def run_location_scoring(progress_callback=None) -> int:
+    # Without a Google key every input here is fabricated: geocode() jitters a
+    # city centre by up to ~2.5 km (so the satellite view would show the wrong
+    # spot as "the property"), and the random noise/construction flags would
+    # penalise real listings' deal scores. Skip honestly instead — the deal
+    # score already rescales when location data is absent, and the "Demo data"
+    # toggle covers the demo experience with fixed coordinates.
+    if not GOOGLE_API_KEY:
+        print("ℹ️  Location IQ skipped — no GOOGLE_PLACES_API_KEY set "
+              "(refusing to score real listings with fabricated coordinates).")
+        return 0
+
     listings = get_unscored_location()
     if not listings:
         print("✅ No listings to score for location.")

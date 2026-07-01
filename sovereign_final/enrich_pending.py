@@ -10,7 +10,7 @@ fresh scrape, then upserts the updated row.
 
 Default max_listings=200. Pass a larger number to do more.
 """
-import sys, os, time
+import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 
 from datetime import datetime, timezone
@@ -18,7 +18,7 @@ from playwright.sync_api import sync_playwright
 
 from database import get_conn, upsert_listing
 from scraper.nehnutelnosti import (
-    _scrape_detail_page, _apply_detail, _district,
+    _scrape_detail_page, _apply_detail,
 )
 
 LIMIT = int(sys.argv[1]) if len(sys.argv) > 1 else 200

@@ -21,6 +21,7 @@ from config import SCRAPE_DELAY_SEC
 from database import upsert_listing, init_db
 from scraper._http import get, make_session
 from scraper.nehnutelnosti import _extract_location_from_text
+from scraper.textparse import rooms_from_title
 
 BASE = "https://www.topreality.sk"
 
@@ -272,7 +273,7 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
         "id": uid, "source": "topreality", "url": url, "url_hash": uid,
         "title": (title or "")[:200], "description": (description or "")[:8000],
         "price_eur": float(price or 0.0), "size_m2": float(size or 0.0),
-        "rooms": None, "floor": None, "year_built": None,
+        "rooms": rooms_from_title(title or ""), "floor": None, "year_built": None,
         "energy_class": energy,
         "address_raw": address,
         "district": _district_from_text(address),

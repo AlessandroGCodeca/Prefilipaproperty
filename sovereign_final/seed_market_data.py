@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from database import init_db, upsert_listing
 from modules.cashflow_runner import run_scoring
+from scraper.textparse import rooms_from_title
 
 random.seed(42)
 
@@ -85,7 +86,7 @@ def seed():
             "description":       "",
             "price_eur":         float(price),
             "size_m2":           float(size),
-            "rooms":             None,
+            "rooms":             rooms_from_title(title),
             "floor":             None,
             "year_built":        None,
             "energy_class":      energy,

@@ -11,7 +11,7 @@ import pytest
 
 from config import (
     HEALTH_LEVY_PERSONAL, ACQUISITION_COST_RATE, OWNER_RESERVE_RATE,
-    TAX_RATE_SRO_REDUCED, DIVIDEND_TAX_RATE,
+    TAX_RATE_SRO_REDUCED,
 )
 from engine.financial import (
     analyse, calc_mortgage, first_year_amortization,

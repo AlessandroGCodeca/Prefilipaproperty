@@ -691,6 +691,13 @@ def _apply_detail(listing: dict, detail: dict) -> None:
     if slug_data.get("district") and not listing.get("district"):
         listing["district"] = slug_data["district"]
 
+    # Rooms fallback — JSON-LD often omits numberOfRooms, but the title/slug
+    # nearly always states it ("3-izbový byt ..."), and rooms drive the ±15%
+    # per-m² rent multiplier in engine/financial.
+    if not listing.get("rooms"):
+        from scraper.textparse import rooms_from_title
+        listing["rooms"] = rooms_from_title(listing.get("title") or "")
+
 
 def _scrape_page_playwright(page_num: int) -> list[dict]:
     """Load one search page via Playwright, capture API responses + DOM links."""
@@ -761,7 +768,7 @@ def _scrape_page_playwright(page_num: int) -> list[dict]:
             results = [r for r in (_parse_api_item(item, now) for item in captured_api) if r]
         else:
             # ── Strategy 2: DOM link extraction with /detail/ selector ─────────
-            print(f"    No API JSON captured — trying DOM extraction...", flush=True)
+            print("    No API JSON captured — trying DOM extraction...", flush=True)
             links = page.eval_on_selector_all(
                 "a[href*='/detail/']",
                 "els => els.map(e => ({href: e.href, text: e.innerText.trim().slice(0,200)}))"
