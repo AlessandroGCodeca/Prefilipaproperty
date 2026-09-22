@@ -17,8 +17,11 @@ from bs4 import BeautifulSoup
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import SCRAPE_DELAY_SEC
-from database import upsert_listing, init_db
+from config import SCRAPE_DELAY_SEC, DETAIL_REFRESH_DAYS
+from database import (
+    upsert_listing, init_db, get_fresh_detail_urls, mark_details_enriched,
+    touch_listings,
+)
 from scraper._http import get, make_session
 from scraper.nehnutelnosti import _extract_location_from_text
 from scraper.textparse import rooms_from_title
@@ -439,8 +442,18 @@ def run(max_pages: int = 5) -> int:
             "in scraper/topreality.py."
         )
 
+    # Listings we already hold complete, recent data for. Their detail page is
+    # not re-fetched; last_seen_at is touched instead so the staleness sweep
+    # doesn't retire a listing that is still live on the site.
+    fresh_urls = get_fresh_detail_urls("topreality", max_age_days=DETAIL_REFRESH_DAYS)
+    if fresh_urls:
+        print(f"  {len(fresh_urls)} listings already scraped in the last "
+              f"{DETAIL_REFRESH_DAYS} days — their detail pages will be skipped",
+              flush=True)
+
     seen_urls: set[str] = set()
     total = 0
+    touched = 0
     for p in range(1, max_pages + 1):
         url = fmt.format(page=p)
         status, html = _fetch(url, sess)
@@ -452,9 +465,17 @@ def run(max_pages: int = 5) -> int:
         seen_urls.update(new_links)
         print(f"  Page {p}: {len(links)} links ({len(new_links)} new)", flush=True)
 
+        skip_links = [u for u in new_links if u in fresh_urls]
+        fetch_links = [u for u in new_links if u not in fresh_urls]
+        if skip_links:
+            touched += touch_listings(skip_links)
+            print(f"  Page {p}: skipped {len(skip_links)} already-scraped detail pages",
+                  flush=True)
+
         page_count = 0
         now = datetime.now(timezone.utc).isoformat()
-        for detail_url in new_links:
+        enriched_ids: list[str] = []
+        for detail_url in fetch_links:
             d_status, d_html = _fetch(detail_url, sess)
             if d_status != 200:
                 continue
@@ -462,15 +483,18 @@ def run(max_pages: int = 5) -> int:
             if listing:
                 try:
                     upsert_listing(listing)
+                    enriched_ids.append(listing["id"])
                     total += 1
                     page_count += 1
                 except Exception as e:
                     print(f"    DB error: {e}", flush=True)
             time.sleep(0.4)
+        # Stamp after the upserts, so a row always exists to stamp.
+        mark_details_enriched(enriched_ids)
         print(f"  Page {p}: upserted {page_count}", flush=True)
         time.sleep(SCRAPE_DELAY_SEC)
 
-    if total == 0:
+    if total == 0 and touched == 0:
         raise RuntimeError(
             "Topreality: 0 listings parsed. Check DETAIL_HREF_PATTERNS in "
             "scraper/topreality.py — the link patterns may need updating."

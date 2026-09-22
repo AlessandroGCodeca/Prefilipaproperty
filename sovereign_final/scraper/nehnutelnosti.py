@@ -16,8 +16,11 @@ from datetime import datetime, timezone
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import SCRAPE_DELAY_SEC
-from database import upsert_listing, init_db
+from config import SCRAPE_DELAY_SEC, DETAIL_REFRESH_DAYS
+from database import (
+    upsert_listing, init_db, get_fresh_detail_urls, mark_details_enriched,
+    touch_listings,
+)
 
 BASE        = "https://www.nehnutelnosti.sk"
 SEARCH_PAGE = BASE + "/vysledky/byty/slovensko/predaj?page={page}"
@@ -205,17 +208,34 @@ def _parse_slug(url: str) -> dict:
     return out
 
 
-def _parse_api_item(item: dict, now: str) -> dict | None:
-    """Convert one API response object to our DB schema."""
+def _api_item_url(item: dict) -> tuple[str, bool]:
+    """Resolve an API item's listing URL.
+
+    Returns (url, from_url_field). from_url_field is False when the item
+    carried no URL at all and the URL had to be built from its id — that form
+    is a guess, so callers that can't afford a dead link reject it.
+    """
+    url = item.get("url") or item.get("seoUrl") or item.get("link") or ""
+    if url:
+        return (url if url.startswith("http") else BASE + url), True
+    advert_id = item.get("id") or item.get("advertId") or ""
+    if advert_id:
+        # /detail/{id} is the canonical form _canonical_url() reduces every
+        # real listing URL to, so an item seen both ways lands on one row.
+        return f"{BASE}/detail/{advert_id}", False
+    return "", False
+
+
+def _parse_api_item(item: dict, now: str, require_url_field: bool = False) -> dict | None:
+    """Convert one API response object to our DB schema.
+
+    With require_url_field, items that only carry an id are dropped rather than
+    stored behind a guessed URL.
+    """
     try:
-        url = item.get("url") or item.get("seoUrl") or item.get("link") or ""
-        advert_id = item.get("id") or item.get("advertId") or ""
-        if not url and advert_id:
-            url = f"{BASE}/nehnutelnost/{advert_id}/"
-        if not url:
+        url, from_url_field = _api_item_url(item)
+        if not url or (require_url_field and not from_url_field):
             return None
-        if not url.startswith("http"):
-            url = BASE + url
 
         price = 0.0
         price_obj = item.get("price") or item.get("priceInfo") or {}
@@ -284,6 +304,26 @@ def _extract_items_from_json(data) -> list[dict]:
                 if isinstance(v, list) and v:
                     return v
     return []
+
+
+def _harvest_api_listings(items, seen: set[str], now: str,
+                          require_url_field: bool = False) -> list[dict]:
+    """Turn captured API items into listing records, skipping URLs already held.
+
+    `seen` is the run-wide set of canonical URLs and is extended in place, so
+    the same listing is never enriched twice — whether it turned up on two
+    search pages or in both the DOM and an API response.
+    """
+    out: list[dict] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        rec = _parse_api_item(item, now, require_url_field=require_url_field)
+        if not rec or rec["url"] in seen:
+            continue
+        seen.add(rec["url"])
+        out.append(rec)
+    return out
 
 
 def _parse_rsc_chunks(html: str) -> list[dict]:
@@ -699,119 +739,180 @@ def _apply_detail(listing: dict, detail: dict) -> None:
         listing["rooms"] = rooms_from_title(listing.get("title") or "")
 
 
-def _scrape_page_playwright(page_num: int) -> list[dict]:
-    """Load one search page via Playwright, capture API responses + DOM links."""
-    from playwright.sync_api import sync_playwright
+class _ApiCapture:
+    """Collects listing-shaped JSON from every API response the browser sees.
 
-    url = SEARCH_PAGE.format(page=page_num)
-    captured_api: list[dict] = []
+    One instance is attached to the page for the whole run. take() drains it,
+    so each phase (loading a search page, then walking its detail pages) reads
+    only the responses that arrived during that phase.
+    """
 
-    def _on_response(response):
+    def __init__(self):
+        self.items: list[dict] = []
+
+    def __call__(self, response):
         if response.status != 200:
             return
         ctype = response.headers.get("content-type", "")
         if "json" not in ctype:
             return
         # Capture any JSON from endpoints that look like listing APIs
-        if any(sig in response.url for sig in API_SIGNALS):
-            try:
-                data = response.json()
-                items = _extract_items_from_json(data)
-                if items:
-                    captured_api.extend(items)
-                    print(f"    ✅ API hit: {response.url[:80]} → {len(items)} items", flush=True)
-            except Exception:
-                pass
-
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-            ],
-        )
-        ctx = browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
-            locale="sk-SK",
-            viewport={"width": 1280, "height": 900},
-            ignore_https_errors=True,
-        )
-        # Patch navigator.webdriver before page JS runs
-        ctx.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            Object.defineProperty(navigator, 'plugins',  { get: () => [1,2,3,4,5] });
-            window.chrome = { runtime: {}, loadTimes: ()=>({}), csi: ()=>({}) };
-        """)
-        page = ctx.new_page()
-        page.on("response", _on_response)
-
+        if not any(sig in response.url for sig in API_SIGNALS):
+            return
         try:
-            page.goto(url, wait_until="networkidle", timeout=60000)
-        except Exception as e:
-            print(f"    ⚠️  goto error: {e}", flush=True)
+            data = response.json()
+            items = _extract_items_from_json(data)
+            if items:
+                self.items.extend(items)
+                print(f"    ✅ API hit: {response.url[:80]} → {len(items)} items", flush=True)
+        except Exception:
+            pass
 
-        # Extra wait for any deferred XHR
-        page.wait_for_timeout(3000)
+    def take(self) -> list[dict]:
+        out, self.items = self.items, []
+        return out
 
-        html = page.content()
-        now = datetime.now(timezone.utc).isoformat()
-        results: list[dict] = []
 
-        # ── Strategy 1: API interception gave full structured items ────────────
-        if captured_api:
-            results = [r for r in (_parse_api_item(item, now) for item in captured_api) if r]
-        else:
-            # ── Strategy 2: DOM link extraction with /detail/ selector ─────────
-            print("    No API JSON captured — trying DOM extraction...", flush=True)
-            links = page.eval_on_selector_all(
-                "a[href*='/detail/']",
-                "els => els.map(e => ({href: e.href, text: e.innerText.trim().slice(0,200)}))"
-            )
-            print(f"    /detail/ links in DOM: {len(links)}", flush=True)
+def _open_browser(pw):
+    """Launch one Chromium session for the whole run and wire up API capture.
 
-            # ── Strategy 3: RSC chunk parsing from HTML source ─────────────────
-            rsc_items = _parse_rsc_chunks(html)
-            print(f"    RSC /detail/ URLs found: {len(rsc_items)}", flush=True)
+    Launching a browser per search page cost a fresh Imperva handshake every
+    time; reusing one session also keeps its cookies, so later pages look like
+    continued browsing rather than 10 unrelated first visits.
+    """
+    browser = pw.chromium.launch(
+        headless=True,
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
+        ],
+    )
+    ctx = browser.new_context(
+        user_agent=(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        locale="sk-SK",
+        viewport={"width": 1280, "height": 900},
+        ignore_https_errors=True,
+    )
+    # Patch navigator.webdriver before page JS runs
+    ctx.add_init_script("""
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        Object.defineProperty(navigator, 'plugins',  { get: () => [1,2,3,4,5] });
+        window.chrome = { runtime: {}, loadTimes: ()=>({}), csi: ()=>({}) };
+    """)
+    page = ctx.new_page()
+    capture = _ApiCapture()
+    page.on("response", capture)
+    return browser, page, capture
 
-            seen: set[str] = set()
-            for l in links:
-                href = l.get("href", "")
-                if href and "/detail/" in href and href not in seen:
-                    seen.add(href)
-                    results.append(_minimal_listing(href, l.get("text", ""), now))
-            for item in rsc_items:
-                href = item["_url"]
-                if href not in seen:
-                    seen.add(href)
-                    results.append(_minimal_listing(href, "", now))
 
-        # ── Enrichment: open each listing's detail page in same browser ────────
-        to_enrich = [r for r in results if not r.get("price_eur")]
-        if to_enrich:
-            print(f"    Enriching {len(to_enrich)} listings (detail pages)...", flush=True)
-            success = 0
-            for i, listing in enumerate(to_enrich, 1):
-                try:
-                    detail = _scrape_detail_page(page, listing["url"])
-                    if detail:
-                        _apply_detail(listing, detail)
-                        if detail.get("price"):
-                            success += 1
-                except Exception as e:
-                    print(f"      [{i}] enrich error: {e}", flush=True)
-                if i % 10 == 0 or i == len(to_enrich):
-                    print(f"      progress {i}/{len(to_enrich)} (with price: {success})",
-                          flush=True)
+def _scrape_page_playwright(page, capture, page_num: int,
+                            seen_urls: set[str], fresh_urls: set[str]
+                            ) -> tuple[list[dict], list[str], list[str]]:
+    """Scrape one search page.
 
-        browser.close()
+    Returns (listings to upsert, ids whose detail page we read, urls to touch).
 
-    return results
+    `seen_urls` is the run-wide dedupe set (extended in place). `fresh_urls`
+    holds listings the DB already has complete recent data for: those come back
+    in the third slot for a last_seen_at touch rather than as listings, since
+    the only record we could build for them without opening the detail page is
+    a bare card-text one that would overwrite what we already hold.
+    """
+    url = SEARCH_PAGE.format(page=page_num)
+    capture.take()  # drop anything left over from the previous page
+
+    try:
+        page.goto(url, wait_until="networkidle", timeout=60000)
+    except Exception as e:
+        print(f"    ⚠️  goto error: {e}", flush=True)
+
+    # Extra wait for any deferred XHR
+    page.wait_for_timeout(3000)
+
+    html = page.content()
+    now = datetime.now(timezone.utc).isoformat()
+    results: list[dict] = []
+
+    # ── Strategy 1: API interception gave full structured items ────────────
+    search_items = capture.take()
+    if search_items:
+        results = _harvest_api_listings(search_items, seen_urls, now)
+    else:
+        # ── Strategy 2: DOM link extraction with /detail/ selector ─────────
+        print("    No API JSON captured — trying DOM extraction...", flush=True)
+        links = page.eval_on_selector_all(
+            "a[href*='/detail/']",
+            "els => els.map(e => ({href: e.href, text: e.innerText.trim().slice(0,200)}))"
+        )
+        print(f"    /detail/ links in DOM: {len(links)}", flush=True)
+
+        # ── Strategy 3: RSC chunk parsing from HTML source ─────────────────
+        rsc_items = _parse_rsc_chunks(html)
+        print(f"    RSC /detail/ URLs found: {len(rsc_items)}", flush=True)
+
+        # Dedupe on the CANONICAL url, not the raw href: the same listing is
+        # linked under several marketing slugs, which all reduce to one row.
+        for l in links:
+            href = l.get("href", "")
+            if not href or "/detail/" not in href:
+                continue
+            canon = _canonical_url(href)
+            if canon in seen_urls:
+                continue
+            seen_urls.add(canon)
+            results.append(_minimal_listing(href, l.get("text", ""), now))
+        for item in rsc_items:
+            canon = _canonical_url(item["_url"])
+            if canon in seen_urls:
+                continue
+            seen_urls.add(canon)
+            results.append(_minimal_listing(canon, "", now))
+
+    # ── Skip: listings the DB already holds complete recent data for. Drop
+    # them from the upsert list entirely — all we have without opening the
+    # detail page is card text, which would overwrite better stored values.
+    touch_urls = [r["url"] for r in results if r["url"] in fresh_urls]
+    if touch_urls:
+        print(f"    Skipping {len(touch_urls)} detail pages already scraped recently",
+              flush=True)
+        results = [r for r in results if r["url"] not in fresh_urls]
+
+    # ── Enrichment: open each listing's detail page in same browser ────────
+    enriched_ids: list[str] = []
+    to_enrich = [r for r in results if not r.get("price_eur")]
+    if to_enrich:
+        print(f"    Enriching {len(to_enrich)} listings (detail pages)...", flush=True)
+        success = 0
+        for i, listing in enumerate(to_enrich, 1):
+            try:
+                detail = _scrape_detail_page(page, listing["url"])
+                if detail:
+                    _apply_detail(listing, detail)
+                    enriched_ids.append(listing["id"])
+                    if detail.get("price"):
+                        success += 1
+            except Exception as e:
+                print(f"      [{i}] enrich error: {e}", flush=True)
+            if i % 10 == 0 or i == len(to_enrich):
+                print(f"      progress {i}/{len(to_enrich)} (with price: {success})",
+                      flush=True)
+
+    # ── Harvest: detail pages fire their own API calls (dev-project unit
+    # lists, "similar listings"), each returning fully structured records for
+    # listings the search page never showed. They were being captured and
+    # dropped; keep the ones carrying a real URL.
+    extra = _harvest_api_listings(capture.take(), seen_urls, now,
+                                  require_url_field=True)
+    if extra:
+        print(f"    + {len(extra)} listings harvested from detail-page APIs", flush=True)
+        results.extend(extra)
+
+    return results, enriched_ids, touch_urls
 
 
 def check_reachable() -> tuple[int, str]:
@@ -926,21 +1027,46 @@ def run(max_pages: int = 10) -> int:
             "Run:  pip install playwright && playwright install chromium"
         )
 
+    from playwright.sync_api import sync_playwright
+
     print(f"🔍 Nehnutelnosti.sk ({max_pages} pages, Playwright)...", flush=True)
     total = 0
 
-    for p in range(1, max_pages + 1):
-        listings = _scrape_page_playwright(p)
-        for l in listings:
-            try:
-                upsert_listing(l)
-                total += 1
-            except Exception as e:
-                print(f"    DB error: {e}", flush=True)
-        print(f"  Page {p}: {len(listings)} found", flush=True)
-        time.sleep(SCRAPE_DELAY_SEC)
+    # Listings we already hold complete, recent data for — seen again below so
+    # last_seen_at stays current, but their detail page is not re-opened.
+    fresh_urls = get_fresh_detail_urls("nehnutelnosti", max_age_days=DETAIL_REFRESH_DAYS)
+    if fresh_urls:
+        print(f"  {len(fresh_urls)} listings already enriched in the last "
+              f"{DETAIL_REFRESH_DAYS} days — their detail pages will be skipped",
+              flush=True)
+    seen_urls: set[str] = set()
+    touched = 0
 
-    if total == 0:
+    with sync_playwright() as pw:
+        browser, page, capture = _open_browser(pw)
+        try:
+            for p in range(1, max_pages + 1):
+                listings, enriched_ids, touch_urls = _scrape_page_playwright(
+                    page, capture, p, seen_urls, fresh_urls
+                )
+                for l in listings:
+                    try:
+                        upsert_listing(l)
+                        total += 1
+                    except Exception as e:
+                        print(f"    DB error: {e}", flush=True)
+                # Stamp only after the upsert, so a row always exists to stamp.
+                mark_details_enriched(enriched_ids)
+                touched += touch_listings(touch_urls)
+                print(f"  Page {p}: {len(listings)} found", flush=True)
+                time.sleep(SCRAPE_DELAY_SEC)
+        finally:
+            browser.close()
+
+    # A run where every listing was already fresh upserts nothing — that's the
+    # skip working, not a broken scraper. Only a run that saw nothing at all
+    # means the extraction strategies have stopped matching the site.
+    if total == 0 and touched == 0:
         raise RuntimeError(
             "Nehnutelnosti: 0 listings after Playwright scrape.\n"
             "Run debug_playwright.py with headless=False to inspect live page."
