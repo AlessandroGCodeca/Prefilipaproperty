@@ -66,8 +66,10 @@ def _price(text: str) -> float:
 
 
 def _size(text: str) -> float:
-    m = re.search(r"(\d+(?:[.,]\d+)?)\s*m", text or "", re.I)
-    return float(m.group(1).replace(",", ".")) if m else 0.0
+    """Apartment area from free card text. Bounded to a plausible flat size so
+    a stated balcony/loggia area is not mistaken for the flat itself."""
+    from scraper.textparse import area_from_text
+    return area_from_text(text)
 
 
 def _district(address: str) -> str:
@@ -613,26 +615,6 @@ def _scrape_detail_page(page, url: str) -> dict:
         if addr:
             data["address"] = addr
 
-    # Price — handle regular space, NBSP (\xa0), narrow NBSP (\u202f), thin space (\u2009).
-    # Scan ALL prices in the visible text and take the max plausible one. Listings
-    # frequently mention deposits ("rezervačná záloha 1 000 €") and per-m² rates
-    # ("3 273 €/m²") before the actual sale price; using re.search (first match)
-    # would grab those instead.
-    if not data.get("price"):
-        candidates: list[float] = []
-        for m in re.finditer(
-            r"(\d{1,3}(?:[\s\xa0\u202f\u2009]\d{3})+|\d{4,8})\s*€",
-            text or html,
-        ):
-            try:
-                v = float(re.sub(r"[\s\xa0\u202f\u2009]", "", m.group(1)))
-            except Exception:
-                continue
-            if _is_plausible_price(v):
-                candidates.append(v)
-        if candidates:
-            data["price"] = max(candidates)
-
     # Size — try labelled patterns first, then fall back to the first
     # plausible "N m²" in the rendered text. Window widened to 120 chars
     # because rendered DOM splits label from value across multiple newlines.
@@ -690,6 +672,35 @@ def _scrape_detail_page(page, url: str) -> dict:
 
         if size_value:
             data["size"] = size_value
+
+    # Price — handle regular space, NBSP (\xa0), narrow NBSP (\u202f), thin space (\u2009).
+    # Scan ALL prices in the visible text. The smaller figures are deposits
+    # ("rezervačná záloha 1 000 €") and per-m² rates ("3 273 €/m²"), so the sale
+    # price is the largest — but the page also renders OTHER listings
+    # (recommendations, the agency's own portfolio), whose prices can be larger
+    # still. Taking the maximum outright attached one agency's €1,250,000
+    # property to seven of its unrelated flats, so pick_sale_price() drops
+    # candidates implying an absurd €/m² for the region first. That needs the
+    # size, which is why the size block above now runs before this one.
+    if not data.get("price"):
+        candidates: list[float] = []
+        for m in re.finditer(
+            r"(\d{1,3}(?:[\s\xa0\u202f\u2009]\d{3})+|\d{4,8})\s*€",
+            text or html,
+        ):
+            try:
+                v = float(re.sub(r"[\s\xa0\u202f\u2009]", "", m.group(1)))
+            except Exception:
+                continue
+            if _is_plausible_price(v):
+                candidates.append(v)
+        if candidates:
+            from engine.regional_prices import pick_sale_price
+            data["price"] = pick_sale_price(
+                candidates,
+                size_m2=data.get("size") or 0.0,
+                district=_district(data.get("address") or "") or (data.get("address") or ""),
+            )
 
     # Energy class — "Energetická trieda B" or similar
     if not data.get("energy"):
@@ -1145,8 +1156,11 @@ def run(max_pages: int = 10) -> int:
     _dedupe_canonical_urls()
     _zero_bogus_prices()
     _backfill_blank_districts()
-    from engine.regional_prices import zero_below_regional_floor
+    from engine.regional_prices import (
+        zero_below_regional_floor, zero_above_regional_ceiling,
+    )
     zero_below_regional_floor("nehnutelnosti")
+    zero_above_regional_ceiling("nehnutelnosti")
     print(f"✅ Nehnutelnosti done. {total} upserted.", flush=True)
     return total
 

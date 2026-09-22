@@ -32,6 +32,40 @@ def strip_diacritics(text: str) -> str:
 _strip_diacritics = strip_diacritics
 
 
+# Plausible apartment floor area. Anything outside this is some other number
+# that happens to be followed by "m" — a balcony, a cellar, a distance.
+APARTMENT_MIN_M2 = 15.0
+APARTMENT_MAX_M2 = 500.0
+
+# "58 m²", "58m2". The unit is explicit, so this is the trustworthy form.
+_AREA_M2_RE = re.compile(r"(\d{1,4}(?:[.,]\d+)?)\s*m(?:²|2)\b", re.I)
+# "58 m" with no superscript. Also matches "s 6m logiou" — a 6 m² loggia, not
+# a 6 m² flat — so this form is only consulted after the one above fails.
+_AREA_BARE_M_RE = re.compile(r"(\d{1,4}(?:[.,]\d+)?)\s*m\b", re.I)
+
+
+def area_from_text(text: str, min_m2: float = APARTMENT_MIN_M2,
+                   max_m2: float = APARTMENT_MAX_M2) -> float:
+    """First plausible apartment area in `text`, or 0.0.
+
+    Every match is checked against the plausible range rather than just the
+    first one, because listings routinely state a balcony or cellar area
+    before the flat's own ("1,5-izb. byt s 6m logiou" put a 6 m² flat, priced
+    at €182,000, into the database).
+    """
+    if not text:
+        return 0.0
+    for pattern in (_AREA_M2_RE, _AREA_BARE_M_RE):
+        for m in pattern.finditer(text):
+            try:
+                v = float(m.group(1).replace(",", "."))
+            except ValueError:
+                continue
+            if min_m2 <= v <= max_m2:
+                return v
+    return 0.0
+
+
 def rooms_from_title(title: str) -> int | None:
     """Extract a room count from a Slovak listing title.
 

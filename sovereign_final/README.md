@@ -25,7 +25,7 @@ CI runs on every PR. To run locally from `sovereign_final/`:
 python3 -m pytest tests/
 ```
 
-Expected: ~267 passing, 1 xfailed (known Slovak-declension limitation).
+Expected: ~331 passing, 1 xfailed (known Slovak-declension limitation).
 
 ---
 
@@ -48,7 +48,7 @@ sovereign_final/
 │   └── topreality.py         ← Topreality.sk scraper
 ├── engine/
 │   ├── financial.py          ← 2026 Slovak tax + cashflow engine
-│   └── regional_prices.py    ← Sale-price floor (dev-project filter)
+│   └── regional_prices.py    ← Sale-price floor + ceiling sanity filters
 ├── modules/
 │   ├── debt_bot.py           ← LV title deed checker + Mistral LLM
 │   ├── cashflow_runner.py    ← Financial scoring runner

@@ -67,8 +67,10 @@ def _price(text: str) -> float:
 
 
 def _size(text: str) -> float:
-    m = re.search(r"(\d+(?:[.,]\d+)?)\s*m", text or "", re.I)
-    return float(m.group(1).replace(",", ".")) if m else 0.0
+    """Apartment area from free card text. Bounded to a plausible flat size so
+    a stated balcony/loggia area is not mistaken for the flat itself."""
+    from scraper.textparse import area_from_text
+    return area_from_text(text)
 
 
 def _district(text: str) -> str:
@@ -288,8 +290,11 @@ def run(max_pages: int = 10) -> int:
         )
     _zero_bogus_prices()
     _backfill_blank_districts()
-    from engine.regional_prices import zero_below_regional_floor
+    from engine.regional_prices import (
+        zero_below_regional_floor, zero_above_regional_ceiling,
+    )
     zero_below_regional_floor("bazos")
+    zero_above_regional_ceiling("bazos")
     print(f"✅ Bazos done. {total} upserted.", flush=True)
     return total
 

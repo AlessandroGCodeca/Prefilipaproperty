@@ -75,6 +75,23 @@ REGIONAL_PRICE_FLOOR_RATIO = 0.50
 # only reject listings priced below the cheapest plausible Slovak apartment.
 GLOBAL_BLANK_DISTRICT_FLOOR = 800.0
 
+# Ceiling as a multiple of the lookup median. A price far above the local
+# median is not a luxury listing, it is the wrong number: the scrapers read the
+# rendered page, and a detail page also renders an agency's other listings, so
+# a price can be picked up from a neighbouring card. A live run had one
+# agency's €1,250,000 property attached to seven of its unrelated flats.
+#
+# 4× is deliberately generous. The medians are for staršie 3-izbové byty, and
+# small flats, new builds and penthouses all run well above that — a Staré
+# Mesto penthouse at ~€9,900/m² sits at 2.2× its district median and passes.
+# Errors of this kind are an order of magnitude out, not a factor of two.
+REGIONAL_PRICE_CEILING_RATIO = 4.0
+
+# Fallback ceiling in €/m² when a listing has no district. The priciest genuine
+# Slovak apartments (Staré Mesto luxury new-builds) ask ~€10–12k/m², so €20k
+# clears every real listing while still catching a 10× misread.
+GLOBAL_BLANK_DISTRICT_CEILING = 20_000.0
+
 # Map of city / district / suburb names (lowercased) → kraj code.
 # Built from the same set of Slovak cities used by RENT_PER_M2 in config.py.
 # Substring match: any listing whose district contains one of these wins.
@@ -192,32 +209,49 @@ def kraj_for_district(district: str) -> str | None:
     return None
 
 
-def regional_price_floor(district: str) -> float:
-    """Return the per-m² price floor for the listing's region.
+def regional_median_price(district: str) -> float | None:
+    """The per-m² sale-price median for the listing's region, or None when the
+    district resolves to nothing.
 
-    Lookup chain: Bratislava sub-district → city → kraj → global fallback.
-    The Bratislava sub-district match requires "bratislava" to also appear
-    in the district string, because suburb names like "Staré Mesto" or
-    "Nové Mesto" exist in other Slovak cities too (e.g. Košice).
+    Lookup chain: Bratislava sub-district → city → kraj. The Bratislava
+    sub-district match requires "bratislava" to also appear in the district
+    string, because suburb names like "Staré Mesto" or "Nové Mesto" exist in
+    other Slovak cities too (e.g. Košice).
     """
     if not district:
-        return GLOBAL_BLANK_DISTRICT_FLOOR
+        return None
     key = district.lower()
 
     if "bratislava" in key:
         for needle in _BA_DISTRICT_KEYS_BY_LENGTH:
             if needle in key:
-                return BA_DISTRICT_MEDIAN_PRICE_PER_M2[needle] * REGIONAL_PRICE_FLOOR_RATIO
+                return BA_DISTRICT_MEDIAN_PRICE_PER_M2[needle]
 
     for needle in _CITY_KEYS_BY_LENGTH:
         if needle in key:
-            return CITY_MEDIAN_PRICE_PER_M2[needle] * REGIONAL_PRICE_FLOOR_RATIO
+            return CITY_MEDIAN_PRICE_PER_M2[needle]
 
     kraj = kraj_for_district(district)
     if kraj:
-        return REGIONAL_MEDIAN_PRICE_PER_M2[kraj] * REGIONAL_PRICE_FLOOR_RATIO
+        return REGIONAL_MEDIAN_PRICE_PER_M2[kraj]
 
-    return GLOBAL_BLANK_DISTRICT_FLOOR
+    return None
+
+
+def regional_price_floor(district: str) -> float:
+    """Per-m² price floor for the listing's region, or the global fallback."""
+    median = regional_median_price(district)
+    if median is None:
+        return GLOBAL_BLANK_DISTRICT_FLOOR
+    return median * REGIONAL_PRICE_FLOOR_RATIO
+
+
+def regional_price_ceiling(district: str) -> float:
+    """Per-m² price ceiling for the listing's region, or the global fallback."""
+    median = regional_median_price(district)
+    if median is None:
+        return GLOBAL_BLANK_DISTRICT_CEILING
+    return median * REGIONAL_PRICE_CEILING_RATIO
 
 
 def is_plausible_regional_price(price_eur: float, size_m2: float, district: str) -> bool:
@@ -226,6 +260,42 @@ def is_plausible_regional_price(price_eur: float, size_m2: float, district: str)
     if not price_eur or not size_m2:
         return True
     return (price_eur / size_m2) >= regional_price_floor(district)
+
+
+def is_above_regional_ceiling(price_eur: float, size_m2: float, district: str) -> bool:
+    """True when price/m² is far above the region's median — which in practice
+    means the price belongs to a different listing, not that this one is
+    expensive. See REGIONAL_PRICE_CEILING_RATIO.
+
+    A listing with no price or no size can't be judged, so it is left alone.
+    """
+    if not price_eur or not size_m2:
+        return False
+    return (price_eur / size_m2) > regional_price_ceiling(district)
+
+
+def pick_sale_price(candidates, size_m2: float = 0.0, district: str = "") -> float:
+    """Choose the sale price from every € figure found on a listing page.
+
+    The smaller figures on a page are deposits, monthly fees, parking spots and
+    per-m² rates, so the sale price is the largest — except that the page also
+    renders other listings, whose prices can be larger still. When the size is
+    known, anything implying an absurd €/m² for the region is dropped before
+    taking the largest; those are prices belonging to a different property.
+
+    Falls back to the plain maximum when there is no size to judge against, and
+    also when every candidate looks too high — better a suspect price the
+    ceiling cleanup will catch than silently no price at all.
+    """
+    values = [float(c) for c in (candidates or [])]
+    if not values:
+        return 0.0
+    if size_m2 and size_m2 > 0:
+        ceiling = regional_price_ceiling(district)
+        within = [v for v in values if (v / size_m2) <= ceiling]
+        if within:
+            return max(within)
+    return max(values)
 
 
 def zero_below_regional_floor(source: str) -> int:
@@ -256,5 +326,44 @@ def zero_below_regional_floor(source: str) -> int:
         print(
             f"  ↳ zeroed {len(flagged)} {source} listings priced below "
             f"regional NBS floor (or €{int(GLOBAL_BLANK_DISTRICT_FLOOR)}/m² when district missing)"
+        )
+    return len(flagged)
+
+
+def zero_above_regional_ceiling(source: str) -> int:
+    """Cleanup pass: zero the price (and reset to PENDING) on rows whose €/m²
+    sits far above the regional median.
+
+    The mirror of zero_below_regional_floor, and it repairs rows already in the
+    database — a price picked up from a neighbouring listing stays wrong until
+    something notices, and a listing the engine thinks costs €1.25M can never
+    score as a deal. Zeroing sends it back to PENDING so the next scrape
+    re-reads it.
+    """
+    from database import get_conn
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, district, price_eur, size_m2 FROM listings "
+        "WHERE source=? AND price_eur > 0 AND size_m2 > 0",
+        (source,),
+    ).fetchall()
+    flagged: list[str] = []
+    for row_id, district, price, size in rows:
+        if is_above_regional_ceiling(price, size, district or ""):
+            flagged.append(row_id)
+    if flagged:
+        placeholders = ",".join("?" * len(flagged))
+        conn.execute(
+            f"UPDATE listings SET price_eur=0, classification='PENDING' "
+            f"WHERE id IN ({placeholders})",
+            flagged,
+        )
+        conn.commit()
+    conn.close()
+    if flagged:
+        print(
+            f"  ↳ zeroed {len(flagged)} {source} listings priced above "
+            f"{REGIONAL_PRICE_CEILING_RATIO:g}× the regional median "
+            f"(or €{int(GLOBAL_BLANK_DISTRICT_CEILING):,}/m² when district missing)"
         )
     return len(flagged)

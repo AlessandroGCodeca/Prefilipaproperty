@@ -25,6 +25,7 @@ from database import (
 from scraper._http import get, make_session
 from scraper.nehnutelnosti import _extract_location_from_text
 from scraper.textparse import rooms_from_title
+from engine.regional_prices import pick_sale_price as _pick_sale_price
 
 BASE = "https://www.topreality.sk"
 
@@ -83,12 +84,20 @@ def _is_plausible_price(v: float) -> bool:
     return _PRICE_MIN <= v <= _PRICE_MAX
 
 
-def _price_from_text(t: str) -> float:
+def _price_from_text(t: str, size_m2: float = 0.0, district: str = "") -> float:
     """Extract the apartment sale price from rendered text.
 
-    The page often contains other € amounts (deposit, monthly fee, parking
-    spot price, per-m² rate). We take the LARGEST value within a plausible
-    sale-price range to avoid grabbing those.
+    The page carries other € amounts (deposit, monthly fee, parking spot,
+    per-m² rate), all smaller than the sale price — so of the plausible
+    candidates we want the largest.
+
+    But it also renders *other listings* (recommendations, the agency's own
+    portfolio), whose prices can be far larger. Taking the largest outright
+    attached one agency's €1,250,000 property to seven of its unrelated flats.
+    So when the listing's size is known, candidates implying an absurd €/m²
+    for the region are dropped first; the largest of what survives is the
+    sale price. With no size there is nothing to check against, and the old
+    behaviour stands.
     """
     if not t:
         return 0.0
@@ -100,7 +109,7 @@ def _price_from_text(t: str) -> float:
                 candidates.append(v)
         except Exception:
             pass
-    return max(candidates) if candidates else 0.0
+    return _pick_sale_price(candidates, size_m2, district)
 
 
 def _size_from_text(t: str) -> float:
@@ -242,13 +251,18 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
                 except Exception:
                     pass
 
-    price = ld_data.get("price") or _price_from_text(body_text)
+    # Size and address first: both feed the price sanity check below, which
+    # needs a €/m² to judge a candidate against its region.
     size = ld_data.get("size") or _size_from_text(body_text)
     address = ld_data.get("address", "")
     # Fallback when JSON-LD has no address (common on topreality detail pages):
     # scan rendered body for any known Slovak city/suburb name.
     if not address:
         address = _extract_location_from_text(body_text)
+
+    price = ld_data.get("price") or _price_from_text(
+        body_text, size_m2=size, district=_district_from_text(address) or address
+    )
 
     # Image
     img = ""
@@ -503,8 +517,11 @@ def run(max_pages: int = 5) -> int:
     _deactivate_category_pages()
     _zero_bogus_prices()
     _backfill_blank_districts()
-    from engine.regional_prices import zero_below_regional_floor
+    from engine.regional_prices import (
+        zero_below_regional_floor, zero_above_regional_ceiling,
+    )
     zero_below_regional_floor("topreality")
+    zero_above_regional_ceiling("topreality")
     print(f"✅ Topreality done. {total} upserted.", flush=True)
     return total
 
