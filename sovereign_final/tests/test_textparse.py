@@ -44,3 +44,38 @@ class TestNoFalsePositives:
     def test_price_digits_not_mistaken_for_rooms(self):
         # "…129 000 € … 3-izbový…" must return 3, not something from the price
         assert rooms_from_title("Predaj za 129 000 €, 3-izbový byt") == 3
+
+
+# ── area_from_text ────────────────────────────────────────────────────────────
+from scraper.textparse import area_from_text  # noqa: E402
+
+
+class TestAreaFromText:
+    @pytest.mark.parametrize("text,expected", [
+        ("3-izbový byt 74 m2", 74.0),
+        ("58m² byt v centre", 58.0),
+        ("Predaj 2-izb, 46,41 m²", 46.41),
+        ("úžitková plocha 120 m²", 120.0),
+    ])
+    def test_reads_the_area(self, text, expected):
+        assert area_from_text(text) == expected
+
+    def test_loggia_is_not_the_flat(self):
+        """This put a 6 m² flat priced at €182 000 into the database — the
+        bare-m form matched the loggia before the flat's own area."""
+        assert area_from_text("1,5-izb.byt s 6m logiou, komplet.rek, Jaltská") == 0.0
+
+    def test_explicit_m2_wins_over_an_earlier_bare_m(self):
+        assert area_from_text("balkón 6m, byt 62 m²") == 62.0
+
+    def test_scans_past_an_implausible_first_match(self):
+        assert area_from_text("pivnica 4 m², byt 70 m²") == 70.0
+
+    @pytest.mark.parametrize("text", [
+        "", "byt bez rozlohy", "garáž 12 m²", "pozemok 5000 m²",
+    ])
+    def test_nothing_plausible(self, text):
+        assert area_from_text(text) == 0.0
+
+    def test_bounds_are_tunable(self):
+        assert area_from_text("garáž 12 m²", min_m2=5.0) == 12.0

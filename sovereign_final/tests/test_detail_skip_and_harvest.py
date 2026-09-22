@@ -405,6 +405,7 @@ def _stub_cleanup(monkeypatch, module):
                "_zero_bogus_prices", "_backfill_blank_districts"):
         monkeypatch.setattr(module, fn, lambda: 0)
     monkeypatch.setattr(rp, "zero_below_regional_floor", lambda source: 0)
+    monkeypatch.setattr(rp, "zero_above_regional_ceiling", lambda source: 0)
     monkeypatch.setattr(module, "time",
                         type("T", (), {"sleep": staticmethod(lambda s: None)}))
 
