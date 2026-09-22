@@ -306,6 +306,28 @@ def _extract_items_from_json(data) -> list[dict]:
     return []
 
 
+# Fields that only a real listing object carries. A bare id/name pair is not
+# enough — the site's dropdown endpoints (report reasons, filter options) are
+# shaped exactly like that, and one of them, /api/v2/advertisement/detail/
+# report/form-categories, matches API_SIGNALS on every single detail page.
+_LISTING_ITEM_KEYS = frozenset({
+    "url", "seoUrl", "link", "price", "priceInfo", "advertId",
+    "usableArea", "floorArea", "area", "size",
+})
+
+
+def _looks_like_listings(items) -> bool:
+    """True when the batch carries at least one listing-shaped object.
+
+    Guards the capture against non-listing endpoints that happen to return a
+    list under one of the keys _extract_items_from_json looks for.
+    """
+    for item in items[:5]:
+        if isinstance(item, dict) and not _LISTING_ITEM_KEYS.isdisjoint(item):
+            return True
+    return False
+
+
 def _harvest_api_listings(items, seen: set[str], now: str,
                           require_url_field: bool = False) -> list[dict]:
     """Turn captured API items into listing records, skipping URLs already held.
@@ -762,7 +784,7 @@ class _ApiCapture:
         try:
             data = response.json()
             items = _extract_items_from_json(data)
-            if items:
+            if items and _looks_like_listings(items):
                 self.items.extend(items)
                 print(f"    ✅ API hit: {response.url[:80]} → {len(items)} items", flush=True)
         except Exception:
