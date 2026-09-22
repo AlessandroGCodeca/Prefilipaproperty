@@ -329,15 +329,19 @@ def _ensure_cashflow_columns(conn):
 #     city so the rent estimate stops defaulting to the €6.50/m² floor.
 #   - lv_risk_level + lv_summary persist modules/debt_bot's Claude analyze_lv
 #     read so the dashboard can show WHY a title deed passed/failed.
+#   - detail_enriched_at records when a scraper last opened the listing's own
+#     detail page. Scrapers read it back via get_fresh_detail_urls() to skip
+#     re-opening pages they already have full data for (see that docstring).
 _ENRICHMENT_COLUMNS = {
-    "has_parking":     "INTEGER",
-    "has_balcony":     "INTEGER",
-    "furnished":       "TEXT",
-    "condition":       "TEXT",
-    "desc_parsed":     "INTEGER DEFAULT 0",
-    "addr_normalized": "INTEGER DEFAULT 0",
-    "lv_risk_level":   "TEXT",
-    "lv_summary":      "TEXT",
+    "has_parking":        "INTEGER",
+    "has_balcony":        "INTEGER",
+    "furnished":          "TEXT",
+    "condition":          "TEXT",
+    "desc_parsed":        "INTEGER DEFAULT 0",
+    "addr_normalized":    "INTEGER DEFAULT 0",
+    "lv_risk_level":      "TEXT",
+    "lv_summary":         "TEXT",
+    "detail_enriched_at": "TEXT",
 }
 
 
@@ -477,6 +481,84 @@ def deactivate_stale_listings(days: int = 21) -> int:
     finally:
         conn.close()
     return n
+
+
+def mark_details_enriched(listing_ids, when: str = "") -> int:
+    """Stamp `detail_enriched_at` on listings whose detail page was just scraped.
+
+    Called by the scrapers after a successful detail-page visit. The stamp is
+    what get_fresh_detail_urls() reads back on the next run to decide the page
+    doesn't need re-opening. Returns the number of rows stamped.
+    """
+    ids = [i for i in (listing_ids or []) if i]
+    if not ids:
+        return 0
+    stamp = when or datetime.now(timezone.utc).isoformat()
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        n = 0
+        for listing_id in ids:
+            n += conn.execute(
+                "UPDATE listings SET detail_enriched_at=? WHERE id=?",
+                (stamp, listing_id),
+            ).rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return n
+
+
+def touch_listings(urls) -> int:
+    """Bump last_seen_at (and re-activate) rows a scraper saw but chose not to
+    re-fetch, so deactivate_stale_listings doesn't retire a listing that is
+    still very much on the source site. Returns the number of rows touched.
+    """
+    urls = [u for u in (urls or []) if u]
+    if not urls:
+        return 0
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_conn()
+    try:
+        n = 0
+        for url in urls:
+            n += conn.execute(
+                "UPDATE listings SET last_seen_at=?, is_active=1 WHERE url=?",
+                (now, url),
+            ).rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return n
+
+
+def get_fresh_detail_urls(source: str, max_age_days: int = 7) -> set[str]:
+    """URLs whose detail page was scraped within `max_age_days` AND already has
+    both a price and a size.
+
+    Opening a detail page is by far the most expensive step in a scrape run —
+    one full browser navigation each. A listing we already hold complete, recent
+    data for gains nothing from being re-opened, so the scrapers skip these and
+    just touch last_seen_at (which keeps deactivate_stale_listings happy).
+
+    The window matters: listings do get price cuts, so anything older than
+    `max_age_days` is re-opened to pick up changes. Rows missing a price or size
+    are never skipped — those are exactly the ones a re-visit might fix.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        rows = conn.execute(
+            "SELECT url FROM listings "
+            "WHERE source=? AND is_active=1 "
+            "  AND price_eur > 0 AND size_m2 > 0 "
+            "  AND detail_enriched_at IS NOT NULL AND detail_enriched_at >= ?",
+            (source, cutoff),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {r[0] for r in rows if r[0]}
 
 
 def clear_cashflow_scores() -> int:

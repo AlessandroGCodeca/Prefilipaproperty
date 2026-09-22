@@ -142,6 +142,13 @@ ANTHROPIC_MODEL   = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
 # ── Scraper ───────────────────────────────────────────────────────────────────
 SCRAPE_DELAY_SEC       = 2.5
+# How long a listing's detail-page scrape stays good for. Opening a detail page
+# is the most expensive step in a run (one navigation/fetch each), so a listing
+# already scraped within this window — and already holding a price and size —
+# is skipped and only has its last_seen_at touched. Listings do get price cuts,
+# so anything older than this is re-read. Lower it to catch price moves sooner
+# at the cost of a slower run.
+DETAIL_REFRESH_DAYS    = 7
 CADASTRAL_DELAY_SEC    = 1.5
 CADASTRAL_BACKOFF_MAX  = 60
 

@@ -25,7 +25,7 @@ CI runs on every PR. To run locally from `sovereign_final/`:
 python3 -m pytest tests/
 ```
 
-Expected: ~103 passing, 1 xfailed (known Slovak-declension limitation).
+Expected: ~267 passing, 1 xfailed (known Slovak-declension limitation).
 
 ---
 
