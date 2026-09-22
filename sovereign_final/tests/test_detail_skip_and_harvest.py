@@ -55,6 +55,84 @@ class TestApiItemUrl:
         assert guessed == slugged
 
 
+# A real dev-project unit, verbatim from a live capture of
+# /api/v2/dev-projects/detail/Ju7ib0Ch1k3/advertisements
+DEV_PROJECT_ITEM = {
+    "id": "JuTHC7fd44k",
+    "title": "MODERNÝ 2-izbový apartmán s terasou v projekte CORVUS ATRIUM Malacky",
+    "sefName": "moderny-2-izbovy-apartman-s-terasou-v-projekte-corvus-atrium-malacky",
+    "price": {"value": 182000, "unit": "CURRENCY", "currency": "EUR"},
+    "subCategory": "2 izbový byt",
+    "internalReference": "CM A208",
+    "floor": 2,
+    "area": 46.41,
+    "availability": "Voľný",
+}
+
+
+class TestDevProjectItem:
+    """These items ship no URL field — the id and the SEO slug arrive
+    separately, as id + sefName."""
+
+    def test_url_is_built_from_id_and_sefname(self):
+        url, real = _api_item_url(DEV_PROJECT_ITEM)
+        assert url == (BASE + "/detail/JuTHC7fd44k/"
+                       "moderny-2-izbovy-apartman-s-terasou-v-projekte-corvus-atrium-malacky")
+        assert real is True, "id + slug is the real address, not a guess"
+
+    def test_survives_require_url_field(self):
+        """The whole reason the first live harvest kept nothing."""
+        assert _parse_api_item(DEV_PROJECT_ITEM, NOW, require_url_field=True) is not None
+
+    def test_fields_parsed(self):
+        rec = _parse_api_item(DEV_PROJECT_ITEM, NOW, require_url_field=True)
+        assert rec["url"] == BASE + "/detail/JuTHC7fd44k"
+        assert rec["price_eur"] == 182000
+        assert rec["size_m2"] == 46.41
+        assert rec["rooms"] == 2, "from subCategory '2 izbový byt'"
+        assert rec["floor"] == 2
+
+    def test_district_comes_from_the_slug(self):
+        """No location field, and a harvested listing never has its detail page
+        opened — so without the slug fallback the rent estimate silently drops
+        to the blank-district default."""
+        rec = _parse_api_item(DEV_PROJECT_ITEM, NOW, require_url_field=True)
+        assert "Malacky" in rec["district"]
+        assert "Malacky" in rec["address_raw"]
+
+    def test_harvested_end_to_end(self):
+        seen: set[str] = set()
+        out = _harvest_api_listings([DEV_PROJECT_ITEM], seen, NOW,
+                                    require_url_field=True)
+        assert len(out) == 1
+        assert seen == {BASE + "/detail/JuTHC7fd44k"}
+
+
+class TestAvailabilityFilter:
+    @pytest.mark.parametrize("value", ["Predaný", "predany", "Rezervovaný",
+                                       "Obsadený", "REZERVOVANÉ"])
+    def test_off_market_units_skipped(self, value):
+        from scraper.nehnutelnosti import _is_unavailable
+        assert _is_unavailable({**DEV_PROJECT_ITEM, "availability": value}) is True
+
+    @pytest.mark.parametrize("value", ["Voľný", "volny", "", "Ihneď k nasťahovaniu"])
+    def test_available_and_unknown_wordings_kept(self, value):
+        """Only positively recognised terms drop a unit, so an unseen wording
+        can never silently lose a real listing."""
+        from scraper.nehnutelnosti import _is_unavailable
+        assert _is_unavailable({**DEV_PROJECT_ITEM, "availability": value}) is False
+
+    def test_missing_field_kept(self):
+        from scraper.nehnutelnosti import _is_unavailable
+        assert _is_unavailable({"id": "X"}) is False
+
+    def test_sold_unit_never_reaches_the_harvest(self):
+        seen: set[str] = set()
+        sold = {**DEV_PROJECT_ITEM, "availability": "Predaný"}
+        assert _harvest_api_listings([sold], seen, NOW, require_url_field=True) == []
+        assert seen == set()
+
+
 class TestRequireUrlField:
     def test_id_only_item_dropped_when_url_required(self):
         assert _parse_api_item({"id": "X1"}, NOW, require_url_field=True) is None

@@ -211,19 +211,42 @@ def _parse_slug(url: str) -> dict:
 def _api_item_url(item: dict) -> tuple[str, bool]:
     """Resolve an API item's listing URL.
 
-    Returns (url, from_url_field). from_url_field is False when the item
-    carried no URL at all and the URL had to be built from its id — that form
-    is a guess, so callers that can't afford a dead link reject it.
+    Returns (url, real). `real` is False only when the item carried nothing but
+    an id, so the URL had to be assumed — callers that can't afford a dead link
+    reject that form.
+
+    The dev-project unit lists don't ship a URL field; they ship the id and the
+    SEO slug separately, as `sefName`. Together those are the listing's actual
+    /detail/{id}/{slug} address, so that counts as real.
     """
     url = item.get("url") or item.get("seoUrl") or item.get("link") or ""
     if url:
         return (url if url.startswith("http") else BASE + url), True
     advert_id = item.get("id") or item.get("advertId") or ""
+    sef_name = item.get("sefName") or item.get("seoName") or ""
+    if advert_id and sef_name:
+        return f"{BASE}/detail/{advert_id}/{sef_name}", True
     if advert_id:
         # /detail/{id} is the canonical form _canonical_url() reduces every
         # real listing URL to, so an item seen both ways lands on one row.
         return f"{BASE}/detail/{advert_id}", False
     return "", False
+
+
+# `availability` on a dev-project unit. Only "Voľný" (free) has been observed
+# live; these are the terms that unambiguously mean the unit is off the market,
+# matched on the diacritic-stripped value. Anything unrecognised is kept, so an
+# unseen wording can never silently drop a real listing.
+_UNAVAILABLE_MARKERS = ("predan", "rezervovan", "obsaden", "nedostupn")
+
+
+def _is_unavailable(item: dict) -> bool:
+    raw = item.get("availability") or item.get("status") or ""
+    if not isinstance(raw, str) or not raw.strip():
+        return False
+    from scraper.textparse import strip_diacritics
+    text = strip_diacritics(raw).lower()
+    return any(m in text for m in _UNAVAILABLE_MARKERS)
 
 
 def _parse_api_item(item: dict, now: str, require_url_field: bool = False) -> dict | None:
@@ -269,15 +292,39 @@ def _parse_api_item(item: dict, now: str, require_url_field: bool = False) -> di
             first = imgs[0]
             img = (first.get("url") or first.get("src") or first) if isinstance(first, dict) else str(first)
 
+        # Rooms drive the ±15% per-m² multiplier in engine/financial. The
+        # dev-project lists state it as subCategory ("2 izbový byt"), which
+        # rooms_from_title already understands; the title is the fallback.
+        from scraper.textparse import rooms_from_title
+        rooms = (rooms_from_title(str(item.get("subCategory") or ""))
+                 or rooms_from_title(str(title)))
+
+        floor = item.get("floor")
+        try:
+            floor = int(floor) if floor is not None else None
+        except (TypeError, ValueError):
+            floor = None
+
         canon = _canonical_url(url)
+
+        # No location field on the dev-project items, and a harvested listing
+        # never has its detail page opened — so without this its district stays
+        # blank and the rent estimate silently falls back to €6.50/m². The slug
+        # we just built the URL from names the town ("…-corvus-atrium-malacky").
+        district = _district(addr)
+        if not addr or not district:
+            slug_data = _parse_slug(url)
+            addr = addr or slug_data.get("address", "")
+            district = district or slug_data.get("district", "")
+
         uid = hashlib.md5(canon.encode()).hexdigest()
         return {
             "id": uid, "source": "nehnutelnosti", "url": canon, "url_hash": uid,
             "title": str(title)[:200], "description": "",
             "price_eur": price, "size_m2": size,
-            "rooms": None, "floor": None, "year_built": None,
+            "rooms": rooms, "floor": floor, "year_built": None,
             "energy_class": energy,
-            "address_raw": addr, "district": _district(addr), "city": "",
+            "address_raw": addr, "district": district, "city": "",
             "primary_image_url": img, "image_urls": img,
             "classification": "PENDING", "lv_status": "PENDING",
             "scraped_at": now, "last_seen_at": now,
@@ -311,8 +358,8 @@ def _extract_items_from_json(data) -> list[dict]:
 # shaped exactly like that, and one of them, /api/v2/advertisement/detail/
 # report/form-categories, matches API_SIGNALS on every single detail page.
 _LISTING_ITEM_KEYS = frozenset({
-    "url", "seoUrl", "link", "price", "priceInfo", "advertId",
-    "usableArea", "floorArea", "area", "size",
+    "url", "seoUrl", "link", "sefName", "seoName", "price", "priceInfo",
+    "advertId", "usableArea", "floorArea", "area", "size",
 })
 
 
@@ -339,6 +386,8 @@ def _harvest_api_listings(items, seen: set[str], now: str,
     out: list[dict] = []
     for item in items or []:
         if not isinstance(item, dict):
+            continue
+        if _is_unavailable(item):
             continue
         rec = _parse_api_item(item, now, require_url_field=require_url_field)
         if not rec or rec["url"] in seen:

@@ -37,6 +37,15 @@ OUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "dev_project_sample.json")
 
 
+def _is_waf_block(payload) -> bool:
+    """Imperva answers a refused request with a small JSON body carrying only a
+    supportID. That parses fine as JSON, so without this check the probe
+    reports a successful capture of a block page."""
+    return (isinstance(payload, dict)
+            and "supportID" in payload
+            and "advertisements" not in payload)
+
+
 def _summarise(payload) -> None:
     """Print enough structure to fix the parser, without dumping everything."""
     print("\n── Response shape " + "─" * 50)
@@ -147,6 +156,14 @@ def main() -> int:
         return 1
 
     url, payload = captured[0]
+    if _is_waf_block(payload):
+        print(f"\n❌ {url}\n   came back as an Imperva block page (supportID only).\n"
+              "   Fetching the API directly is refused however many cookies we\n"
+              "   carry — the real calls are XHRs issued from inside a detail\n"
+              "   page. Run with no argument to walk detail pages instead:\n"
+              "     python3 dev/dump_dev_project_api.py")
+        return 1
+
     print(f"\n✅ Captured {url}")
     with open(OUT_PATH, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)

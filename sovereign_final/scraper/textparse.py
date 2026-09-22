@@ -19,11 +19,17 @@ _IZB_RE = re.compile(r"\b([1-6])\s*[-–]?\s*izb", re.I)
 _GARSONKA_RE = re.compile(r"\bgar[sz]onk", re.I)
 
 
-def _strip_diacritics(text: str) -> str:
+def strip_diacritics(text: str) -> str:
+    """Fold Slovak diacritics away so "Voľný"/"Volny" and "izbový"/"izbovy"
+    match the same pattern."""
     return "".join(
         c for c in unicodedata.normalize("NFD", text)
         if unicodedata.category(c) != "Mn"
     )
+
+
+# Kept for callers that used the private name before it was made public.
+_strip_diacritics = strip_diacritics
 
 
 def rooms_from_title(title: str) -> int | None:
