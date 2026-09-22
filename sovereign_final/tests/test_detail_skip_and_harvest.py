@@ -118,7 +118,53 @@ class _FakeResponse:
         return self._payload
 
 
+class TestLooksLikeListings:
+    """The site's dropdown endpoints return id/name lists under the same keys
+    _extract_items_from_json looks for. One of them — /api/v2/advertisement/
+    detail/report/form-categories — matches API_SIGNALS on every detail page,
+    so a live run logged it ~130 times in a single scrape."""
+
+    def test_report_form_categories_rejected(self):
+        from scraper.nehnutelnosti import _looks_like_listings
+        assert _looks_like_listings([{"id": i, "name": f"reason {i}"}
+                                     for i in range(9)]) is False
+
+    def test_label_value_dropdown_rejected(self):
+        from scraper.nehnutelnosti import _looks_like_listings
+        assert _looks_like_listings([{"value": 1, "label": "Spam"}]) is False
+
+    @pytest.mark.parametrize("item", [
+        {"url": "/detail/A1/x"},
+        {"seoUrl": "/detail/A1/x"},
+        {"price": {"value": 150000}},
+        {"id": "A1", "usableArea": 55},
+        {"id": "A1", "advertId": "B2"},
+    ])
+    def test_listing_shaped_items_accepted(self, item):
+        from scraper.nehnutelnosti import _looks_like_listings
+        assert _looks_like_listings([item]) is True
+
+    def test_scans_past_a_leading_junk_item(self):
+        from scraper.nehnutelnosti import _looks_like_listings
+        items = [{"id": 1, "name": "x"}, {"url": "/detail/A1/x"}]
+        assert _looks_like_listings(items) is True
+
+    def test_empty_and_non_dict_items(self):
+        from scraper.nehnutelnosti import _looks_like_listings
+        assert _looks_like_listings([]) is False
+        assert _looks_like_listings(["x", 5, None]) is False
+
+
 class TestApiCapture:
+    def test_dropdown_endpoint_is_not_captured(self):
+        """The noise that drowned the live run's log."""
+        cap = _ApiCapture()
+        cap(_FakeResponse(
+            BASE + "/api/v2/advertisement/detail/report/form-categories",
+            {"items": [{"id": i, "name": f"reason {i}"} for i in range(9)]},
+        ))
+        assert cap.items == []
+
     def test_captures_listing_api_json(self):
         cap = _ApiCapture()
         cap(_FakeResponse(BASE + "/api/v2/dev-projects/detail/X/advertisements",
