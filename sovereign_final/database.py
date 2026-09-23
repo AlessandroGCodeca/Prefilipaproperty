@@ -532,6 +532,72 @@ def touch_listings(urls) -> int:
     return n
 
 
+def set_listing_price(listing_id: str, price_eur: float) -> bool:
+    """Overwrite a listing's price outright — including back down to 0.
+
+    upsert_listing deliberately never lowers a price to 0, because a scrape
+    that simply failed to read one must not wipe a good value. Repairing a
+    price that was read off the wrong listing needs exactly that, so it goes
+    through here instead.
+
+    Clearing a price also resets the row to PENDING and drops
+    detail_enriched_at, so get_fresh_detail_urls() stops treating the row as
+    complete and the next scrape reads its detail page again.
+    """
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        if price_eur and price_eur > 0:
+            n = conn.execute(
+                "UPDATE listings SET price_eur=? WHERE id=?",
+                (float(price_eur), listing_id),
+            ).rowcount
+        else:
+            n = conn.execute(
+                "UPDATE listings SET price_eur=0, classification='PENDING', "
+                "detail_enriched_at=NULL WHERE id=?",
+                (listing_id,),
+            ).rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return n > 0
+
+
+def get_shared_price_listings(source: str, min_distinct_sizes: int = 2,
+                              limit: int = 200) -> list[dict]:
+    """Listings whose price is also carried by other listings of a DIFFERENT
+    size — the signature of a price read off a neighbouring listing.
+
+    One agency's €1,250,000 property ended up on seven of its unrelated flats,
+    and €1,399,000 on three more of 200, 188 and 114 m². Sizes differ because
+    the listings are genuinely different properties; only the price was shared.
+
+    Round asking prices do repeat legitimately (€259,000 across nine unrelated
+    flats is ordinary market clustering), so this over-reports. That is the
+    right way round for its purpose: the caller re-reads the page, which costs
+    one visit and confirms a genuine price as easily as it corrects a wrong one.
+    """
+    conn = get_conn()
+    try:
+        rows = conn.execute("""
+            SELECT id, source, url, price_eur, size_m2, district, title
+            FROM listings
+            WHERE source=? AND is_active=1 AND price_eur > 0 AND size_m2 > 0
+              AND price_eur IN (
+                  SELECT price_eur FROM listings
+                  WHERE source=? AND is_active=1 AND price_eur > 0 AND size_m2 > 0
+                  GROUP BY price_eur
+                  HAVING COUNT(DISTINCT size_m2) >= ?
+              )
+            ORDER BY price_eur DESC
+            LIMIT ?
+        """, (source, source, min_distinct_sizes, limit)).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
 def get_fresh_detail_urls(source: str, max_age_days: int = 7) -> set[str]:
     """URLs whose detail page was scraped within `max_age_days` AND already has
     both a price and a size.
