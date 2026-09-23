@@ -45,6 +45,31 @@ def _check_playwright() -> bool:
 _PRICE_MIN = 30_000
 _PRICE_MAX = 10_000_000
 
+# Prices as rendered: "342 000 €", with any of the space characters the site
+# uses as a thousands separator.
+_PRICE_RE = re.compile(r"(\d{1,3}(?:[\s\xa0  ]\d{3})+|\d{4,8})\s*€")
+
+# The listing's own price is rendered as a heading; every other € figure on the
+# page belongs to the promoted-listings carousel, which is styled body2/noWrap.
+# A live probe of a €342 000 Ružinov flat showed its own price under
+# MuiTypography-h3 while €1 399 000 / €570 720 / €446 736 / €279 800 sat in
+# body2 elements — the same four on every page, which is how one price ended up
+# on seven unrelated flats. The emotion hash (mui-tokrpc) changes between
+# builds; MuiTypography-h3 is the stable semantic class. Real heading tags are
+# included so a markup change doesn't take the whole path down with it.
+_PRICE_HEADING_SELECTOR = ", ".join(
+    [f"[class*='MuiTypography-h{n}']" for n in range(1, 6)] + ["h1", "h2", "h3"]
+)
+
+# "1 200 €/mes." is a monthly rent, not a sale price.
+_MONTHLY_RE = re.compile(r"/\s*mes|mesiac|/\s*mo\b", re.I)
+
+# With no own-price heading, a page showing this many distinct plausible prices
+# is showing several properties (a developer project's unit list, or a page
+# whose own price didn't render). Which one is ours is then unknowable, so we
+# store none — the dev-project API supplies those units' real prices instead.
+_MULTI_PRICE_PAGE_THRESHOLD = 3
+
 
 def _is_plausible_price(v) -> bool:
     try:
@@ -63,6 +88,47 @@ def _price(text: str) -> float:
         return v if _is_plausible_price(v) else 0.0
     except Exception:
         return 0.0
+
+
+def _prices_in(text: str) -> list[float]:
+    """Every plausible sale price in `text`, in the order they appear."""
+    out: list[float] = []
+    for m in _PRICE_RE.finditer(text or ""):
+        try:
+            v = float(re.sub(r"[\s\xa0  ]", "", m.group(1)))
+        except ValueError:
+            continue
+        if _is_plausible_price(v):
+            out.append(v)
+    return out
+
+
+def _heading_price(texts) -> float:
+    """The sale price from the listing's own price heading, or 0.0."""
+    for t in texts or []:
+        if not t or _MONTHLY_RE.search(t):
+            continue
+        found = _prices_in(t)
+        if found:
+            return found[0]
+    return 0.0
+
+
+def _fallback_price(text: str, size_m2: float = 0.0, district: str = "") -> float:
+    """Sale price scanned from the whole page, used when no price heading was
+    found — a developer project's unit list, or a markup change.
+
+    Several distinct prices and no heading means the page is showing several
+    properties. Which one is ours is then unknowable, and guessing is how
+    €1 399 000 landed on flats of 200, 188 and 114 m²; the dev-project API
+    supplies those units' real prices instead. With one or two candidates the
+    smaller is a deposit or a per-m² rate, so the sale price is the larger.
+    """
+    candidates = _prices_in(text)
+    if not candidates or len(set(candidates)) >= _MULTI_PRICE_PAGE_THRESHOLD:
+        return 0.0
+    from engine.regional_prices import pick_sale_price
+    return pick_sale_price(candidates, size_m2=size_m2, district=district)
 
 
 def _size(text: str) -> float:
@@ -673,34 +739,35 @@ def _scrape_detail_page(page, url: str) -> dict:
         if size_value:
             data["size"] = size_value
 
-    # Price — handle regular space, NBSP (\xa0), narrow NBSP (\u202f), thin space (\u2009).
-    # Scan ALL prices in the visible text. The smaller figures are deposits
-    # ("rezervačná záloha 1 000 €") and per-m² rates ("3 273 €/m²"), so the sale
-    # price is the largest — but the page also renders OTHER listings
-    # (recommendations, the agency's own portfolio), whose prices can be larger
-    # still. Taking the maximum outright attached one agency's €1,250,000
-    # property to seven of its unrelated flats, so pick_sale_price() drops
-    # candidates implying an absurd €/m² for the region first. That needs the
-    # size, which is why the size block above now runs before this one.
+    # Price — read the listing's own price heading first. Every other € figure
+    # on the page is a carousel card (see _PRICE_HEADING_SELECTOR), and the
+    # listing's own price is frequently NOT the largest of them: the €342 000
+    # Ružinov flat shares its page with a €1 399 000 promoted listing.
     if not data.get("price"):
-        candidates: list[float] = []
-        for m in re.finditer(
-            r"(\d{1,3}(?:[\s\xa0\u202f\u2009]\d{3})+|\d{4,8})\s*€",
-            text or html,
-        ):
-            try:
-                v = float(re.sub(r"[\s\xa0\u202f\u2009]", "", m.group(1)))
-            except Exception:
-                continue
-            if _is_plausible_price(v):
-                candidates.append(v)
-        if candidates:
-            from engine.regional_prices import pick_sale_price
-            data["price"] = pick_sale_price(
-                candidates,
-                size_m2=data.get("size") or 0.0,
-                district=_district(data.get("address") or "") or (data.get("address") or ""),
+        try:
+            heading_texts = page.eval_on_selector_all(
+                _PRICE_HEADING_SELECTOR, "els => els.map(e => e.innerText)"
             )
+        except Exception:
+            heading_texts = []
+        heading = _heading_price(heading_texts)
+        if heading:
+            data["price"] = heading
+
+    # Fallback — scan the visible text. Reached when the price heading is
+    # absent, which happens on a developer project's unit list and would happen
+    # if the markup changed. The smaller figures here are deposits ("rezervačná
+    # záloha 1 000 €") and per-m² rates, so of what remains the sale price is
+    # the largest; pick_sale_price() first drops candidates implying an absurd
+    # €/m² for the region, which is why the size block above runs before this.
+    if not data.get("price"):
+        fallback = _fallback_price(
+            text or html,
+            size_m2=data.get("size") or 0.0,
+            district=_district(data.get("address") or "") or (data.get("address") or ""),
+        )
+        if fallback:
+            data["price"] = fallback
 
     # Energy class — "Energetická trieda B" or similar
     if not data.get("energy"):
