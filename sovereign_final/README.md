@@ -25,7 +25,7 @@ CI runs on every PR. To run locally from `sovereign_final/`:
 python3 -m pytest tests/
 ```
 
-Expected: ~358 passing, 1 xfailed (known Slovak-declension limitation).
+Expected: ~376 passing, 1 xfailed (known Slovak-declension limitation).
 
 ---
 
@@ -37,6 +37,9 @@ sovereign_final/
 ├── scheduler.py              ← Daily 06:00 CET automation
 ├── config.py                 ← All 2026 Slovak tax rates
 ├── database.py               ← PostgreSQL + SQLite fallback
+├── enrich_pending.py         ← Backfill listings missing a price or size
+├── repair_prices.py          ← Re-read listings whose price looks borrowed
+├── diagnose.py               ← Data-quality report (coverage, classification)
 ├── START.bat                 ← Windows one-click launcher
 ├── docker-compose.yml        ← 4 Docker containers
 ├── docker/Dockerfile         ← App image
