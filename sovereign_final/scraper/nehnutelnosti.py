@@ -21,6 +21,7 @@ from database import (
     upsert_listing, init_db, get_fresh_detail_urls, mark_details_enriched,
     touch_listings,
 )
+from scraper.textparse import EXCLUDE_KEYWORDS, is_excluded_listing
 
 BASE        = "https://www.nehnutelnosti.sk"
 SEARCH_PAGE = BASE + "/vysledky/byty/slovensko/predaj?page={page}"
@@ -347,6 +348,8 @@ def _parse_api_item(item: dict, now: str, require_url_field: bool = False) -> di
                 break
 
         title = item.get("title") or item.get("name") or item.get("heading") or ""
+        if is_excluded_listing(str(title), url):
+            return None
         addr_obj = item.get("location") or item.get("address") or {}
         addr = (addr_obj.get("fullAddress") or addr_obj.get("address") or
                 addr_obj.get("city") or "") if isinstance(addr_obj, dict) else str(addr_obj)
@@ -816,15 +819,21 @@ def _build_location_patterns() -> list[tuple[re.Pattern, str]]:
         "Bytča", "Čadca", "Revúca", "Krupina", "Hnúšťa", "Stupava", "Šaľa",
     ]
     pats: list[tuple[re.Pattern, str]] = []
-    # Suburbs first (sorted by length desc so multi-word names win)
+    # Suburbs first (sorted by length desc so multi-word names win). Matched
+    # case-insensitively — Bazos/topreality titles are routinely ALL-CAPS
+    # ("PREDAM BYT BRATISLAVA") or all-lowercase, and a case-sensitive match
+    # against the diacritic-correct name left those permanently blank.
     for suburb in sorted(suburb_to_city, key=len, reverse=True):
         pats.append((
-            re.compile(r"(?<!\w)" + re.escape(suburb) + r"(?!\w)"),
+            re.compile(r"(?<!\w)" + re.escape(suburb) + r"(?!\w)", re.IGNORECASE),
             f"{suburb}, {suburb_to_city[suburb]}",
         ))
     # Then cities (longest first so "Banská Bystrica" wins over "Bystrica")
     for city in sorted(cities, key=len, reverse=True):
-        pats.append((re.compile(r"(?<!\w)" + re.escape(city) + r"(?!\w)"), city))
+        pats.append((
+            re.compile(r"(?<!\w)" + re.escape(city) + r"(?!\w)", re.IGNORECASE),
+            city,
+        ))
     return pats
 
 
@@ -1014,12 +1023,16 @@ def _scrape_page_playwright(page, capture, page_num: int,
             if canon in seen_urls:
                 continue
             seen_urls.add(canon)
+            if is_excluded_listing(l.get("text", ""), href):
+                continue
             results.append(_minimal_listing(href, l.get("text", ""), now))
         for item in rsc_items:
             canon = _canonical_url(item["_url"])
             if canon in seen_urls:
                 continue
             seen_urls.add(canon)
+            if is_excluded_listing("", item["_url"]):
+                continue
             results.append(_minimal_listing(canon, "", now))
 
     # ── Skip: listings the DB already holds complete recent data for. Drop
@@ -1072,6 +1085,38 @@ def check_reachable() -> tuple[int, str]:
         return r.status_code, ""
     except Exception as e:
         return 0, str(e)
+
+
+def _deactivate_non_apartments() -> int:
+    """Mark nehnutelnosti listings as inactive when the title or URL reveals a
+    non-apartment (rental, house, land, non-residential/commercial space, etc.).
+
+    The site's own "byty" (apartments) search category doesn't fully exclude
+    these — e.g. a "nebytový priestor" (non-residential unit) in the same
+    building as a dev-project's apartments rides along in that project's unit
+    list. This is the retroactive cleanup for rows already scraped before
+    exclusion filtering ran at harvest time (see is_excluded_listing above).
+    Also zeroes the price and sets classification='WHITE' so they drop out of
+    the GREEN/YELLOW lists.
+    """
+    from database import get_conn
+    conn = get_conn()
+    clauses = " OR ".join(
+        f"LOWER(title) LIKE '%{kw}%' OR LOWER(url) LIKE '%{kw}%'"
+        for kw in EXCLUDE_KEYWORDS
+    )
+    sql = f"""
+        UPDATE listings
+           SET is_active=0, price_eur=0, classification='WHITE'
+         WHERE source='nehnutelnosti' AND is_active=1
+           AND ({clauses})
+    """
+    n = conn.execute(sql).rowcount
+    conn.commit()
+    conn.close()
+    if n:
+        print(f"  ↳ deactivated {n} non-apartment nehnutelnosti listings (title/url match)", flush=True)
+    return n
 
 
 def _zero_bogus_prices() -> int:
@@ -1129,43 +1174,60 @@ def _dedupe_canonical_urls() -> int:
 
 
 def _backfill_blank_districts() -> int:
-    """Re-run _parse_slug on the stored URL for rows that have a blank district
-    and a generic title. Catches PREMIUM listings whose slug encodes the city
-    name ("3-izbovy-byt-...-velka-maca") but where the slug parser never ran
-    because the row was upserted before the parser was added."""
+    """Resolve district for rows that still have none, trying every source we
+    have — not just the URL slug.
+
+    This used to try _parse_slug(url) alone, which only recognises the ~90
+    towns in _SLUG_CITIES and only when the URL's own marketing slug happens
+    to name one. By the time a row reaches this function with a blank
+    district, _apply_detail() already tried that exact slug fallback at scrape
+    time (see _apply_detail below) — so re-running only the slug parser here
+    was close to a no-op and left a listing permanently stuck on the €6.50/m²
+    rent default whenever its slug was a generic marketing name
+    ("moderny-3-izbovy-byt") even though its title, description or
+    address_raw plainly named the city. _extract_location_from_text scans
+    those independently and catches many of those cases.
+    """
     from database import get_conn
     conn = get_conn()
     rows = conn.execute(
-        "SELECT id, url, title FROM listings "
+        "SELECT id, url, title, address_raw, description FROM listings "
         "WHERE source='nehnutelnosti' AND (district IS NULL OR district='')"
     ).fetchall()
     updated = 0
-    for row_id, url, title in rows:
+    for row_id, url, title, addr_raw, description in rows:
         slug_data = _parse_slug(url or "")
-        if not slug_data.get("district"):
+        district = slug_data.get("district", "")
+        address = slug_data.get("address", "")
+        if not district:
+            for text in (addr_raw, description, title):
+                matched = _extract_location_from_text(text or "")
+                if matched:
+                    district = matched
+                    address = matched
+                    break
+        if not district:
             continue
-        # Only overwrite title when the current one is a generic placeholder.
+        new_addr = addr_raw or address or district
+        # Only overwrite title when the current one is a generic placeholder,
+        # and only a slug-derived title (not a bare city/suburb match) is
+        # worth using in its place.
         cur_title = (title or "").strip().lower()
         if slug_data.get("title") and cur_title in _GENERIC_TITLES:
             conn.execute(
                 "UPDATE listings SET district=?, address_raw=?, title=? WHERE id=?",
-                (slug_data["district"],
-                 slug_data.get("address", slug_data["district"]),
-                 slug_data["title"][:200],
-                 row_id),
+                (district, new_addr, slug_data["title"][:200], row_id),
             )
         else:
             conn.execute(
                 "UPDATE listings SET district=?, address_raw=? WHERE id=?",
-                (slug_data["district"],
-                 slug_data.get("address", slug_data["district"]),
-                 row_id),
+                (district, new_addr, row_id),
             )
         updated += 1
     conn.commit()
     conn.close()
     if updated:
-        print(f"  ↳ backfilled district on {updated} nehnutelnosti rows from URL slug")
+        print(f"  ↳ backfilled district on {updated} nehnutelnosti rows")
     return updated
 
 
@@ -1199,6 +1261,13 @@ def run(max_pages: int = 10) -> int:
                     page, capture, p, seen_urls, fresh_urls
                 )
                 for l in listings:
+                    # Detail-page enrichment (_apply_detail, above) can reveal a
+                    # real title for the first time — e.g. a card that showed no
+                    # text or a generic "PREMIUM" label turns out to be a
+                    # "Nebytový priestor" — so exclusion is checked again here,
+                    # after enrichment, not just at harvest time.
+                    if is_excluded_listing(l.get("title", ""), l.get("url", "")):
+                        continue
                     try:
                         upsert_listing(l)
                         total += 1
@@ -1220,6 +1289,7 @@ def run(max_pages: int = 10) -> int:
             "Nehnutelnosti: 0 listings after Playwright scrape.\n"
             "Run debug_playwright.py with headless=False to inspect live page."
         )
+    _deactivate_non_apartments()
     _dedupe_canonical_urls()
     _zero_bogus_prices()
     _backfill_blank_districts()
