@@ -7,10 +7,55 @@ rooms count — but bazos/topreality never provide one structurally, and
 nehnutelnosti only sometimes ships it in JSON-LD. The count is almost always
 sitting in the title ("3-izbový byt", "2-izb. byt", "garsónka"), so parse it
 from there as a fallback.
+
+EXCLUDE_KEYWORDS is shared for the same reason: each site's search page mixes
+apartments-for-sale with rentals, houses, land, garages and non-residential
+space, and a keyword added to catch one of those on one site needs to catch it
+on every site — otherwise the list quietly drifts out of sync per scraper.
 """
 
 import re
 import unicodedata
+
+# Skip these — a site's "apartments for sale" search/category still mixes in
+# rentals, houses, land, garages, and non-residential/commercial space. Matched
+# as a case-insensitive substring against a listing's title and URL, so a
+# single entry catches every Slovak grammatical declension of the word
+# (e.g. "nebytov" catches nebytový/nebytové/nebytovej/nebytových priestor(y)).
+EXCLUDE_KEYWORDS = (
+    "prenajom",   # rental
+    "rodinn",     # rodinný dom = house
+    "pozem",      # pozemok/pozemku/pozemky — land plot in any declension
+    "zahrad",     # garden / land plot (záhrada)
+    "garaz",      # garage
+    "kancelar",   # office
+    "chal", "chat",  # cottages
+    "obchodn",    # commercial
+    "sklado",     # storage
+    "administr",  # administrative space
+    "statie",     # parking spot
+    "vikend",     # weekend cottage
+    "budov",      # building (budova)
+    "kaviar",     # café (kaviareň)
+    "reštaur",    # restaurant
+    "hotel",      # hotel
+    "penzion",    # guesthouse
+    "zrub",       # log cabin / chalet (zrub, zrubu)
+    "zastavan",   # "v zastavanom území" — construction-zone/built-up-area plots
+    "dražb",      # dražba — auction (often non-apartment property)
+    "viacúčelov", "viacucelov",  # multi-purpose building, not apartment
+    "nebytov",    # nebytový priestor / nebytové priestory — non-residential unit
+)
+
+
+def is_excluded_listing(*texts: str) -> bool:
+    """True when any of the given strings (title, URL, …) names a
+    non-apartment listing per EXCLUDE_KEYWORDS."""
+    for t in texts:
+        low = (t or "").lower()
+        if any(kw in low for kw in EXCLUDE_KEYWORDS):
+            return True
+    return False
 
 # "3-izbový", "3 izbový", "3-izb.", "3izb", "3 - izbovy" … (diacritics stripped
 # before matching, so izbový/izbovy both hit).

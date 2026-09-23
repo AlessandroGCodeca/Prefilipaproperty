@@ -24,7 +24,7 @@ from database import (
 )
 from scraper._http import get, make_session
 from scraper.nehnutelnosti import _extract_location_from_text
-from scraper.textparse import rooms_from_title
+from scraper.textparse import rooms_from_title, EXCLUDE_KEYWORDS
 from engine.regional_prices import pick_sale_price as _pick_sale_price
 
 BASE = "https://www.topreality.sk"
@@ -44,31 +44,6 @@ SEARCH_URL_CANDIDATES = [
 DETAIL_HREF_PATTERNS = [
     re.compile(r"-r\d{6,8}\.html(?:$|[?#])"),
 ]
-
-# Skip these — page mixes apartments with rentals / houses / land / commercial.
-EXCLUDE_KEYWORDS = (
-    "prenajom",   # rental
-    "rodinn",     # rodinný dom = house
-    "pozem",      # pozemok/pozemku/pozemky — land plot in any declension
-    "zahrad",     # garden / land plot (záhrada)
-    "garaz",      # garage
-    "kancelar",   # office
-    "chal", "chat",  # cottages
-    "obchodn",    # commercial
-    "sklado",     # storage
-    "administr",  # administrative space
-    "statie",     # parking spot
-    "vikend",     # weekend cottage
-    "budov",      # building (budova)
-    "kaviar",     # café (kaviareň)
-    "reštaur",    # restaurant
-    "hotel",      # hotel
-    "penzion",    # guesthouse
-    "zrub",       # log cabin / chalet (zrub, zrubu)
-    "zastavan",   # "v zastavanom území" — construction-zone/built-up-area plots
-    "dražb",      # dražba — auction (often non-apartment property)
-    "viacúčelov", "viacucelov",  # multi-purpose building, not apartment
-)
 
 ENERGY_VALID = {"A0", "A1", "A", "B", "C", "D", "E", "F", "G"}
 
