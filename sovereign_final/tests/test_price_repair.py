@@ -172,3 +172,63 @@ class TestRepairArgs:
     def test_parsing(self, argv, limit, dry):
         import repair_prices
         assert repair_prices._parse_args(argv) == (limit, dry)
+
+
+# ── Refusing to replace one shared price with another ─────────────────────────
+class TestRepeatedAcrossSizes:
+    """The first repair run "corrected" 77 listings and wrote €697,800 onto
+    seven of 104–178 m² — the same fault it was repairing, with a different
+    number. Two passes minutes apart also disagreed (€610,000 vs €430,000 on
+    the same listings), because the carousel being read rotates. A proposal
+    that repeats across sizes is therefore not written.
+    """
+
+    LIVE = [
+        {"id": "a", "size_m2": 111.0,  "price": 697_800.0},
+        {"id": "b", "size_m2": 119.7,  "price": 697_800.0},
+        {"id": "c", "size_m2": 143.82, "price": 697_800.0},
+        {"id": "d", "size_m2": 170.0,  "price": 697_800.0},
+        {"id": "e", "size_m2": 178.0,  "price": 697_800.0},
+        {"id": "f", "size_m2": 112.0,  "price": 697_800.0},
+        {"id": "g", "size_m2": 104.5,  "price": 697_800.0},
+        {"id": "ok", "size_m2": 82.0,  "price": 342_000.0},
+    ]
+
+    def test_rejects_the_seven(self):
+        from repair_prices import repeated_across_sizes
+        assert repeated_across_sizes(self.LIVE) == {"a", "b", "c", "d", "e", "f", "g"}
+
+    def test_keeps_a_price_nothing_else_claims(self):
+        from repair_prices import repeated_across_sizes
+        assert "ok" not in repeated_across_sizes(self.LIVE)
+
+    def test_same_size_repeat_is_allowed(self):
+        """Two 75 m² units at one price is a repeated unit type, not a
+        borrowed price — the properties really can share it."""
+        from repair_prices import repeated_across_sizes
+        proposals = [
+            {"id": "u1", "size_m2": 75.0, "price": 283_500.0},
+            {"id": "u2", "size_m2": 75.0, "price": 283_500.0},
+        ]
+        assert repeated_across_sizes(proposals) == set()
+
+    def test_unpriced_proposals_are_not_grouped(self):
+        """Several reads returning nothing must not look like a shared price."""
+        from repair_prices import repeated_across_sizes
+        proposals = [
+            {"id": "n1", "size_m2": 60.0, "price": 0.0},
+            {"id": "n2", "size_m2": 90.0, "price": 0.0},
+        ]
+        assert repeated_across_sizes(proposals) == set()
+
+    def test_empty(self):
+        from repair_prices import repeated_across_sizes
+        assert repeated_across_sizes([]) == set()
+
+    def test_missing_size_still_compares(self):
+        from repair_prices import repeated_across_sizes
+        proposals = [
+            {"id": "x", "size_m2": 0, "price": 500_000.0},
+            {"id": "y", "size_m2": 80.0, "price": 500_000.0},
+        ]
+        assert repeated_across_sizes(proposals) == {"x", "y"}

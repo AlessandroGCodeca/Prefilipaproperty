@@ -68,8 +68,11 @@ class TestHeadingPrice:
         texts = ["3-izbový byt Ružinov", "", None, f"342{NBSP}000 €"]
         assert _heading_price(texts) == 342_000.0
 
-    def test_takes_the_first_priced_heading(self):
-        assert _heading_price([f"342{NBSP}000 €", f"999{NBSP}000 €"]) == 342_000.0
+    def test_two_different_prices_is_not_first_one_wins(self):
+        """This used to return the first. Taking whichever came first in
+        document order is how a carousel price got stored: the page does not
+        state one price for one property, so there is nothing to pick."""
+        assert _heading_price([f"342{NBSP}000 €", f"999{NBSP}000 €"]) == 0.0
 
     def test_no_headings_at_all(self):
         assert _heading_price([]) == 0.0
@@ -131,3 +134,56 @@ class TestHeadingSelector:
     def test_does_not_match_carousel_styling(self):
         assert "body2" not in _PRICE_HEADING_SELECTOR
         assert "noWrap" not in _PRICE_HEADING_SELECTOR
+
+
+# ── The live regression ───────────────────────────────────────────────────────
+class TestHeadingMustBeOnlyThePrice:
+    """_heading_price used to accept any heading TEXT CONTAINING a price. The
+    selector also matches container elements, and a container's innerText
+    carries every price beneath it — so on a real page it returned a carousel
+    price. A repair run then wrote €697,800 onto seven listings of 104–178 m²,
+    and gave different answers on two passes minutes apart, because the
+    carousel rotates between page loads.
+    """
+
+    CAROUSEL_SWEEP = (f"1{NBSP}399{NBSP}000 € 697{NBSP}800 € "
+                      f"610{NBSP}000 € 430{NBSP}000 €")
+
+    def test_container_innertext_is_rejected(self):
+        assert _heading_price([self.CAROUSEL_SWEEP]) == 0.0
+
+    def test_section_heading_with_carousel_beneath_is_rejected(self):
+        assert _heading_price([f"Podobné ponuky {self.CAROUSEL_SWEEP}"]) == 0.0
+
+    def test_own_price_still_read_past_a_container(self):
+        """Document order must not decide it — the carousel can come first."""
+        assert _heading_price([self.CAROUSEL_SWEEP, f"342{NBSP}000 €"]) == 342_000.0
+
+    @pytest.mark.parametrize("text,expected", [
+        (f"342{NBSP}000 €", 342_000.0),
+        ("342 000 €", 342_000.0),
+        (f"  342{NBSP}000 €  ", 342_000.0),
+        (f"Cena: 342{NBSP}000 €", 342_000.0),
+        (f"cena {NBSP}342{NBSP}000 €", 342_000.0),
+    ])
+    def test_price_only_headings_accepted(self, text, expected):
+        assert _heading_price([text]) == expected
+
+    @pytest.mark.parametrize("text", [
+        f"342{NBSP}000 € vrátane parkovania",     # trailing prose
+        f"Novostavba za 342{NBSP}000 €",          # leading prose
+        f"342{NBSP}000 € / 500{NBSP}000 €",       # two prices in one heading
+        f"3-izbový byt, 342{NBSP}000 €, Ružinov",
+    ])
+    def test_headings_that_merely_contain_a_price_are_rejected(self, text):
+        assert _heading_price([text]) == 0.0
+
+    def test_two_distinct_price_headings_are_ambiguous(self):
+        assert _heading_price([f"342{NBSP}000 €", f"500{NBSP}000 €"]) == 0.0
+
+    def test_the_same_price_twice_is_not_ambiguous(self):
+        """Pages render each figure twice; that is one price, not two."""
+        assert _heading_price([f"342{NBSP}000 €", f"342{NBSP}000 €"]) == 342_000.0
+
+    def test_rent_heading_skipped_and_sale_price_still_found(self):
+        assert _heading_price([f"1{NBSP}200 €/mes.", f"342{NBSP}000 €"]) == 342_000.0

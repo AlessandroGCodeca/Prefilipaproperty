@@ -47,6 +47,50 @@ def _parse_args(argv) -> tuple[int, bool]:
     return limit, dry_run
 
 
+def repeated_across_sizes(proposals) -> set:
+    """Ids whose proposed price would land on listings of more than one size.
+
+    A read that returns the same price for differently-sized flats has read
+    something other than those flats — the exact fault being repaired. Left
+    unchecked, the first repair run replaced one shared price with another,
+    writing €697,800 onto seven listings of 104 to 178 m², and gave different
+    answers on two passes minutes apart because the carousel it was reading
+    rotates. So a proposal that repeats is not written.
+    """
+    sizes_by_price: dict = {}
+    for p in proposals:
+        if not p["price"]:
+            continue
+        sizes_by_price.setdefault(p["price"], set()).add(
+            round(float(p["size_m2"] or 0), 2)
+        )
+    repeated = {price for price, sizes in sizes_by_price.items() if len(sizes) > 1}
+    return {p["id"] for p in proposals if p["price"] in repeated}
+
+
+def _read_proposals(page, suspects) -> tuple[list, int]:
+    """Read every suspect's page first, deciding nothing yet."""
+    proposals, failed = [], 0
+    for i, row in enumerate(suspects, 1):
+        try:
+            detail = _scrape_detail_page(page, row["url"])
+        except Exception as e:
+            print(f"  [{i}/{len(suspects)}] read error: {e}", flush=True)
+            failed += 1
+            continue
+        proposals.append({
+            "id": row["id"],
+            "url": row["url"],
+            "title": row["title"] or row["url"],
+            "old": float(row["price_eur"] or 0),
+            "size_m2": float(row["size_m2"] or 0),
+            "price": float((detail or {}).get("price") or 0),
+        })
+        if i % 20 == 0 or i == len(suspects):
+            print(f"  read {i}/{len(suspects)}", flush=True)
+    return proposals, failed
+
+
 def main() -> int:
     limit, dry_run = _parse_args(sys.argv[1:])
 
@@ -62,8 +106,6 @@ def main() -> int:
 
     from playwright.sync_api import sync_playwright
 
-    corrected = cleared = confirmed = failed = 0
-
     with sync_playwright() as pw:
         browser, page, capture = _open_browser(pw)
         page.remove_listener("response", capture)
@@ -75,44 +117,41 @@ def main() -> int:
                 page.wait_for_timeout(2000)
             except Exception:
                 pass
-
-            for i, row in enumerate(suspects, 1):
-                old = float(row["price_eur"] or 0)
-                size = float(row["size_m2"] or 0)
-                label = (row["title"] or row["url"])[:44].replace("\n", " ")
-
-                try:
-                    detail = _scrape_detail_page(page, row["url"])
-                except Exception as e:
-                    print(f"  [{i}/{len(suspects)}] error: {e}", flush=True)
-                    failed += 1
-                    continue
-
-                new = float((detail or {}).get("price") or 0)
-
-                if new and abs(new - old) < 1:
-                    confirmed += 1
-                    verdict = "confirmed"
-                elif new:
-                    corrected += 1
-                    verdict = f"corrected → €{new:,.0f}"
-                    if not dry_run:
-                        set_listing_price(row["id"], new)
-                else:
-                    cleared += 1
-                    verdict = "cleared (page states no single price)"
-                    if not dry_run:
-                        set_listing_price(row["id"], 0)
-
-                if verdict != "confirmed":
-                    per_m2 = f"{old / size:,.0f}" if size else "?"
-                    print(f"  [{i}/{len(suspects)}] €{old:,.0f} "
-                          f"({per_m2} €/m², {size:g} m²)  {label}\n"
-                          f"        → {verdict}", flush=True)
-                elif i % 20 == 0:
-                    print(f"  progress {i}/{len(suspects)}", flush=True)
+            proposals, failed = _read_proposals(page, suspects)
         finally:
             browser.close()
+
+    rejected = repeated_across_sizes(proposals)
+    corrected = cleared = confirmed = 0
+
+    print()
+    for p in proposals:
+        per_m2 = f"{p['old'] / p['size_m2']:,.0f}" if p["size_m2"] else "?"
+        label = p["title"][:44].replace("\n", " ")
+
+        if p["price"] and p["id"] in rejected:
+            cleared += 1
+            verdict = (f"REJECTED €{p['price']:,.0f} — that price came back for "
+                       f"differently-sized listings too; cleared instead")
+            write = 0
+        elif p["price"] and abs(p["price"] - p["old"]) < 1:
+            confirmed += 1
+            verdict = "confirmed"
+            write = None
+        elif p["price"]:
+            corrected += 1
+            verdict = f"corrected → €{p['price']:,.0f}"
+            write = p["price"]
+        else:
+            cleared += 1
+            verdict = "cleared (page states no single price)"
+            write = 0
+
+        if write is not None and not dry_run:
+            set_listing_price(p["id"], write)
+        if verdict != "confirmed":
+            print(f"  €{p['old']:,.0f} ({per_m2} €/m², {p['size_m2']:g} m²)  "
+                  f"{label}\n        → {verdict}", flush=True)
 
     print(f"\nDone. corrected {corrected}, cleared {cleared}, "
           f"confirmed {confirmed}, failed {failed}."
