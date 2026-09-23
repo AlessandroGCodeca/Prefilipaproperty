@@ -104,15 +104,42 @@ def _prices_in(text: str) -> list[float]:
     return out
 
 
+# The price element's whole text is the price and nothing else — "342 000 €",
+# optionally labelled. Matching a heading that merely CONTAINS a price is what
+# broke this the first time: the selector also matches container elements, and
+# a container's innerText sweeps up every price beneath it, carousel included.
+# A live repair run then wrote one carousel price onto seven listings and gave
+# different answers on two passes minutes apart, because the carousel rotates.
+_PRICE_ONLY_RE = re.compile(
+    r"^\s*(?:cena\s*:?\s*)?"
+    r"(\d{1,3}(?:[\s\xa0  ]\d{3})+|\d{4,8})"
+    r"\s*€\s*$",
+    re.I,
+)
+
+
 def _heading_price(texts) -> float:
-    """The sale price from the listing's own price heading, or 0.0."""
+    """The sale price, from a heading whose entire text is that price.
+
+    Returns 0.0 unless exactly one price survives. Several different
+    price-only headings means the page is not stating a single price for one
+    property, and picking one of them is guesswork — the same guesswork that
+    put a neighbouring listing's price on this row to begin with.
+    """
+    found: set[float] = set()
     for t in texts or []:
         if not t or _MONTHLY_RE.search(t):
             continue
-        found = _prices_in(t)
-        if found:
-            return found[0]
-    return 0.0
+        m = _PRICE_ONLY_RE.match(t.strip())
+        if not m:
+            continue
+        try:
+            v = float(re.sub(r"[\s\xa0  ]", "", m.group(1)))
+        except ValueError:
+            continue
+        if _is_plausible_price(v):
+            found.add(v)
+    return found.pop() if len(found) == 1 else 0.0
 
 
 def _fallback_price(text: str, size_m2: float = 0.0, district: str = "") -> float:
@@ -746,6 +773,9 @@ def _scrape_detail_page(page, url: str) -> dict:
     # on the page is a carousel card (see _PRICE_HEADING_SELECTOR), and the
     # listing's own price is frequently NOT the largest of them: the €342 000
     # Ružinov flat shares its page with a €1 399 000 promoted listing.
+    # The selector matches container elements too, whose innerText carries the
+    # whole carousel with it — _heading_price() is what rejects those, by
+    # requiring a heading's entire text to be the price.
     if not data.get("price"):
         try:
             heading_texts = page.eval_on_selector_all(
