@@ -13,6 +13,8 @@ get_fresh_detail_urls(), so the wrong values sit there untouched.
 This opens each suspect listing's page and settles it:
 
   new price found   → stored, replacing the wrong one (or confirming a right one)
+  listing gone      → deactivated: the page shows a grid of similar listings
+                      where the listing was, so there is no price to repair
   no price on page  → cleared, because the stored value came from the guessing
                       that has since been removed; the row goes back to PENDING
                       for the dev-project harvest or a later read to fill
@@ -28,7 +30,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from database import (  # noqa: E402
-    get_shared_price_listings, set_listing_price,
+    deactivate_listings, get_shared_price_listings, set_listing_price,
 )
 from scraper.nehnutelnosti import (  # noqa: E402
     SEARCH_PAGE, _open_browser, _scrape_detail_page,
@@ -85,10 +87,29 @@ def _read_proposals(page, suspects) -> tuple[list, int]:
             "old": float(row["price_eur"] or 0),
             "size_m2": float(row["size_m2"] or 0),
             "price": float((detail or {}).get("price") or 0),
+            "gone": bool((detail or {}).get("gone")),
         })
         if i % 20 == 0 or i == len(suspects):
             print(f"  read {i}/{len(suspects)}", flush=True)
     return proposals, failed
+
+
+def decide(p: dict, rejected: set) -> tuple[str, float | None]:
+    """What one read settles: (outcome, price to write, or None for no write).
+
+    A gone listing is checked first. Its page states no price, so without this
+    it would fall through to "cleared" — back to PENDING, where it sat until
+    the three-week staleness sweep noticed what the page already said.
+    """
+    if p.get("gone"):
+        return "deactivated", None
+    if p["price"] and p["id"] in rejected:
+        return "rejected", 0
+    if p["price"] and abs(p["price"] - p["old"]) < 1:
+        return "confirmed", None
+    if p["price"]:
+        return "corrected", p["price"]
+    return "cleared", 0
 
 
 def main() -> int:
@@ -122,30 +143,32 @@ def main() -> int:
             browser.close()
 
     rejected = repeated_across_sizes(proposals)
-    corrected = cleared = confirmed = 0
+    corrected = cleared = confirmed = deactivated = 0
 
     print()
     for p in proposals:
         per_m2 = f"{p['old'] / p['size_m2']:,.0f}" if p["size_m2"] else "?"
         label = p["title"][:44].replace("\n", " ")
 
-        if p["price"] and p["id"] in rejected:
+        outcome, write = decide(p, rejected)
+        if outcome == "deactivated":
+            deactivated += 1
+            verdict = "deactivated (listing gone — page shows similar listings)"
+            if not dry_run:
+                deactivate_listings([p["url"]])
+        elif outcome == "rejected":
             cleared += 1
             verdict = (f"REJECTED €{p['price']:,.0f} — that price came back for "
                        f"differently-sized listings too; cleared instead")
-            write = 0
-        elif p["price"] and abs(p["price"] - p["old"]) < 1:
+        elif outcome == "confirmed":
             confirmed += 1
             verdict = "confirmed"
-            write = None
-        elif p["price"]:
+        elif outcome == "corrected":
             corrected += 1
             verdict = f"corrected → €{p['price']:,.0f}"
-            write = p["price"]
         else:
             cleared += 1
             verdict = "cleared (page states no single price)"
-            write = 0
 
         if write is not None and not dry_run:
             set_listing_price(p["id"], write)
@@ -154,7 +177,7 @@ def main() -> int:
                   f"{label}\n        → {verdict}", flush=True)
 
     print(f"\nDone. corrected {corrected}, cleared {cleared}, "
-          f"confirmed {confirmed}, failed {failed}."
+          f"deactivated {deactivated}, confirmed {confirmed}, failed {failed}."
           + ("\n(dry run — nothing was written)" if dry_run else ""))
     if cleared and not dry_run:
         print("Cleared rows are PENDING with no detail_enriched_at stamp, so "

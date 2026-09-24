@@ -532,6 +532,33 @@ def touch_listings(urls) -> int:
     return n
 
 
+def deactivate_listings(urls) -> int:
+    """Retire listings whose own page says they are gone, without waiting the
+    three weeks deactivate_stale_listings needs to reach the same answer.
+
+    A removed nehnutelnosti listing's URL still loads, but shows a grid of
+    similar listings where the listing was (see
+    scraper.nehnutelnosti._is_similar_listings_page). Keyed on url like
+    touch_listings; the row keeps its data and comes back if an upsert sees
+    the listing again. Returns the number of rows deactivated.
+    """
+    urls = [u for u in (urls or []) if u]
+    if not urls:
+        return 0
+    conn = get_conn()
+    try:
+        n = 0
+        for url in urls:
+            n += conn.execute(
+                "UPDATE listings SET is_active=0 WHERE url=? AND is_active=1",
+                (url,),
+            ).rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return n
+
+
 def set_listing_price(listing_id: str, price_eur: float) -> bool:
     """Overwrite a listing's price outright — including back down to 0.
 
@@ -649,6 +676,52 @@ def clear_cashflow_scores() -> int:
     return n
 
 
+def _drop_cashflow_score(conn, listing_id: str) -> bool:
+    """Discard one listing's cashflow score so the next scoring run redoes it.
+
+    A score worked out while the district was blank used the €6.50/m² default
+    rent — about half what a Bratislava flat earns. get_unscored_cashflow()
+    only picks up rows with no score, so filling the district alone would
+    leave that wrong score in place for good. Classification goes back to
+    PENDING only when it came from the score being dropped.
+    """
+    n = conn.execute(
+        "DELETE FROM cashflow_scores WHERE listing_id=?", (listing_id,)
+    ).rowcount
+    if n:
+        conn.execute(
+            "UPDATE listings SET classification='PENDING' "
+            "WHERE id=? AND classification IN ('GREEN','YELLOW','WHITE')",
+            (listing_id,),
+        )
+    return n > 0
+
+
+def fill_blank_district(conn, listing_id: str, district: str,
+                        address_raw: str | None = None) -> bool:
+    """Set a district on a row that has none, and drop the score worked out
+    without it (see _drop_cashflow_score). A row that already has a district
+    is left alone. `address_raw`, when given, is written alongside.
+
+    Takes the caller's connection so a backfill loop stays one transaction;
+    the caller commits. Returns True when the row was filled.
+    """
+    if not district:
+        return False
+    sets, params = "district=?", [district]
+    if address_raw is not None:
+        sets += ", address_raw=?"
+        params.append(address_raw)
+    n = conn.execute(
+        f"UPDATE listings SET {sets} "
+        "WHERE id=? AND (district IS NULL OR district='')",
+        (*params, listing_id),
+    ).rowcount
+    if n:
+        _drop_cashflow_score(conn, listing_id)
+    return n > 0
+
+
 def upsert_listing(data: dict):
     conn = get_conn()
     try:
@@ -656,7 +729,7 @@ def upsert_listing(data: dict):
         # that _dedupe_canonical_urls rewrote to the canonical form), reuse its
         # id so ON CONFLICT(id) fires instead of hitting the url UNIQUE constraint.
         existing = conn.execute(
-            "SELECT id FROM listings WHERE url=?", (data["url"],)
+            "SELECT id, district FROM listings WHERE url=?", (data["url"],)
         ).fetchone()
         if existing and existing[0] != data["id"]:
             data = {**data, "id": existing[0], "url_hash": existing[0]}
@@ -696,6 +769,10 @@ def upsert_listing(data: dict):
                 is_active=1,
                 is_dev_project=CASE WHEN excluded.is_dev_project=1 THEN 1 ELSE is_dev_project END
         """, data)
+        # A district arriving for a row that had none: its score is stale.
+        if (existing and not (existing[1] or "").strip()
+                and (data.get("district") or "").strip()):
+            _drop_cashflow_score(conn, data["id"])
         conn.commit()
     finally:
         conn.close()
@@ -931,7 +1008,8 @@ def update_address(listing_id: str, district: str, city: str):
     Only fills blanks: district is set when a non-empty value was resolved; city
     is set only when it was previously blank — so a good scraped city is never
     clobbered. addr_normalized is set regardless (even on an empty resolution)
-    so an unresolvable address isn't re-sent to the LLM every run.
+    so an unresolvable address isn't re-sent to the LLM every run. A resolved
+    district drops the score worked out without it (_drop_cashflow_score).
     """
     conn = get_conn()
     try:
@@ -944,6 +1022,8 @@ def update_address(listing_id: str, district: str, city: str):
                 addr_normalized = 1
             WHERE id = ?
         """, (district, district, city, city, listing_id))
+        if district:
+            _drop_cashflow_score(conn, listing_id)
         conn.commit()
     finally:
         conn.close()
