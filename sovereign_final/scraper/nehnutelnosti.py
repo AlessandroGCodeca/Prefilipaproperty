@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import SCRAPE_DELAY_SEC, DETAIL_REFRESH_DAYS
 from database import (
     upsert_listing, init_db, get_fresh_detail_urls, mark_details_enriched,
-    touch_listings,
+    touch_listings, deactivate_listings,
 )
 from scraper.textparse import EXCLUDE_KEYWORDS, is_excluded_listing
 
@@ -159,6 +159,47 @@ def _fallback_price(text: str, size_m2: float = 0.0, district: str = "") -> floa
     return pick_sale_price(candidates, size_m2=size_m2, district=district)
 
 
+# A removed listing's URL keeps loading, but the listing is no longer on it:
+# the page states no price of its own and shows a grid of about 28 "similar
+# listings" instead, each card's price in MuiTypography-h5 (probed on
+# /detail/JuS4u4DYlpK). A live listing's own price is an h3 and its only other
+# prices are the body2 carousel, so the grid is the tell. The page already says
+# the listing is gone; deactivate_stale_listings would take three weeks to agree.
+_GRID_CARD_SELECTOR = "[class*='MuiTypography-h5']"
+
+# Well under the ~28 cards seen, so a shorter grid still counts, and far above
+# the carousel's four prices or the price + deposit a live listing states.
+_SIMILAR_GRID_MIN_PRICES = 10
+
+# Each price heading's text, and whether it is one of the grid's cards.
+_HEADINGS_JS = (
+    'els => els.map(e => [e.innerText, e.matches("' + _GRID_CARD_SELECTOR + '")])'
+)
+
+
+def _is_similar_listings_page(url: str, own_texts, card_texts) -> bool:
+    """True when the page shows the similar-listings grid where the listing was.
+
+    `own_texts` are the price headings outside the grid, `card_texts` the grid
+    cards. Both conditions must hold:
+
+      - no heading outside the grid is a price, of any amount. A page stating
+        one is still showing a listing, whatever else is on it.
+      - the grid carries many distinct prices. Card text is scanned for prices
+        rather than required to BE one: a container sweeping up several cards
+        here only confirms the grid, it can't put a wrong price on a row.
+
+    A developer project's own page is never judged gone: it lists its units'
+    prices with none of its own, which is the same shape.
+    """
+    if "/developersky-projekt/" in (url or ""):
+        return False
+    if any(t and _PRICE_ONLY_RE.match(t.strip()) for t in own_texts or []):
+        return False
+    grid = {p for t in card_texts or [] for p in _prices_in(t)}
+    return len(grid) >= _SIMILAR_GRID_MIN_PRICES
+
+
 def _size(text: str) -> float:
     """Apartment area from free card text. Bounded to a plausible flat size so
     a stated balcony/loggia area is not mistaken for the flat itself."""
@@ -191,6 +232,33 @@ def _canonical_url(url: str) -> str:
         if "-" not in p and len(p) <= 24:
             break
     return f"{base}/detail/" + "/".join(keep)
+
+
+def _own_slug_url(url: str, html: str, final_url: str = "") -> str:
+    """This listing's own /detail/{id}/{slug} address, read off its page.
+
+    Stored URLs are canonical — _canonical_url() drops the slug so every
+    variant lands on one row — and the slug is where _parse_slug() finds the
+    town. A page opened as /detail/{id} still carries its slugged address: in
+    the browser's final URL after a redirect, the canonical link, og:url.
+
+    Only a link carrying THIS listing's id counts. Every page links other
+    listings too, and taking the first slug on it would give this row a
+    neighbour's town — the location twin of the borrowed-price bug.
+    """
+    canon = _canonical_url(url or "")
+    if "/detail/" not in canon:
+        return ""
+    own_id = canon.rstrip("/").rsplit("/", 1)[-1]
+    pattern = re.compile(
+        r"/detail/(?:developersky-projekt/)?" + re.escape(own_id)
+        + r"/([A-Za-z0-9]+(?:-[A-Za-z0-9]+)+)"
+    )
+    for source in (final_url, html):
+        m = pattern.search(source if isinstance(source, str) else "")
+        if m:
+            return f"{canon}/{m.group(1)}"
+    return ""
 
 
 # Slovak cities/towns most likely to appear in a nehnutelnosti URL slug.
@@ -528,19 +596,20 @@ def _parse_rsc_chunks(html: str) -> list[dict]:
 
     seen_urls: set[str] = set()
 
+    # _href keeps the slug that _url drops — the town is read out of it.
     for url in detail_urls:
         canon = _canonical_url(url)
         if canon not in seen_urls:
             seen_urls.add(canon)
             uid = hashlib.md5(canon.encode()).hexdigest()
-            results.append({"_url": canon, "_uid": uid})
+            results.append({"_url": canon, "_uid": uid, "_href": url})
 
     for path in detail_paths:
         canon = _canonical_url(BASE + path)
         if canon not in seen_urls:
             seen_urls.add(canon)
             uid = hashlib.md5(canon.encode()).hexdigest()
-            results.append({"_url": canon, "_uid": uid})
+            results.append({"_url": canon, "_uid": uid, "_href": BASE + path})
 
     return results
 
@@ -548,13 +617,18 @@ def _parse_rsc_chunks(html: str) -> list[dict]:
 def _minimal_listing(url: str, title: str, now: str) -> dict:
     canon = _canonical_url(url)
     uid = hashlib.md5(canon.encode()).hexdigest()
+    # The card links /detail/{id}/{slug}, and the slug often names the town.
+    # Everything downstream sees only canon, which has no slug, so read the
+    # town out of it now. A detail-page address still takes precedence.
+    slug = _parse_slug(url)
     return {
         "id": uid, "source": "nehnutelnosti", "url": canon, "url_hash": uid,
         "title": title[:200] if title else "", "description": "",
         "price_eur": 0.0, "size_m2": 0.0,
         "rooms": None, "floor": None, "year_built": None,
         "energy_class": "UNKNOWN",
-        "address_raw": "", "district": "", "city": "",
+        "address_raw": slug.get("address", ""),
+        "district": slug.get("district", ""), "city": "",
         "primary_image_url": "", "image_urls": "",
         "classification": "PENDING", "lv_status": "PENDING",
         "scraped_at": now, "last_seen_at": now,
@@ -649,7 +723,11 @@ def _safe_text(page) -> str:
 
 
 def _scrape_detail_page(page, url: str) -> dict:
-    """Open one /detail/ page in the same browser session and pull structured fields."""
+    """Open one /detail/ page in the same browser session and pull structured fields.
+
+    Returns {"gone": True} and nothing else when the page shows the
+    similar-listings grid in place of the listing (_is_similar_listings_page).
+    """
     data: dict = {}
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=25000)
@@ -696,6 +774,16 @@ def _scrape_detail_page(page, url: str) -> dict:
             m = re.search(r'<meta\s+name="description"\s+content="([^"]+)"', html)
         if m:
             data["description"] = m.group(1)
+
+    # The listing's own slugged address, which _apply_detail reads the town
+    # from when nothing on the page states one.
+    try:
+        final_url = page.url
+    except Exception:
+        final_url = ""
+    slug_url = _own_slug_url(url, html, final_url)
+    if slug_url:
+        data["slug_url"] = slug_url
 
     # 3. For price/size/energy/address, regex on rendered visible text — more
     #    reliable than HTML because these fields are often split across spans.
@@ -778,14 +866,21 @@ def _scrape_detail_page(page, url: str) -> dict:
     # requiring a heading's entire text to be the price.
     if not data.get("price"):
         try:
-            heading_texts = page.eval_on_selector_all(
-                _PRICE_HEADING_SELECTOR, "els => els.map(e => e.innerText)"
-            )
+            headings = page.eval_on_selector_all(_PRICE_HEADING_SELECTOR, _HEADINGS_JS)
         except Exception:
-            heading_texts = []
-        heading = _heading_price(heading_texts)
+            headings = []
+        heading = _heading_price([h[0] for h in headings])
         if heading:
             data["price"] = heading
+        elif _is_similar_listings_page(
+            url,
+            own_texts=[h[0] for h in headings if not h[1]],
+            card_texts=[h[0] for h in headings if h[1]],
+        ):
+            # The listing is gone. Nothing else read off this page is about it
+            # — the title, text and towns belong to the similar listings — so
+            # the verdict is all that comes back.
+            return {"gone": True}
 
     # Fallback — scan the visible text. Reached when the price heading is
     # absent, which happens on a developer project's unit list and would happen
@@ -909,8 +1004,10 @@ def _apply_detail(listing: dict, detail: dict) -> None:
         listing["image_urls"] = detail["image"]
 
     # Slug fallback — covers "PREMIUM"-titled paid listings and JSON-LD blobs
-    # that omit address. Always runs but only fills empty fields.
-    slug_data = _parse_slug(listing.get("url", ""))
+    # that omit address. Always runs but only fills empty fields. The stored
+    # URL is canonical and carries no slug, so the page's own slugged address
+    # is used when the read found one.
+    slug_data = _parse_slug(detail.get("slug_url") or listing.get("url", ""))
     cur_title = (listing.get("title") or "").strip().lower()
     if slug_data.get("title") and cur_title in _GENERIC_TITLES:
         listing["title"] = slug_data["title"][:200]
@@ -1000,10 +1097,11 @@ def _open_browser(pw):
 
 def _scrape_page_playwright(page, capture, page_num: int,
                             seen_urls: set[str], fresh_urls: set[str]
-                            ) -> tuple[list[dict], list[str], list[str]]:
+                            ) -> tuple[list[dict], list[str], list[str], list[str]]:
     """Scrape one search page.
 
-    Returns (listings to upsert, ids whose detail page we read, urls to touch).
+    Returns (listings to upsert, ids whose detail page we read, urls to touch,
+    urls whose detail page showed the listing is gone).
 
     `seen_urls` is the run-wide dedupe set (extended in place). `fresh_urls`
     holds listings the DB already has complete recent data for: those come back
@@ -1063,7 +1161,7 @@ def _scrape_page_playwright(page, capture, page_num: int,
             seen_urls.add(canon)
             if is_excluded_listing("", item["_url"]):
                 continue
-            results.append(_minimal_listing(canon, "", now))
+            results.append(_minimal_listing(item.get("_href") or canon, "", now))
 
     # ── Skip: listings the DB already holds complete recent data for. Drop
     # them from the upsert list entirely — all we have without opening the
@@ -1076,6 +1174,7 @@ def _scrape_page_playwright(page, capture, page_num: int,
 
     # ── Enrichment: open each listing's detail page in same browser ────────
     enriched_ids: list[str] = []
+    gone_urls: list[str] = []
     to_enrich = [r for r in results if not r.get("price_eur")]
     if to_enrich:
         print(f"    Enriching {len(to_enrich)} listings (detail pages)...", flush=True)
@@ -1083,7 +1182,9 @@ def _scrape_page_playwright(page, capture, page_num: int,
         for i, listing in enumerate(to_enrich, 1):
             try:
                 detail = _scrape_detail_page(page, listing["url"])
-                if detail:
+                if detail.get("gone"):
+                    gone_urls.append(listing["url"])
+                elif detail:
                     _apply_detail(listing, detail)
                     enriched_ids.append(listing["id"])
                     if detail.get("price"):
@@ -1093,6 +1194,14 @@ def _scrape_page_playwright(page, capture, page_num: int,
             if i % 10 == 0 or i == len(to_enrich):
                 print(f"      progress {i}/{len(to_enrich)} (with price: {success})",
                       flush=True)
+
+    # ── Gone: the detail page showed similar listings instead of this one.
+    # Upserting it would re-activate the row, so it goes back for deactivation.
+    if gone_urls:
+        print(f"    {len(gone_urls)} listings gone (similar-listings page instead)",
+              flush=True)
+        gone = set(gone_urls)
+        results = [r for r in results if r["url"] not in gone]
 
     # ── Harvest: detail pages fire their own API calls (dev-project unit
     # lists, "similar listings"), each returning fully structured records for
@@ -1104,7 +1213,7 @@ def _scrape_page_playwright(page, capture, page_num: int,
         print(f"    + {len(extra)} listings harvested from detail-page APIs", flush=True)
         results.extend(extra)
 
-    return results, enriched_ids, touch_urls
+    return results, enriched_ids, touch_urls, gone_urls
 
 
 def check_reachable() -> tuple[int, str]:
@@ -1217,8 +1326,11 @@ def _backfill_blank_districts() -> int:
     ("moderny-3-izbovy-byt") even though its title, description or
     address_raw plainly named the city. _extract_location_from_text scans
     those independently and catches many of those cases.
+
+    A row filled here loses its cashflow score, which was worked out on the
+    blank-district default rent (see database.fill_blank_district).
     """
-    from database import get_conn
+    from database import get_conn, fill_blank_district
     conn = get_conn()
     rows = conn.execute(
         "SELECT id, url, title, address_raw, description FROM listings "
@@ -1239,19 +1351,16 @@ def _backfill_blank_districts() -> int:
         if not district:
             continue
         new_addr = addr_raw or address or district
+        if not fill_blank_district(conn, row_id, district, new_addr):
+            continue
         # Only overwrite title when the current one is a generic placeholder,
         # and only a slug-derived title (not a bare city/suburb match) is
         # worth using in its place.
         cur_title = (title or "").strip().lower()
         if slug_data.get("title") and cur_title in _GENERIC_TITLES:
             conn.execute(
-                "UPDATE listings SET district=?, address_raw=?, title=? WHERE id=?",
-                (district, new_addr, slug_data["title"][:200], row_id),
-            )
-        else:
-            conn.execute(
-                "UPDATE listings SET district=?, address_raw=? WHERE id=?",
-                (district, new_addr, row_id),
+                "UPDATE listings SET title=? WHERE id=?",
+                (slug_data["title"][:200], row_id),
             )
         updated += 1
     conn.commit()
@@ -1282,12 +1391,13 @@ def run(max_pages: int = 10) -> int:
               flush=True)
     seen_urls: set[str] = set()
     touched = 0
+    gone = deactivated = 0
 
     with sync_playwright() as pw:
         browser, page, capture = _open_browser(pw)
         try:
             for p in range(1, max_pages + 1):
-                listings, enriched_ids, touch_urls = _scrape_page_playwright(
+                listings, enriched_ids, touch_urls, gone_urls = _scrape_page_playwright(
                     page, capture, p, seen_urls, fresh_urls
                 )
                 for l in listings:
@@ -1306,6 +1416,8 @@ def run(max_pages: int = 10) -> int:
                 # Stamp only after the upsert, so a row always exists to stamp.
                 mark_details_enriched(enriched_ids)
                 touched += touch_listings(touch_urls)
+                gone += len(gone_urls)
+                deactivated += deactivate_listings(gone_urls)
                 print(f"  Page {p}: {len(listings)} found", flush=True)
                 time.sleep(SCRAPE_DELAY_SEC)
         finally:
@@ -1314,7 +1426,7 @@ def run(max_pages: int = 10) -> int:
     # A run where every listing was already fresh upserts nothing — that's the
     # skip working, not a broken scraper. Only a run that saw nothing at all
     # means the extraction strategies have stopped matching the site.
-    if total == 0 and touched == 0:
+    if total == 0 and touched == 0 and gone == 0:
         raise RuntimeError(
             "Nehnutelnosti: 0 listings after Playwright scrape.\n"
             "Run debug_playwright.py with headless=False to inspect live page."
@@ -1328,7 +1440,8 @@ def run(max_pages: int = 10) -> int:
     )
     zero_below_regional_floor("nehnutelnosti")
     zero_above_regional_ceiling("nehnutelnosti")
-    print(f"✅ Nehnutelnosti done. {total} upserted.", flush=True)
+    print(f"✅ Nehnutelnosti done. {total} upserted, "
+          f"{deactivated} gone listings deactivated on sight.", flush=True)
     return total
 
 

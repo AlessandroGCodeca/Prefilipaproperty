@@ -337,7 +337,7 @@ def _backfill_blank_districts() -> int:
     scanning the title / address_raw for a known city or suburb name. The
     location helper requires Slovak diacritics, so the URL slug (ASCII) won't
     match — title and og:title address_raw normally retain the diacritics."""
-    from database import get_conn
+    from database import get_conn, fill_blank_district
     conn = get_conn()
     rows = conn.execute(
         "SELECT id, title, address_raw FROM listings "
@@ -348,11 +348,8 @@ def _backfill_blank_districts() -> int:
         for text in (addr, title):
             matched = _extract_location_from_text(text or "")
             if matched:
-                conn.execute(
-                    "UPDATE listings SET district=? WHERE id=?",
-                    (matched, row_id),
-                )
-                updated += 1
+                if fill_blank_district(conn, row_id, matched):
+                    updated += 1
                 break
     conn.commit()
     conn.close()

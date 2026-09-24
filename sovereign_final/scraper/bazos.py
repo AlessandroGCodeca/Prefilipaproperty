@@ -218,7 +218,7 @@ def _backfill_blank_districts() -> int:
     """Re-extract district from address_raw/description for existing rows that
     have a blank district. Older scraper versions stored postcodes or empty
     strings; the location helper finds the real city/suburb name."""
-    from database import get_conn
+    from database import get_conn, fill_blank_district
     conn = get_conn()
     rows = conn.execute(
         "SELECT id, address_raw, description, title FROM listings "
@@ -229,11 +229,8 @@ def _backfill_blank_districts() -> int:
         for text in (addr, desc, title):
             matched = _extract_location_from_text(text or "")
             if matched:
-                conn.execute(
-                    "UPDATE listings SET district=? WHERE id=?",
-                    (matched, row_id),
-                )
-                updated += 1
+                if fill_blank_district(conn, row_id, matched):
+                    updated += 1
                 break
     conn.commit()
     conn.close()
