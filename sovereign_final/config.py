@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Database ──────────────────────────────────────────────────────────────────
-DATABASE_URL = os.getenv("DATABASE_URL", "")
-USE_SQLITE_FALLBACK = not DATABASE_URL  # True when no Postgres available
+# SQLite only — see SQLITE_PATH below. DATABASE_URL is ignored: the old
+# PostgreSQL mode never worked (see the database.py docstring).
 
 # ── 2026 Slovak Financial Rates ───────────────────────────────────────────────
 # Mortgage: NBS new-housing-loan average sat ~3.5% in 2026, bank offers ~3.4–4.0%
@@ -78,8 +78,20 @@ PROPERTY_MGMT_RATE     = 0.00
 ACQUISITION_COST_RATE  = 0.01
 
 # ── Classification Thresholds ─────────────────────────────────────────────────
-GREEN_RATIO            = 1.15   # Rent >= 115% of costs
-YELLOW_RATIO           = 1.05   # Rent >= 105% of costs
+# Classes measure how far the asking €/m² sits below the region's median
+# (engine/regional_prices — Realitná únia / NBS). They used to be the s.r.o.
+# self-funding ratio: GREEN at rent ≥ 115% of all costs including the
+# mortgage, YELLOW at ≥ 105%. At 3.8% over 25 years and 80% LTV that needs a
+# ~7% gross yield, which no region reaches below ~50% of its median price —
+# exactly where the sanity floor (REGIONAL_PRICE_FLOOR_RATIO) zeroes prices as
+# data errors. At the median the ratio is 0.60–0.75 everywhere. So GREEN was
+# unreachable for any real listing, and YELLOW only reachable at the floor.
+# These thresholds sit well clear of it: GREEN is 20–50% below the median.
+GREEN_DISCOUNT         = 0.20   # asking €/m² ≥ 20% below the regional median
+YELLOW_DISCOUNT        = 0.10   # ≥ 10% below
+# A GREEN this close to the floor (≥ 40% below the median) gets a warning: the
+# price may be a deposit, an "od €X" starting price, or another listing's.
+NEAR_FLOOR_DISCOUNT    = 0.40
 
 # ── Location Scoring ──────────────────────────────────────────────────────────
 TRANSIT_WALK_METERS    = 560    # 7 min walk at 80m/min
@@ -151,17 +163,24 @@ SCRAPE_DELAY_SEC       = 2.5
 DETAIL_REFRESH_DAYS    = 7
 CADASTRAL_DELAY_SEC    = 1.5
 CADASTRAL_BACKOFF_MAX  = 60
+# An UNVERIFIED LV check that has something to check with (a portal map pin or
+# the flat's LV number) is retried after this many days — portal outages and
+# approximate pins shouldn't park a listing for good.
+LV_RECHECK_DAYS        = 7
 
-# ── LV Rejection Keywords ─────────────────────────────────────────────────────
-LV_REJECT_FLAGS = [
-    "záložné právo", "exekúcia", "súdny spor",
-    "vecné bremeno", "predkupné právo", "konkurz",
-    "zabezpečovacie prevodné právo",
-]
+# ── LV screening ──────────────────────────────────────────────────────────────
+# The encumbrances the LV debt filter rejects on (záložné právo, exekúcia,
+# konkurz, súdny spor, vecné bremeno, predkupné právo, zabezpečovacie prevodné
+# právo) and how each is matched live in modules/lv_screen.py.
+#
+# A lien is ordinary housing finance — and doesn't reject — only when ITS OWN
+# creditor is one of these. Any creditor whose name contains "banka"/"bank" or
+# "sporiteľňa" already counts (Slovak law reserves "banka" for licensed banks);
+# this list adds names and abbreviations that don't. ŠFRB (the state housing
+# fund) lends against flats the way a bank does.
 LV_BANK_NAMES = [
-    "slovenská sporiteľňa", "vúb", "tatra banka", "čsob",
-    "prima banka", "unicredit", "oberbank", "hypotekárna banka",
-    "365 bank", "mbank",
+    "vúb", "čsob", "unicredit", "oberbank", "mbank", "365.bank",
+    "štátny fond rozvoja bývania", "šfrb",
 ]
 
 # ── Rent Comps: €/m²/month by district (2026 baseline) ───────────────────────

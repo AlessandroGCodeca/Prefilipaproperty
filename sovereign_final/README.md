@@ -8,12 +8,22 @@
 ```
 1. Install Docker Desktop  →  docker.com/products/docker-desktop
 2. Unzip this folder anywhere (e.g. C:\Users\Filip\sovereign)
-3. Copy .env.example → .env  (edit DB_PASSWORD if you want)
+3. Copy .env.example → .env  (API keys are optional)
 4. Double-click START.bat
 5. Dashboard opens at http://localhost:8501
 ```
 
 That's it.
+
+Storage is one SQLite file, `data/sovereign.db` — locally, and in Docker on
+the `sovereign_data` volume shared by the dashboard and the scheduler. (The
+old PostgreSQL mode never worked and is gone; a `DATABASE_URL` left in an old
+`.env` is ignored.) To carry a local database into Docker:
+
+```
+docker compose cp data/sovereign.db dashboard:/app/data/sovereign.db
+docker compose restart
+```
 
 ---
 
@@ -25,7 +35,7 @@ CI runs on every PR. To run locally from `sovereign_final/`:
 python3 -m pytest tests/
 ```
 
-Expected: ~482 passing, 1 xfailed (known Slovak-declension limitation).
+Expected: ~750 passing.
 
 ---
 
@@ -36,25 +46,28 @@ sovereign_final/
 ├── app.py                    ← Streamlit dashboard (4 tabs)
 ├── scheduler.py              ← Daily 06:00 CET automation
 ├── config.py                 ← All 2026 Slovak tax rates
-├── database.py               ← PostgreSQL + SQLite fallback
+├── database.py               ← SQLite storage
 ├── enrich_pending.py         ← Re-read listings missing a price, size or district
 ├── repair_prices.py          ← Re-read listings whose price looks borrowed
 ├── repair_districts.py       ← Fix towns misread as Bratislava, then rescore
 ├── diagnose.py               ← Data-quality report (coverage, classification)
 ├── START.bat                 ← Windows one-click launcher
-├── docker-compose.yml        ← 4 Docker containers
+├── docker-compose.yml        ← dashboard + scheduler + local LLM
 ├── docker/Dockerfile         ← App image
 ├── requirements.txt
 ├── .env.example              ← Copy to .env
 ├── scraper/
 │   ├── nehnutelnosti.py      ← Nehnutelnosti.sk scraper (Playwright)
 │   ├── bazos.py              ← Bazos.sk scraper
-│   └── topreality.py         ← Topreality.sk scraper
+│   ├── topreality.py         ← Topreality.sk scraper
+│   ├── geo.py                ← A listing's own map pin (JSON-LD / API / meta)
+│   └── slovak_cases.py       ← Locative place names ("v Nitre", "v Košiciach")
 ├── engine/
 │   ├── financial.py          ← 2026 Slovak tax + cashflow engine
 │   └── regional_prices.py    ← Sale-price floor + ceiling sanity filters
 ├── modules/
-│   ├── debt_bot.py           ← LV title deed checker + Mistral LLM
+│   ├── debt_bot.py           ← LV title deed checker (PASS / UNVERIFIED / REJECTED)
+│   ├── lv_screen.py          ← Entry-by-entry LV encumbrance screen
 │   ├── cashflow_runner.py    ← Financial scoring runner
 │   └── location_iq.py        ← Google Places location scorer
 └── dev/                      ← One-off debug/exploration scripts (not runtime)
@@ -67,13 +80,14 @@ sovereign_final/
 | Tab | What it does |
 |-----|-------------|
 | TRIAGE TABLE | Flat, sortable view of every scored listing — composite grade, cap rate, surplus, yield. Default sort: best deal grade first |
-| ACTIVE SNAG LIST | 🟢🟡 deals with full cost breakdown, location IQ, one-click LV re-verify |
+| ACTIVE SNAG LIST | 🟢🟡 deals with full cost breakdown, location IQ, LV status, flat-LV verify |
 | SATELLITE VIEWER | Listing photo vs Google satellite + Street View + vibe score |
 | ONE-CLICK CLOSE | Pre-filled Slovak notary contract draft with download |
 
 Each listing also gets a **composite deal grade (A–D)** blending financial
-(cap rate + self-funding ratio), location, energy class and risk flags — so a
-GREEN deal in a poor location doesn't outrank a genuinely solid one.
+(cap rate + discount to the regional median), location, energy class,
+condition and risk flags — so a GREEN deal in a poor location doesn't outrank
+a genuinely solid one. An LV that is verified clean scores above an unverified one.
 
 ---
 
@@ -98,12 +112,69 @@ processes listings that have never been scored).
 
 ## Classification
 
+Classes compare the asking €/m² with the region's median
+(`engine/regional_prices.py` — Realitná únia / NBS), and the GREEN / YELLOW
+lists rank by that discount, then gross yield.
+
 | Class | Condition |
 |-------|-----------|
-| 🟢 GREEN | s.r.o. ratio ≥ 115% — self-funding, hold 20+ years |
-| 🟡 YELLOW | s.r.o. ratio ≥ 105% — solid yield play |
-| ⚪ WHITE | Below threshold — flip/arbitrage only |
-| ❌ REJECTED | Any LV debt flag — hard stop, never pursue |
+| 🟢 GREEN | 20–50% below the regional median €/m² |
+| 🟡 YELLOW | 10–20% below |
+| ⚪ WHITE | Less than 10% below, above the median, no regional benchmark — or more than 50% below, which is the sanity floor (a deposit, an "od €X" price, another listing's price) |
+| ❌ REJECTED | The flat's own LV carries a blocking encumbrance — hard stop |
+
+The classes used to be the s.r.o. self-funding ratio (GREEN at rent ≥ 115% of
+all costs). At 3.8% / 25 years / 80% LTV that needs a ~7% gross yield, which
+no region reaches above ~50% of its median price — the sanity floor below
+which prices are zeroed as data errors. No real listing could be GREEN. The
+ratio is still computed and shown ("Self-Fund"). A GREEN ≥ 40% below the
+median carries a warning: that close to the floor, check the price is the
+flat's own.
+
+Existing scores from the old rule are cleared once on upgrade — run
+💰 CASHFLOW SCORE (or wait for 06:00) to reclassify.
+
+---
+
+## LV debt filter
+
+| LV status | Meaning |
+|-----------|---------|
+| ✅ CLEAN | The flat's **own** LV was read and nothing on it blocks |
+| ⚠ UNVERIFIED | No LV of this flat was read — the card says how far the check got |
+| ❌ REJECTED | The flat's own LV has a non-bank lien, exekúcia, konkurz, súdny spor, vecné bremeno or predkupné právo |
+
+How a check runs:
+
+1. **Building plot.** When the portal ships the listing's own map pin, the
+   filter resolves it to the built-up parcel under it (`kataster_scraper.parcel_at`)
+   and stores the parcel, its cadastral unit and the plot's LV. A pin off any
+   building, or in another town than the listing, is not used. Geocoded
+   addresses never are — they land on a street or district centroid.
+2. **That is still UNVERIFIED.** A flat in a bytový dom has its own LV entry,
+   often on another LV than its plot, sometimes on one LV shared by the whole
+   building — so a clean plot LV says nothing about the flat, and a lien on it
+   may be a neighbour's. The card shows the plot and anything its LV lists.
+3. **The flat's own LV verifies it.** Type the flat's LV number (from the
+   seller's papers or the agent) and its katastrálne územie into the card and
+   press RE-VERIFY LV. A shared LV with a flag on it stays UNVERIFIED until
+   you've checked part C against the flat's number.
+
+The screen (`modules/lv_screen.py`) reads each encumbrance separately: a lien
+passes only when its **own** creditor ("v prospech …") is a bank or ŠFRB, and
+an exekúcia / konkurz / súdny spor never passes — not even when the optional
+Claude read says otherwise. Matching is inflection-aware ("začatie exekúcie",
+"záložným právom").
+
+To check the filter against a flat whose výpis you hold:
+
+```
+python3 dev/lv_known_flat.py LAT LNG --lv 4321 --area Petržalka
+```
+
+It prints the parcels at the pin, the plot LV and the flat LV, what the screen
+reads out of each, and the verdicts the filter would store. Run it from a
+Slovak IP — skgeodesy.sk geo-blocks many foreign ones.
 
 ---
 
@@ -135,8 +206,8 @@ processes listings that have never been scored).
 
 > LV debt checking needs **no key**: ÚGKK SR has no public API, so
 > `kataster_scraper.py` scrapes kataster.skgeodesy.sk directly (unofficial —
-> may break if the portal changes; listings without parcel data pass
-> "unverified").
+> may break if the portal changes). Listings it cannot verify are stored and
+> shown as ⚠ UNVERIFIED, never as clean.
 
 ---
 

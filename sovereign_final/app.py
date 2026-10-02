@@ -125,6 +125,7 @@ DEMO = [
      "cf_class":"GREEN","surplus_personal":198,"surplus_sro":412,
      "ratio_personal":1.12,"ratio_sro":1.24,"cash_on_cash":0.089,
      "net_rental_yield":0.048,"gross_yield":0.066,"optimal_structure":"SRO",
+     "market_discount":0.40,
      "estimated_rent_eur":920,"total_costs_personal":825,"total_costs_sro":742,
      "annual_sro_saving":2568,"sro_break_even_months":12,
      "mortgage_monthly":598,"hoa_monthly":60,"property_tax_monthly":46,
@@ -133,7 +134,7 @@ DEMO = [
      "income_tax_sro":112,"health_levy_sro":0,
      "location_score":83,"location_tier":"PRIME","nearest_transit_m":340,
      "walkability_score":78,"industrial_zone":0,"construction_risk":0,"noise_flag":0,
-     "amenity_count":5,"lv_status":"PASS","lat":48.178,"lng":17.062,
+     "amenity_count":5,"lv_status":"UNVERIFIED","lat":48.178,"lng":17.062,
      "primary_image_url":""},
     {"id":"d2","url":"https://nehnutelnosti.sk/demo2",
      "title":"2-izbový byt, Žilina centrum","price_eur":98000,"size_m2":58,
@@ -141,6 +142,7 @@ DEMO = [
      "cf_class":"GREEN","surplus_personal":145,"surplus_sro":318,
      "ratio_personal":1.06,"ratio_sro":1.19,"cash_on_cash":0.074,
      "net_rental_yield":0.039,"gross_yield":0.078,"optimal_structure":"SRO",
+     "market_discount":0.37,
      "estimated_rent_eur":640,"total_costs_personal":603,"total_costs_sro":537,
      "annual_sro_saving":2076,"sro_break_even_months":15,
      "mortgage_monthly":401,"hoa_monthly":60,"property_tax_monthly":27,
@@ -149,7 +151,7 @@ DEMO = [
      "income_tax_sro":78,"health_levy_sro":0,
      "location_score":72,"location_tier":"SOLID","nearest_transit_m":490,
      "walkability_score":66,"industrial_zone":1,"construction_risk":0,"noise_flag":0,
-     "amenity_count":4,"lv_status":"PASS","lat":49.223,"lng":18.739,
+     "amenity_count":4,"lv_status":"UNVERIFIED","lat":49.223,"lng":18.739,
      "primary_image_url":""},
     {"id":"d3","url":"https://nehnutelnosti.sk/demo3",
      "title":"1-izbový byt, Nitra Klokočina","price_eur":82000,"size_m2":38,
@@ -157,6 +159,7 @@ DEMO = [
      "cf_class":"YELLOW","surplus_personal":-42,"surplus_sro":87,
      "ratio_personal":0.94,"ratio_sro":1.09,"cash_on_cash":0.051,
      "net_rental_yield":0.031,"gross_yield":0.066,"optimal_structure":"SRO",
+     "market_discount":0.13,
      "estimated_rent_eur":450,"total_costs_personal":479,"total_costs_sro":413,
      "annual_sro_saving":1548,"sro_break_even_months":20,
      "mortgage_monthly":336,"hoa_monthly":35,"property_tax_monthly":23,
@@ -165,7 +168,7 @@ DEMO = [
      "income_tax_sro":42,"health_levy_sro":0,
      "location_score":62,"location_tier":"SOLID","nearest_transit_m":680,
      "walkability_score":55,"industrial_zone":1,"construction_risk":0,"noise_flag":0,
-     "amenity_count":3,"lv_status":"PASS","lat":48.307,"lng":18.085,
+     "amenity_count":3,"lv_status":"UNVERIFIED","lat":48.307,"lng":18.085,
      "primary_image_url":""},
 ]
 
@@ -340,9 +343,9 @@ if do_lv:
     txt = st.empty()
     def lv_cb(i, n, a=""): bar.progress(i/n); txt.text(f"LV {i}/{n}: {a}")
     from modules.debt_bot import run_debt_filter
-    p, r = run_debt_filter(progress_callback=lv_cb)
+    p, r, u = run_debt_filter(progress_callback=lv_cb)
     bar.empty(); txt.empty()
-    st.success(f"✅ LV done — Passed: {p}, Rejected: {r}")
+    st.success(f"✅ LV done — Clean: {p}, Rejected: {r}, ⚠ Unverified: {u}")
     st.rerun()
 
 if do_cf:
@@ -493,6 +496,31 @@ def _features_label(l):
     return " ".join(p for p in (icons, cond) if p) or "—"
 
 
+def _lv_state(l):
+    """(label, badge css) for a listing's LV check. Only PASS — the flat's own
+    LV read and clean — earns the tick."""
+    status = (l.get("lv_status") or "PENDING").upper()
+    if status in ("PASS", "CLEAN"):
+        lv_no = l.get("lv_number")
+        return (f"✅ LV CLEAN{f' · LV {lv_no}' if lv_no else ''}", "bg")
+    if status == "REJECTED":
+        return "❌ LV REJECTED", "br"
+    if status == "UNVERIFIED":
+        return "⚠ LV UNVERIFIED", "by"
+    return "⏳ LV PENDING", "bw"
+
+
+def _lv_link(l):
+    """The official LV report when the flat's (or failing that, the plot's)
+    LV and cadastral unit code are known; otherwise the cadastre portal."""
+    ku = l.get("cadastral_unit_code")
+    lv_no = l.get("lv_number") or l.get("plot_lv_number")
+    if ku and lv_no:
+        from kataster_scraper import GENERATE_PRF
+        return GENERATE_PRF.format(lv_no=lv_no, ku_code=ku)
+    return "https://kataster.skgeodesy.sk/EsriRegistrationWeb/"
+
+
 def render_card(l):
     cls      = (l.get("cf_class") or l.get("classification") or "PENDING").upper()
     css_cls  = {"GREEN":"g","YELLOW":"y","WHITE":"w","PENDING":"w"}.get(cls,"w")
@@ -514,7 +542,10 @@ def render_card(l):
     saving   = l.get("annual_sro_saving", 0) or 0
     bev      = l.get("sro_break_even_months")
 
-    header = f"{emoji}  {title[:60]}   ·   €{price:,.0f}   ·   {fe(surplus,'€','',0)}/mo"
+    disc     = l.get("market_discount")
+    below    = (f"{abs(disc)*100:.0f}% {'below' if disc >= 0 else 'above'} market"
+                if disc is not None else "no benchmark")
+    header = f"{emoji}  {title[:60]}   ·   €{price:,.0f}   ·   {below}   ·   {fe(surplus,'€','',0)}/mo"
 
     with st.expander(header):
         # Row 1: key metrics
@@ -534,8 +565,8 @@ def render_card(l):
             st.metric("CoC Return", fp(l.get("cash_on_cash")))
             st.metric("Net Yield",  fp(l.get("net_rental_yield")))
         with c5:
+            st.metric("vs Market",  below)
             st.metric("Location",   f"{l.get('location_score','—')}/100")
-            st.metric("Transit",    f"{transit:.0f}m" if transit else "—")
 
         # Composite deal grade (financial + location + energy + risk)
         from engine.financial import compute_deal_score
@@ -545,6 +576,7 @@ def render_card(l):
         # Badges
         lv_risk = (l.get("lv_risk_level") or "").upper()
         lv_css  = {"LOW": "bg", "MEDIUM": "by", "HIGH": "br"}.get(lv_risk, "bw")
+        lv_label, lv_badge_css = _lv_state(l)
         badges = (
             badge(css_cls, cls) + " " +
             (f'<span class="badge {grade_css}">GRADE {deal_grade} · {deal_score}</span> '
@@ -552,14 +584,16 @@ def render_card(l):
             f'<span class="badge bo">{"s.r.o." if opt=="SRO" else "PERSONAL"}</span>' + " " +
             tier_badge(loc_tier) +
             (' <span class="badge bg">⚙️ INDUSTRIAL</span>' if ind else "") +
+            f' <span class="badge {lv_badge_css}">{lv_label}</span>' +
             (f' <span class="badge {lv_css}">⚖️ LV {lv_risk}</span>' if lv_risk else "")
         )
         st.markdown(badges, unsafe_allow_html=True)
-        if l.get("lv_summary"):
-            st.markdown(
-                f'<div class="muted" style="margin-top:6px">⚖️ LV: {l["lv_summary"]}</div>',
-                unsafe_allow_html=True,
-            )
+        for lv_note in (l.get("lv_detail"), l.get("lv_summary")):
+            if lv_note:
+                st.markdown(
+                    f'<div class="muted" style="margin-top:6px">⚖️ LV: {lv_note}</div>',
+                    unsafe_allow_html=True,
+                )
 
         st.markdown('<hr class="div">', unsafe_allow_html=True)
 
@@ -599,7 +633,7 @@ def render_card(l):
                 ("Construction",   "⚠️ Risk" if l.get("construction_risk") else "✅ Clear"),
                 ("Noise",          "⚠️ >65dB" if l.get("noise_flag") else "✅ Clear"),
                 ("Energy Class",   l.get("energy_class","?")),
-                ("LV Status",      "✅ CLEAN" if l.get("lv_status") in ("PASS","CLEAN") else l.get("lv_status","—")),
+                ("LV Status",      _lv_state(l)[0]),
             ]
             html = ""
             for lbl, val in loc_rows:
@@ -616,19 +650,43 @@ def render_card(l):
             if lat and lng:
                 st.link_button("MAPS", f"https://www.google.com/maps?q={lat},{lng}&z=15", use_container_width=True)
         with a3:
-            st.link_button("CHECK LV", "https://kataster.skgeodesy.sk/EsriRegistrationWeb/", use_container_width=True)
+            st.link_button("CHECK LV", _lv_link(l), use_container_width=True)
         with a4:
-            if st.button("RE-VERIFY LV", key=f"rv_{l['id']}", use_container_width=True):
-                try:
-                    from modules.debt_bot import reverify
-                    r = reverify(l["id"])
-                    if r["status"] == "REJECT":
-                        st.error(f"❌ NOW REJECTED: {r['detail']}")
-                        st.rerun()
-                    else:
-                        st.success("✅ Still clean.")
-                except Exception as e:
-                    st.warning(f"Re-verify: {e}")
+            verify = st.button("RE-VERIFY LV", key=f"rv_{l['id']}", use_container_width=True)
+
+        # The flat's own LV — the only thing that can verify it. The building
+        # plot found from the map pin is a different LV (see modules/debt_bot).
+        v1, v2 = st.columns(2)
+        with v1:
+            flat_lv = st.text_input(
+                "Flat's own LV no.", value=l.get("lv_number") or "",
+                key=f"lvno_{l['id']}", placeholder="e.g. 4321",
+                help="From the seller's papers or the agent. The building "
+                     "plot's LV is not the flat's.")
+        with v2:
+            flat_ku = st.text_input(
+                "Katastrálne územie", value=l.get("cadastral_area") or "",
+                key=f"lvku_{l['id']}", placeholder="e.g. Petržalka",
+                help="Name or numeric code of the cadastral unit.")
+        if verify:
+            try:
+                from modules.debt_bot import reverify
+                lv_in = flat_lv.strip()
+                ku_in = flat_ku.strip()
+                changed = (lv_in != (l.get("lv_number") or "")
+                           or ku_in != (l.get("cadastral_area") or ""))
+                r = reverify(l["id"], lv_number=lv_in if changed else None,
+                             cadastral_area=ku_in if changed else "")
+                if r["status"] == "REJECT":
+                    st.error(f"❌ REJECTED: {r['detail']}")
+                elif r["status"] == "PASS":
+                    st.success(f"✅ Clean: {r['detail']}")
+                elif r["status"] == "UNVERIFIED":
+                    st.warning(f"⚠ Unverified: {r['detail']}")
+                else:
+                    st.warning(f"Re-verify: {r.get('detail', r['status'])}")
+            except Exception as e:
+                st.warning(f"Re-verify: {e}")
 
         st.markdown(f'<div class="muted">Source: {(l.get("source") or "").upper()} · Scraped: {(l.get("scraped_at") or "")[:10]}</div>', unsafe_allow_html=True)
 
@@ -643,10 +701,15 @@ t0, t1, t2, t3 = st.tabs([
     "ONE-CLICK CLOSE",
 ])
 
+def _value_rank(l):
+    """Deepest discount to the regional median first, then the higher yield."""
+    return (l.get("market_discount") or 0, l.get("gross_yield") or 0)
+
+
 greens  = sorted([l for l in data if (l.get("cf_class") or l.get("classification")) == "GREEN"],
-                 key=lambda x: x.get("surplus_sro") or 0, reverse=True)
+                 key=_value_rank, reverse=True)
 yellows = sorted([l for l in data if (l.get("cf_class") or l.get("classification")) == "YELLOW"],
-                 key=lambda x: x.get("surplus_sro") or 0, reverse=True)
+                 key=_value_rank, reverse=True)
 whites  = [l for l in data if (l.get("cf_class") or l.get("classification")) == "WHITE"]
 pending = [l for l in data if (l.get("cf_class") or l.get("classification") or "PENDING") == "PENDING"
            and l.get("id","").startswith("d") is False
@@ -677,23 +740,26 @@ with t0:
                 "Title":    (l.get("title") or l.get("district") or "—")[:50],
                 "District": l.get("district") or "—",
                 "Features": _features_label(l),
-                "LV":       l.get("lv_risk_level") or "—",
+                "LV":       _lv_state(l)[0].replace(" LV", "")
+                            + (f" · {l['lv_risk_level']}" if l.get("lv_risk_level") else ""),
                 "Src":      (l.get("source") or "").upper()[:5],
                 "Price":    l.get("price_eur")            or 0,
                 "Size":     l.get("size_m2")              or 0,
                 "Rent":     l.get("estimated_rent_eur")   or 0,
                 "Surplus":  surplus if surplus is not None else 0,
+                "Below%":   (l.get("market_discount") or 0) * 100,
+                "Gross%":   (l.get("gross_yield")         or 0) * 100,
                 "Cap%":     (l.get("cap_rate")            or 0) * 100,
                 "Yield":    (l.get("net_rental_yield")    or 0) * 100,
                 "URL":      l.get("url") or "",
             })
         df = pd.DataFrame(triage_rows).sort_values(
-            ["Score", "Surplus"], ascending=[False, False]
+            ["Score", "Below%"], ascending=[False, False]
         )
         st.markdown(
             f'<div class="muted">{len(df)} scored listings — sorted by composite deal '
-            f'grade (financial + location + energy + condition + risk), then '
-            f'{"s.r.o." if show_sro else "personal"} surplus. Click any header to re-sort.</div>',
+            f'grade (yield + discount to market + location + energy + condition + '
+            f'risk), then discount. Click any header to re-sort.</div>',
             unsafe_allow_html=True,
         )
         st.dataframe(
@@ -707,6 +773,10 @@ with t0:
                 "Size":    st.column_config.NumberColumn(format="%d m²"),
                 "Rent":    st.column_config.NumberColumn(format="€%d"),
                 "Surplus": st.column_config.NumberColumn(format="€%+d"),
+                "Below%":  st.column_config.NumberColumn(
+                    format="%.0f%%", help="Asking €/m² below the regional median "
+                                          "(negative = above it)"),
+                "Gross%":  st.column_config.NumberColumn(format="%.2f%%"),
                 "Cap%":    st.column_config.NumberColumn(format="%.2f%%"),
                 "Yield":   st.column_config.NumberColumn(format="%.2f%%"),
                 "URL":     st.column_config.LinkColumn(display_text="open ↗"),
@@ -722,15 +792,15 @@ with t1:
         if not greens and not yellows and not whites and pending:
             st.info(f"⏳ {len(pending)} listing(s) scraped and pending scoring. Click 💰 CASHFLOW SCORE in the sidebar to classify them.")
         if greens:
-            st.markdown(f'<div class="muted" style="margin:14px 0 8px">🟢 GREEN — ALPHA HOLDS ({len(greens)})</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="muted" style="margin:14px 0 8px">🟢 GREEN — ≥20% BELOW MARKET ({len(greens)})</div>', unsafe_allow_html=True)
             for l in greens:
                 render_card(l)
         if yellows:
-            st.markdown(f'<div class="muted" style="margin:18px 0 8px">🟡 YELLOW — YIELD PLAYS ({len(yellows)})</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="muted" style="margin:18px 0 8px">🟡 YELLOW — 10–20% BELOW MARKET ({len(yellows)})</div>', unsafe_allow_html=True)
             for l in yellows:
                 render_card(l)
         if whites:
-            st.markdown(f'<div class="muted" style="margin:18px 0 8px">⚪ WHITE — MARKET / FLIP ({len(whites)})</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="muted" style="margin:18px 0 8px">⚪ WHITE — AT MARKET OR NO BENCHMARK ({len(whites)})</div>', unsafe_allow_html=True)
             for l in whites:
                 render_card(l)
         if pending:
