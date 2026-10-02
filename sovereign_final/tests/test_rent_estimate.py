@@ -118,3 +118,28 @@ class TestRoomsMultiplier:
             assert rent == pytest.approx(baseline, rel=0.01), (
                 f"rooms={bad!r} should fall back to baseline, got {rent}"
             )
+
+
+class TestBratislavaPartsOutsideBratislava:
+    """"Staré Mesto" and "Nové Mesto" are generic names, so a Bratislava
+    city-part rate is not used for a district that names another town — the
+    caution engine/regional_prices takes with its BA sub-district medians."""
+
+    def test_kosice_stare_mesto_not_at_bratislava_rate(self):
+        # The slug parser writes "Staré Mesto, Košice" for Košice's old town.
+        assert get_rent_estimate("Staré Mesto, Košice", 1) == \
+            pytest.approx(get_rent_estimate("Košice II", 1))
+
+    def test_zilina_stare_mesto_at_zilina_rate(self):
+        assert get_rent_estimate("Žilina - Staré Mesto", 1) == \
+            pytest.approx(get_rent_estimate("Žilina", 1))
+
+    @pytest.mark.parametrize("district,rate", [
+        ("Staré Mesto",             14.5),
+        ("Staré Mesto, Bratislava", 14.5),
+        ("Nové Mesto",              13.0),
+        # Two Bratislava parts and no city: still Bratislava.
+        ("Nové Mesto, Rača",        13.0),
+    ])
+    def test_bratislava_parts_keep_their_rate(self, district, rate):
+        assert get_rent_estimate(district, 1) == pytest.approx(rate)

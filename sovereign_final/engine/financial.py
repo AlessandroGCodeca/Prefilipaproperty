@@ -150,6 +150,27 @@ def calc_tax_sro(annual_taxable: float, annual_revenue: float) -> float:
 
 _CITY_ONLY_KEYS = {"bratislava", "košice"}  # used only as last-resort city fallbacks
 
+# Bratislava's city parts in RENT_PER_M2. "Staré Mesto" and "Nové Mesto" are
+# generic names (Košice has a Staré Mesto too), so a city-part rate is not used
+# for a district that names a town outside Bratislava: "Staré Mesto, Košice" is
+# not priced at Bratislava's Staré Mesto rent. engine/regional_prices guards
+# its BA sub-district medians the same way. A district that says "bratislava"
+# keeps the city-part rate.
+_BA_CITY_PART_KEYS = {
+    "staré mesto", "ružinov", "vrakuňa", "podunajské", "vajnory", "nové mesto",
+    "rača", "dúbravka", "karlova ves", "lamač", "záhorská", "devínska",
+    "petržalka", "rusovce", "jarovce", "čunovo",
+}
+_OUTSIDE_BA_KEYS = tuple(
+    k for k in RENT_PER_M2
+    if k != "default" and k not in _BA_CITY_PART_KEYS
+    and not k.startswith("bratislava")
+)
+
+
+def _names_town_outside_bratislava(key: str) -> bool:
+    return "bratislava" not in key and any(t in key for t in _OUTSIDE_BA_KEYS)
+
 # Per-m² rates in RENT_PER_M2 represent 2-izb apartments (baseline). Smaller
 # units command a per-m² premium; larger units sell at a discount. Multipliers
 # derived from Q2 2026 Deloitte Rent Index data showing 1-izb at 1.15× and
@@ -204,7 +225,10 @@ def get_rent_estimate(district: str, size_m2: float, rooms=None,
         key=len, reverse=True,
     )
     if rate is None:
+        outside_ba = _names_town_outside_bratislava(key)
         for known in keys_by_specificity:
+            if outside_ba and known in _BA_CITY_PART_KEYS:
+                continue
             if known in key:
                 rate = RENT_PER_M2[known]
                 break
