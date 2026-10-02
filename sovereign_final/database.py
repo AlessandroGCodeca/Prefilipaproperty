@@ -1041,5 +1041,43 @@ def get_unscored_location():
     return [dict(r) for r in rows]
 
 
+def save_contract_draft(listing_id: str, ownership_type: str, agreed_price: float,
+                        buyer_name: str, buyer_ico: str, notary_name: str,
+                        draft_text: str) -> str:
+    """Keep a generated contract draft, so the text sent to the notár can be
+    found again after the page reloads. Returns the new draft's id."""
+    import uuid
+    draft_id = str(uuid.uuid4())
+    conn = get_conn()
+    try:
+        conn.execute("""
+            INSERT INTO contract_drafts
+            (id, listing_id, ownership_type, agreed_price, buyer_name, buyer_ico,
+             notary_name, draft_text, generated_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
+        """, (draft_id, listing_id, ownership_type, float(agreed_price),
+              buyer_name, buyer_ico or None, notary_name or None, draft_text,
+              datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+    return draft_id
+
+
+def get_contract_drafts(listing_id: str) -> list[dict]:
+    """Saved contract drafts for one listing, newest first."""
+    conn = get_conn()
+    try:
+        rows = conn.execute("""
+            SELECT id, ownership_type, agreed_price, buyer_name, buyer_ico,
+                   notary_name, draft_text, generated_at, status
+            FROM contract_drafts WHERE listing_id=?
+            ORDER BY generated_at DESC
+        """, (listing_id,)).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
 if __name__ == "__main__":
     init_db()
