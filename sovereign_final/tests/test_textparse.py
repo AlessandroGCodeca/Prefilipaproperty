@@ -79,3 +79,106 @@ class TestAreaFromText:
 
     def test_bounds_are_tunable(self):
         assert area_from_text("garáž 12 m²", min_m2=5.0) == 12.0
+
+
+# ── is_excluded_listing ───────────────────────────────────────────────────────
+import sqlite3  # noqa: E402
+
+from scraper.textparse import is_excluded_listing  # noqa: E402
+
+
+class TestIsExcludedListing:
+    """Most EXCLUDE_KEYWORDS are ASCII ("garaz", "kancelar", "nebytov") while
+    titles keep their diacritics, and a nehnutelnosti URL (/detail/{id}) has
+    no slug — so the title alone has to trip the filter."""
+
+    @pytest.mark.parametrize("title", [
+        "Predaj garáže, Žilina",
+        "Kancelárske priestory na predaj",
+        "Nebytový priestor",
+        "Prenájom 2-izbového bytu",
+        "POZEMOK NA PREDAJ",
+    ])
+    def test_diacritic_titles_are_excluded(self, title):
+        assert is_excluded_listing(title, "https://www.nehnutelnosti.sk/detail/JuXyZ123")
+
+    @pytest.mark.parametrize("title", [
+        "Reštaurácia v centre",   # "reštaur" keyword is stored with diacritics
+        "DRAŽBA bytu, Košice",    # so is "dražb"
+        "Viacúčelová budova",
+    ])
+    def test_diacritic_keywords_still_match_raw(self, title):
+        assert is_excluded_listing(title)
+
+    def test_ascii_url_slug_still_excludes(self):
+        assert is_excluded_listing("", "https://www.topreality.sk/predaj-garaz-r123.html")
+
+    def test_apartment_is_kept(self):
+        assert not is_excluded_listing(
+            "3-izbový byt, Ružinov", "https://www.nehnutelnosti.sk/detail/JuXyZ123")
+
+    @pytest.mark.parametrize("texts", [(), ("",), (None,), (None, None)])
+    def test_missing_text_is_kept(self, texts):
+        assert not is_excluded_listing(*texts)
+
+
+class TestDeactivateNonApartments:
+    """The retroactive cleanup on both scrapers used to be SQL LIKE clauses,
+    which share the blind spot (and SQLite's LOWER() folds ASCII only)."""
+
+    @pytest.fixture
+    def temp_db(self, tmp_path, monkeypatch):
+        path = str(tmp_path / "listings.db")
+        conn = sqlite3.connect(path)
+        conn.execute("""
+            CREATE TABLE listings (
+                id TEXT PRIMARY KEY, source TEXT NOT NULL, url TEXT NOT NULL,
+                title TEXT, price_eur REAL NOT NULL, is_active INTEGER,
+                classification TEXT
+            )
+        """)
+        rows = [
+            ("garage",  "Predaj garáže, Žilina"),
+            ("office",  "Kancelárske priestory na predaj"),
+            ("nonres",  "Nebytový priestor"),
+            ("flat",    "3-izbový byt, Ružinov"),
+            ("untitled", None),
+        ]
+        for source in ("nehnutelnosti", "topreality"):
+            for rid, title in rows:
+                conn.execute(
+                    "INSERT INTO listings VALUES (?,?,?,?,150000,1,'GREEN')",
+                    (f"{source}-{rid}", source, f"https://x/{source}/detail/{rid}9",
+                     title),
+                )
+        conn.commit()
+        conn.close()
+
+        import database as db
+
+        def _temp_conn():
+            c = sqlite3.connect(path)
+            c.row_factory = sqlite3.Row
+            return c
+        monkeypatch.setattr(db, "get_conn", _temp_conn)
+        return path
+
+    @pytest.mark.parametrize("source", ["nehnutelnosti", "topreality"])
+    def test_deactivates_diacritic_titles_only(self, temp_db, source):
+        import importlib
+        mod = importlib.import_module(f"scraper.{source}")
+        assert mod._deactivate_non_apartments() == 3
+
+        conn = sqlite3.connect(temp_db)
+        state = {
+            rid: (active, price, cls) for rid, active, price, cls in conn.execute(
+                "SELECT id, is_active, price_eur, classification FROM listings")
+        }
+        conn.close()
+        for rid in ("garage", "office", "nonres"):
+            assert state[f"{source}-{rid}"] == (0, 0, "WHITE")
+        assert state[f"{source}-flat"] == (1, 150000, "GREEN")
+        assert state[f"{source}-untitled"] == (1, 150000, "GREEN")
+        other = "topreality" if source == "nehnutelnosti" else "nehnutelnosti"
+        assert all(state[f"{other}-{rid}"][0] == 1
+                   for rid in ("garage", "office", "nonres", "flat"))
