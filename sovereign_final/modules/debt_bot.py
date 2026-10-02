@@ -4,98 +4,180 @@ Module D: LV (List Vlastníctva) Debt-Bot
 
 Hard stop: any non-bank lien, execution, or lawsuit = instant REJECTED.
 
-Decision layers (most reliable first):
-  1. Claude analyze_lv() — schema-validated risk read, authoritative when an
-     ANTHROPIC_API_KEY is set and real LV text is available. It reliably tells a
-     normal bank záložné právo apart from a private lien / exekúcia / konkurz,
-     which the substring scan often gets wrong.
-  2. Substring scan (query_lv_api/_parse_lv) — the always-on baseline and the
-     fallback whenever Claude is disabled, has no LV text, or is unsure.
+Three verdicts, and only one of them says the title is clean:
+  PASS        the flat's OWN LV was read and nothing on it blocks.
+  REJECTED    the flat's own LV carries a blocking encumbrance.
+  UNVERIFIED  no LV of this flat was read. The detail says how far the check
+              got — often to the building plot under the listing's map pin.
+
+Why a plot is never enough: identify_parcels() resolves a map pin to the land
+parcel, and that parcel's LV is the plot's. A flat in a bytový dom is
+registered with its own entry, usually on a different LV, sometimes on one LV
+shared by the whole building — so a clean plot LV says nothing about the flat,
+and a lien on it may be a neighbour's. A flat is verified through its own LV
+number (set on the dashboard card from the seller's papers or the agent).
+
+Decision layers on an LV that IS the flat's (most reliable first):
+  1. Claude analyze_lv() — schema-validated risk read when ANTHROPIC_API_KEY is
+     set. It can reject what the screen missed and clear a lien the screen
+     couldn't attribute, but never an exekúcia / konkurz / súdny spor hit.
+  2. modules/lv_screen — the always-on, entry-by-entry screen.
 Optional: DMR (Mistral) for a fully-local plain-language summary.
 """
+
+import re
 
 import requests
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import (
-    LV_REJECT_FLAGS, LV_BANK_NAMES, DMR_ENDPOINT, LLM_MODEL,
-)
+from config import DMR_ENDPOINT, LLM_MODEL, LV_RECHECK_DAYS
 from database import (
-    get_pending_lv, set_lv_status, set_lv_analysis, reset_demo_rejections,
-    get_conn, init_db,
+    get_pending_lv, get_lv_row, set_lv_status, set_lv_analysis,
+    set_parcel_data, set_flat_lv, reset_demo_rejections, init_db,
 )
-from kataster_scraper import enrich_parcel
+from kataster_scraper import enrich_parcel, enrich_lv, parcel_at, fold
+from modules.lv_screen import screen_lv, describe
+from engine.regional_prices import kraj_for_district
 from modules.llm_enrichment import is_enabled as claude_enabled, analyze_lv as claude_analyze_lv
 
+_VERIFY_HINT = "Enter the flat's own LV number on its card to verify it."
 
-# ── Cadastre lookup (unofficial scraper — no API/key exists) ─────────────────
-def query_lv_api(cadastral_id: str, area: str = "") -> dict:
-    """
-    Fetch and screen the LV (list vlastníctva) for a parcel via the unofficial
-    skgeodesy.sk scraper (kataster_scraper.enrich_parcel). There is NO official
-    ÚGKK SR API and no API key — the scraper reads the cadastre portal's OData
-    backend directly, throttles and retries internally, caches results in the
-    cadastre_cache table, and may break if the portal changes.
 
-    When the check CANNOT run (listing has no cadastral area / parcel number —
-    scrapers don't provide them — or the portal is unreachable or the parcel
-    isn't found), the listing PASSES as "unverified" rather than being
-    rejected. The old behaviour fabricated demo rejections here; because every
-    parcel-less listing shared the same fallback hash seed, one scheduler run
-    marked EVERY listing REJECTED and emptied the dashboard. Never fabricate a
-    title-deed verdict.
-    """
-    if not cadastral_id or not area:
+def _unverified(detail: str, **extra) -> dict:
+    return {"status": "UNVERIFIED", "detail": detail, "raw": {}, **extra}
+
+
+# ── The screen ────────────────────────────────────────────────────────────────
+def _parse_lv(lv_text) -> dict:
+    """Screen one LV text entry by entry (modules/lv_screen). REJECT when any
+    entry blocks; `raw` carries the text through to _decide_lv for Claude."""
+    entries = screen_lv(lv_text)
+    blocking = [e for e in entries if e["blocking"]]
+    if blocking:
         return {
-            "status": "PASS", "unverified": True,
-            "detail": "LV unverified — listing has no cadastral area / parcel "
-                      "number. Verify the title deed manually before purchase.",
-            "raw": {},
+            "status": "REJECT", "flag": blocking[0]["flag"],
+            "detail": "LV encumbrance: " + "; ".join(describe(e) for e in blocking[:3]),
+            "raw": lv_text, "entries": entries,
+            # Claude may overrule a lien it can attribute to a bank, never
+            # distress (exekúcia / konkurz / súdny spor).
+            "claude_may_clear": all(e["kind"] != "distress" for e in blocking),
         }
+    banks = [e for e in entries if e["kind"] == "lien"]
+    detail = "Clean title — no non-bank encumbrances"
+    if banks:
+        detail += f" ({len(banks)} bank lien(s): " \
+                  + "; ".join(e["creditor"] or "?" for e in banks[:3]) + ")"
+    return {"status": "PASS", "detail": detail, "raw": lv_text, "entries": entries}
 
-    result = enrich_parcel(area, cadastral_id)
 
-    if result["status"] != "OK":
-        return {
-            "status": "PASS", "unverified": True,
-            "detail": f"LV unverified — cadastre lookup "
-                      f"{result['status'].lower()}: {result['detail']} "
-                      f"Verify the title deed manually before purchase.",
-            "raw": {},
-        }
+_FLAT_NO_RE = re.compile(r"(?<!\w)byt\w*\s+c\.?\s*(\d+)")
 
-    lv_text = result.get("lv_text")
-    if not lv_text:
-        # Parcel exists but no LV text (e.g. no folio attached) — nothing to
-        # screen, so pass unverified rather than invent a verdict.
-        return {
-            "status": "PASS", "unverified": True,
-            "detail": f"LV unverified — {result['detail']}. Verify the title "
-                      f"deed manually before purchase.",
-            "raw": {},
-        }
 
-    decision = _parse_lv(lv_text)
-    lv_no = (result.get("lv") or {}).get("no")
-    if lv_no is not None:
-        decision["detail"] = f"LV {lv_no}: {decision['detail']}"
+def _flat_numbers(lv_text) -> set:
+    """Flat numbers ("byt č. 12") an LV lists. More than one means the LV is
+    shared by several flats, and its encumbrances may be another flat's."""
+    return set(_FLAT_NO_RE.findall(fold(str(lv_text or ""))))
+
+
+# ── Cadastre lookups (unofficial scraper — no API/key exists) ────────────────
+def check_flat_lv(area, lv_no) -> dict:
+    """Screen the flat's OWN LV — the only check that can PASS or REJECT."""
+    result = enrich_lv(str(area), str(lv_no))
+    if result["status"] != "OK" or not result.get("lv_text"):
+        return _unverified(f"LV {lv_no} lookup {result['status'].lower()}: "
+                           f"{result['detail']}")
+    text = result["lv_text"]
+    decision = _parse_lv(text)
+    flats = _flat_numbers(text)
+    if decision["status"] == "REJECT" and len(flats) > 1:
+        # A shared LV: a lien on it may sit on another flat's share.
+        return _unverified(
+            f"LV {lv_no} is shared by {len(flats)} flats and lists "
+            f"{decision['detail'].removeprefix('LV encumbrance: ')} — check "
+            f"part C for this flat's number before ruling it out.")
+    decision["detail"] = f"LV {lv_no}: {decision['detail']}"
     return decision
 
 
-def _parse_lv(lv_text) -> dict:
-    """Substring-scan LV text (or any raw payload) for reject flags. `raw`
-    carries the scanned payload through to _decide_lv, where Claude reads it."""
-    raw = str(lv_text).lower()
-    for flag in LV_REJECT_FLAGS:
-        if flag in raw:
-            is_bank = any(b in raw for b in LV_BANK_NAMES)
-            if not is_bank:
-                return {"status": "REJECT", "flag": flag,
-                        "detail": f"LV encumbrance detected: '{flag}'",
-                        "raw": lv_text}
-    return {"status": "PASS", "detail": "Clean title — no non-bank encumbrances",
-            "raw": lv_text}
+def _pin_matches_listing(parcel: dict, district: str) -> bool:
+    """A pin in the wrong town (a portal's default pin, a mistyped address)
+    must not hand this listing another town's parcel. The listing's district
+    words have to appear in the parcel's municipality or cadastral unit."""
+    words = {w for w in re.findall(r"[a-z]{4,}", fold(district or ""))
+             if w not in ("okres", "mesto", "nove", "stare", "okolie")}
+    if not words:
+        return True
+    ku = parcel.get("cadastral_unit") or {}
+    place = fold(f"{parcel.get('municipality') or ''} {ku.get('name') or ''}")
+    if any(w in place for w in words):
+        return True
+    # "Bratislava" / "Košice II" with the pin in a city part whose cadastral
+    # unit is named for the part alone ("Petržalka", "Západ").
+    if words <= {"bratislava", "kosice"}:
+        kraj = kraj_for_district(place)
+        return kraj is None or kraj == kraj_for_district(" ".join(words))
+    return False
+
+
+def check_plot(row: dict) -> dict:
+    """How far a listing without its flat's LV number gets: the building plot
+    under its map pin, and that plot's LV. Always UNVERIFIED — see the module
+    docstring — but the plot data is captured (`parcel`) and what the plot LV
+    shows is spelled out, so the manual check starts from the right parcel."""
+    area, parcel_no = row.get("cadastral_area"), row.get("cadastral_number")
+    ku_code, plot_lv = row.get("cadastral_unit_code"), row.get("plot_lv_number")
+    captured = None
+    if not (area and parcel_no):
+        if row.get("coords_source") != "listing" or row.get("lat") is None:
+            return _unverified(
+                "No title deed read — the listing has no map pin of its own "
+                f"to find its building by. {_VERIFY_HINT}")
+        found = parcel_at(row["lat"], row["lng"])
+        if found["status"] != "OK":
+            return _unverified(
+                f"No title deed read — building lookup "
+                f"{found['status'].lower()}: {found['detail']}. {_VERIFY_HINT}")
+        parcel = found["parcel"]
+        ku = parcel.get("cadastral_unit") or {}
+        if not _pin_matches_listing(parcel, row.get("district") or ""):
+            return _unverified(
+                f"No title deed read — the map pin is in "
+                f"{parcel.get('municipality') or ku.get('name')}, not "
+                f"{row.get('district')}. {_VERIFY_HINT}")
+        area, parcel_no = ku.get("name") or "", parcel["no"]
+        ku_code, plot_lv = ku.get("code"), parcel.get("lv_no")
+        captured = {"cadastral_area": area, "parcel_no": parcel_no,
+                    "ku_code": ku_code, "plot_lv": plot_lv}
+
+    where = f"parcel {parcel_no} (k.ú. {area})"
+    plot = enrich_parcel(str(ku_code or area), parcel_no, register="C")
+    if plot["status"] != "OK":
+        return _unverified(f"Building plot {where}; its LV lookup "
+                           f"{plot['status'].lower()}: {plot['detail']}. "
+                           f"{_VERIFY_HINT}", parcel=captured)
+    plot_lv = (plot.get("lv") or {}).get("no", plot_lv)
+    if captured and plot_lv is not None:
+        captured["plot_lv"] = plot_lv
+    note = f"Building plot {where}, plot LV {plot_lv}"
+    if plot.get("lv_text"):
+        found = [e for e in screen_lv(plot["lv_text"]) if e["blocking"]]
+        if found:
+            note += (" lists " + "; ".join(describe(e) for e in found[:2])
+                     + " — it may concern another flat or the land")
+    return _unverified(f"{note}. A flat's own LV differs from its plot's. "
+                       f"{_VERIFY_HINT}", parcel=captured)
+
+
+def check_listing(row: dict) -> dict:
+    """LV verdict for one listing row (a get_pending_lv() row)."""
+    area = row.get("cadastral_unit_code") or row.get("cadastral_area")
+    if row.get("lv_number"):
+        if not area:
+            return _unverified(f"Flat LV {row['lv_number']} is set but its "
+                               f"katastrálne územie is unknown — add it on the card.")
+        return check_flat_lv(area, row["lv_number"])
+    return check_plot(row)
 
 
 # ── DMR LLM Analysis ──────────────────────────────────────────────────────────
@@ -142,29 +224,29 @@ def llm_analyse_lv(lv_text: str) -> dict:
         return {"llm_analysis": f"DMR unavailable: {e}", "llm_risk_level": "UNKNOWN"}
 
 
-# ── Unified LV decision (Claude-authoritative, substring fallback) ────────────
+# ── Unified LV decision (Claude-authoritative, screen fallback) ──────────────
 def _decide_lv(api_result: dict) -> dict:
-    """Refine a raw query_lv_api result with Claude's structured LV analysis.
+    """Refine a screened LV result with Claude's structured LV analysis.
 
-    The substring scan in `api_result` is the baseline. When Claude enrichment
-    is enabled AND we have real LV text (`raw`), its schema-validated read is
-    authoritative: it can both REJECT something the substring scan missed and
-    PASS a normal bank lien the substring scan would wrongly flag. Claude's
-    summary/risk_level/flags are merged in for transparency.
+    Runs only on LV text that is the flat's own (`raw`); an UNVERIFIED result
+    carries none. When Claude is enabled its read is authoritative in both
+    directions — it can REJECT what the screen missed and PASS a lien the
+    screen couldn't attribute to a bank — with one exception: a distress hit
+    (exekúcia, konkurz, súdny spor) stays REJECTED whatever Claude says.
 
-    Degrades gracefully — returns the original substring decision untouched when
-    Claude is disabled, there's no LV text, the call fails, or it returns an
-    UNKNOWN risk level. So the hard-stop safety net is never weaker than before.
+    Degrades gracefully — returns the screen's decision untouched when Claude
+    is disabled, there's no LV text, the call fails, or it returns an UNKNOWN
+    risk level. So the hard-stop safety net is never weaker than the screen.
     """
     if not claude_enabled():
         return api_result
     raw = api_result.get("raw")
-    if not raw:
+    if not raw or api_result.get("status") == "UNVERIFIED":
         return api_result
 
     analysis = claude_analyze_lv(str(raw))
     if not analysis or analysis.get("risk_level") == "UNKNOWN":
-        return api_result  # fall back to the substring decision
+        return api_result  # fall back to the screen's decision
 
     flags = analysis.get("flags") or []
     summary = (analysis.get("summary") or "").strip()
@@ -183,6 +265,14 @@ def _decide_lv(api_result: dict) -> dict:
             "flag": flags[0] if flags else "LV_RISK",
             "detail": note or api_result.get("detail", "LV risk flagged by Claude"),
         })
+    elif (api_result.get("status") == "REJECT"
+          and not api_result.get("claude_may_clear", True)):
+        decided.update({
+            "status": "REJECT",
+            "flag": api_result.get("flag", "LV_RISK"),
+            "detail": f"{api_result.get('detail', '')} (Claude read it as "
+                      f"{level}; exekúcia / konkurz / súdny spor still blocks)",
+        })
     else:
         decided.update({
             "status": "PASS",
@@ -192,7 +282,28 @@ def _decide_lv(api_result: dict) -> dict:
 
 
 # ── Main Runner ───────────────────────────────────────────────────────────────
-def run_debt_filter(progress_callback=None) -> tuple[int, int]:
+_DB_STATUS = {"PASS": "PASS", "REJECT": "REJECTED", "UNVERIFIED": "UNVERIFIED"}
+
+
+def _check_and_store(row: dict, module: str = "debt_bot") -> dict:
+    result = check_listing(row)
+    parcel = result.get("parcel")
+    if parcel:
+        set_parcel_data(row["id"], parcel["cadastral_area"], parcel["parcel_no"],
+                        parcel["ku_code"], parcel["plot_lv"])
+    # Claude-authoritative refinement (no-op when disabled / not the flat's LV).
+    result = _decide_lv(result)
+    if result.get("llm_risk_level"):
+        set_lv_analysis(row["id"], result["llm_risk_level"], result.get("llm_analysis", ""))
+    set_lv_status(row["id"], _DB_STATUS[result["status"]],
+                  result.get("flag", "DEBT_FLAG"), result.get("detail", ""),
+                  module=module)
+    return result
+
+
+def run_debt_filter(progress_callback=None) -> tuple[int, int, int]:
+    """Check every pending listing. Returns (passed, rejected, unverified) —
+    `passed` counts only flats whose own LV was read and found clean."""
     # Heal rows the old demo mode fabricated: "[DEMO]" rejections hid real
     # listings behind invented liens. Reset them to PENDING so they get an
     # honest re-check below. Idempotent — a clean DB is a no-op.
@@ -200,72 +311,54 @@ def run_debt_filter(progress_callback=None) -> tuple[int, int]:
     if healed:
         print(f"♻️  Reset {healed} fabricated [DEMO] rejections back to PENDING.")
 
-    pending = get_pending_lv()
+    pending = get_pending_lv(recheck_days=LV_RECHECK_DAYS)
     if not pending:
         print("✅ No pending LV checks.")
-        return 0, 0
+        return 0, 0, 0
 
     print(f"🔒 Running LV debt filter on {len(pending)} listings...")
-    passed = rejected = unverified = 0
+    passed = rejected = unverified = plots = 0
 
     for i, row in enumerate(pending):
-        lid   = row["id"]
-        cid   = row.get("cadastral_number", "")
-        area  = row.get("cadastral_area", "")
-        addr  = row.get("address_raw", "")[:55]
-
+        addr = (row.get("address_raw") or "")[:55]
         if progress_callback:
             progress_callback(i + 1, len(pending), addr)
 
-        result = query_lv_api(cid, area)
-        # Claude-authoritative refinement (no-op when disabled / no LV text).
-        result = _decide_lv(result)
-
-        # Persist Claude's risk read (when it ran) for the dashboard.
-        if result.get("llm_risk_level"):
-            set_lv_analysis(lid, result["llm_risk_level"], result.get("llm_analysis", ""))
-
+        result = _check_and_store(row)
         if result["status"] == "REJECT":
-            set_lv_status(lid, "REJECTED", result.get("flag","DEBT_FLAG"), result["detail"])
             rejected += 1
             print(f"  ❌ {addr} — {result['detail']}")
-        else:
-            set_lv_status(lid, "PASS")
+        elif result["status"] == "PASS":
             passed += 1
-            if result.get("unverified"):
-                unverified += 1
-            else:
-                print(f"  ✅ {addr}")
+            print(f"  ✅ {addr} — {result['detail']}")
+        else:
+            unverified += 1
+            if result.get("parcel"):
+                plots += 1
 
         # No pause needed here — kataster_scraper throttles its own requests
         # (CADASTRAL_DELAY_SEC) and cache hits shouldn't wait at all.
 
     if unverified:
-        print(f"  ℹ️  {unverified} passed UNVERIFIED (no parcel data / LV unavailable) — "
-              f"verify title deeds manually before purchase.")
-    print(f"\n✅ LV filter complete. Passed: {passed} | Rejected: {rejected}\n")
-    return passed, rejected
+        print(f"  ⚠️  {unverified} UNVERIFIED — no LV of the flat itself was read "
+              f"({plots} building plot(s) found from map pins). Enter a flat's "
+              f"LV number on its card to verify it.")
+    print(f"\n✅ LV filter complete. Clean: {passed} | Rejected: {rejected} | "
+          f"Unverified: {unverified}\n")
+    return passed, rejected, unverified
 
 
-def reverify(listing_id: str) -> dict:
-    """Force re-check single listing LV. Call before committing to purchase."""
-    conn = get_conn()
-    row  = conn.execute(
-        "SELECT cadastral_number, cadastral_area FROM listings WHERE id=?",
-        (listing_id,)
-    ).fetchone()
-    conn.close()
+def reverify(listing_id: str, lv_number: str | None = None,
+             cadastral_area: str = "") -> dict:
+    """Re-check one listing's LV now — before committing to a purchase, or
+    after entering the flat's own LV number (and its katastrálne územie).
+    lv_number=None keeps the stored one; "" clears it."""
+    if lv_number is not None:
+        set_flat_lv(listing_id, lv_number, cadastral_area)
+    row = get_lv_row(listing_id)
     if not row:
         return {"status": "ERROR", "detail": "Not found"}
-    result = query_lv_api(row[0] or "", row[1] or "")
-    result = _decide_lv(result)
-    if result.get("llm_risk_level"):
-        set_lv_analysis(listing_id, result["llm_risk_level"], result.get("llm_analysis", ""))
-    status = "REJECTED" if result["status"] == "REJECT" else "PASS"
-    set_lv_status(listing_id, status,
-                  result.get("flag",""), result.get("detail",""),
-                  module="debt_bot_reverify")
-    return result
+    return _check_and_store(row, module="debt_bot_reverify")
 
 
 if __name__ == "__main__":

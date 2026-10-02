@@ -199,6 +199,73 @@ def test_identify_parcels_filters_parcel_layers(temp_db, monkeypatch):
     assert hits == [{"register": "C", "parcel_id": "123"}]
 
 
+# ── map pin → building plot ──────────────────────────────────────────────────
+def _pin_dispatcher(identify, parcels):
+    """identify: the identify-service results; parcels: {id: OData parcel row}."""
+    def dispatch(url, accept="application/json"):
+        if "/identify" in url:
+            return json.dumps({"results": identify})
+        for pid, row in parcels.items():
+            if f"ParcelsC({pid})/" in url:
+                return json.dumps(row)
+        raise AssertionError(f"unexpected URL: {url}")
+    return dispatch
+
+
+def _hit(pid, layer="KN PARCELS C"):
+    return {"layerName": layer, "attributes": {"ID": str(pid)}}
+
+
+ROAD_ROW = {**PARCEL_ROW, "Id": 124, "No": "1234/9", "HouseNo": None,
+            "LandUse": {"Name": "Zastavaná plocha a nádvorie"},
+            "Utilisation": {"Name": "Pozemná komunikácia"}}
+
+
+def test_parcel_at_returns_the_building_plot(temp_db, monkeypatch):
+    monkeypatch.setattr(ks, "_cadastral_get", _pin_dispatcher(
+        [_hit(124), _hit(123)], {124: ROAD_ROW, 123: PARCEL_ROW}))
+    res = ks.parcel_at(48.3, 18.08)
+    assert res["status"] == "OK"
+    assert res["parcel"]["no"] == "1234/5"
+    assert res["parcel"]["lv_no"] == 4321
+    assert res["parcel"]["cadastral_unit"] == {"name": "Nitra", "code": 838365}
+
+
+def test_parcel_at_off_the_building_is_not_found(temp_db, monkeypatch):
+    # A pin on the street outside resolves to the road parcel; handing that
+    # back would screen the road's LV as this flat's building.
+    monkeypatch.setattr(ks, "_cadastral_get", _pin_dispatcher(
+        [_hit(124)], {124: ROAD_ROW}))
+    res = ks.parcel_at(48.3, 18.08)
+    assert res["status"] == "NOT_FOUND"
+    assert "1234/9" in res["detail"] and "approximate" in res["detail"]
+
+
+def test_parcel_at_ignores_the_e_register(temp_db, monkeypatch):
+    monkeypatch.setattr(ks, "_cadastral_get", _pin_dispatcher(
+        [_hit(55, "KN PARCELS E")], {}))
+    assert ks.parcel_at(48.3, 18.08)["status"] == "NOT_FOUND"
+
+
+def test_parcel_at_nothing_and_errors(temp_db, monkeypatch):
+    monkeypatch.setattr(ks, "_cadastral_get", _pin_dispatcher([], {}))
+    assert ks.parcel_at(48.3, 18.08)["detail"] == "no parcel at the map pin"
+
+    def boom(url, accept="application/json"):
+        raise ks.CadastreError("portal down")
+    monkeypatch.setattr(ks, "_cadastral_get", boom)
+    res = ks.parcel_at(48.3, 18.08)
+    assert res["status"] == "ERROR" and "portal down" in res["detail"]
+
+
+def test_scan_risk_flags_is_per_entry():
+    # A bank lien and a private lien: only the bank's counts as bank-related.
+    flags = ks.scan_risk_flags("Záložné právo v prospech Tatra banka, a.s. "
+                               "Záložné právo v prospech Ján Novák")
+    assert flags == [{"flag": "záložné právo", "bank_related": True},
+                     {"flag": "záložné právo", "bank_related": False}]
+
+
 # ── caching ───────────────────────────────────────────────────────────────────
 def test_cache_hit_avoids_network(temp_db, monkeypatch):
     monkeypatch.setattr(ks, "_cadastral_get", make_dispatcher())

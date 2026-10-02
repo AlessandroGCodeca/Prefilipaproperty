@@ -197,7 +197,12 @@ def run_location_scoring(progress_callback=None) -> int:
         if progress_callback:
             progress_callback(i + 1, len(listings), addr[:50])
 
-        lat, lng = geocode(addr)
+        # The portal's own map pin beats geocoding an address that is often
+        # just "Petržalka, Bratislava".
+        if row.get("coords_source") == "listing" and row.get("lat") is not None:
+            lat, lng = row["lat"], row["lng"]
+        else:
+            lat, lng = geocode(addr)
         if lat is None:
             print(f"  ⚠️ No geocode: {addr[:50]}")
             continue

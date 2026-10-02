@@ -82,8 +82,8 @@ def run_pipeline():
     try:
         log.info("Step 5/9 — LV Debt Filter")
         from modules.debt_bot import run_debt_filter
-        p, r = run_debt_filter()
-        log.info(f"   ✅ Passed: {p} | Rejected: {r}")
+        p, r, u = run_debt_filter()
+        log.info(f"   ✅ Clean: {p} | Rejected: {r} | Unverified: {u}")
     except Exception as e:
         log.error(f"   ❌ {e}")
 

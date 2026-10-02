@@ -1,8 +1,9 @@
 """Quick DB inventory — what's actually scored vs gated, and why."""
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
-from database import get_conn
+from database import get_conn, init_db
 
+init_db()   # brings an older DB's columns up to date
 conn = get_conn()
 
 print("\n=== Counts by source × data completeness ===\n")
@@ -58,6 +59,30 @@ rows = conn.execute("""
 """).fetchall()
 for r in rows:
     print(f"  {r['classification']:<10} {r['n']:>5}")
+
+print("\n=== LV checks — how far the title-deed filter gets, per source ===")
+rows = conn.execute("""
+    SELECT
+      source,
+      COUNT(*)                                                         AS total,
+      SUM(CASE WHEN coords_source='listing' THEN 1 ELSE 0 END)         AS pinned,
+      SUM(CASE WHEN COALESCE(plot_lv_number,'') != '' THEN 1 ELSE 0 END) AS plot,
+      SUM(CASE WHEN COALESCE(lv_number,'') != '' THEN 1 ELSE 0 END)    AS flat_lv,
+      SUM(CASE WHEN lv_status='PASS'       THEN 1 ELSE 0 END)          AS clean,
+      SUM(CASE WHEN lv_status='UNVERIFIED' THEN 1 ELSE 0 END)          AS unverified,
+      SUM(CASE WHEN lv_status='REJECTED'   THEN 1 ELSE 0 END)          AS rejected,
+      SUM(CASE WHEN lv_status='PENDING'    THEN 1 ELSE 0 END)          AS pending
+    FROM listings WHERE is_active=1
+    GROUP BY source
+""").fetchall()
+print(f"  {'source':<14} {'total':>6} {'map pin':>8} {'plot':>6} {'flat LV':>8} "
+      f"{'clean':>6} {'⚠ unver':>8} {'rejected':>9} {'pending':>8}")
+for r in rows:
+    print(f"  {r['source']:<14} {r['total']:>6} {r['pinned']:>8} {r['plot']:>6} "
+          f"{r['flat_lv']:>8} {r['clean']:>6} {r['unverified']:>8} "
+          f"{r['rejected']:>9} {r['pending']:>8}")
+print("  (map pin = the portal's own coordinates; plot = building parcel found "
+      "under it; only a flat LV can make a listing clean)")
 
 print("\n=== Rent estimate coverage (district matching) ===")
 rows = conn.execute("""
