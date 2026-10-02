@@ -266,6 +266,10 @@ def _own_slug_url(url: str, html: str, final_url: str = "") -> str:
 # doesn't get matched before "bratislava". Bratislava city parts come before
 # the bare "bratislava" so suburbs resolve to their finer-grained name.
 _SLUG_CITIES = (
+    # Towns whose names contain a Bratislava part's name. They go before the
+    # parts, and _parse_slug consumes a matched name, so "kysucke-nove-mesto"
+    # never also reads as Bratislava's "nove-mesto".
+    "nove-mesto-nad-vahom", "nove-mesto-n-vahom", "kysucke-nove-mesto",
     # Bratislava parts (most specific first)
     "stare-mesto", "ruzinov", "vrakuna", "podunajske-biskupice", "vajnory",
     "nove-mesto", "raca", "dubravka", "karlova-ves", "lamac",
@@ -284,7 +288,7 @@ _SLUG_CITIES = (
     "komarno", "levice", "nove-zamky", "sala", "dunajska-streda",
     "galanta", "piestany", "hlohovec", "senica", "skalica",
     "povazska-bystrica", "puchov", "partizanske", "bytca", "cadca",
-    "kysucke-nove-mesto", "namestovo", "tvrdosin", "dolny-kubin",
+    "namestovo", "tvrdosin", "dolny-kubin",
     "brezno", "rimavska-sobota", "revuca", "rossnava", "roznava",
     "stropkov", "vranov-nad-toplou", "snina", "stara-lubovna", "kezmarok",
     "levoca", "sabinov", "trebisov", "sobrance", "topolcany",
@@ -315,6 +319,10 @@ _SLUG_TO_DIACRITIC = {
     "devinska-nova-ves": "Devínska Nová Ves", "rusovce": "Rusovce",
     "jarovce": "Jarovce", "cunovo": "Čunovo", "ruzinov": "Ružinov",
     "tahanovce": "Ťahanovce",
+    "nove-mesto-nad-vahom": "Nové Mesto nad Váhom",
+    "nove-mesto-n-vahom": "Nové Mesto nad Váhom",
+    "komarno": "Komárno", "nove-zamky": "Nové Zámky", "partizanske": "Partizánske",
+    "lucenec": "Lučenec", "sala": "Šaľa", "vrable": "Vráble",
 }
 
 
@@ -349,10 +357,15 @@ def _parse_slug(url: str) -> dict:
 
     # City/district: search for known city tokens with hyphen-bounded matching
     # so "raca" doesn't match "barack" and "kosice" doesn't match "kosicepiece".
+    # A matched name is cut out of the slug, so a name inside it can't match
+    # again: "kysucke-nove-mesto" is one town, not that town plus Bratislava's
+    # "nove-mesto".
     bordered = "-" + slug + "-"
     found_parts: list[str] = []
     for city_slug in _SLUG_CITIES:
-        if ("-" + city_slug + "-") in bordered:
+        token = "-" + city_slug + "-"
+        if token in bordered:
+            bordered = bordered.replace(token, "-")
             nice_name = _SLUG_TO_DIACRITIC.get(
                 city_slug, city_slug.replace("-", " ").title()
             )
@@ -915,10 +928,26 @@ _GENERIC_TITLES = {"premium", "top", "exclusive", "exkluzivne", "exkluzívne", "
 # can match either the suburb (Petržalka → 10.5 €/m²) or fall back to the
 # city anchor (Bratislava → BA IV rate). Order matters: longest/most-specific
 # names first so "Devínska Nová Ves" wins over "Bratislava".
-_TEXT_LOCATION_PATTERNS: list[tuple[re.Pattern, str]] = []
+# Each entry is (pattern, name, parent city) — parent is "" for a city.
+_TEXT_LOCATION_PATTERNS: list[tuple[re.Pattern, str, str]] = []
+
+# Bratislava city parts with generic names ("Old Town", "New Town"). Košice has
+# a Staré Mesto of its own, so these go to another city the text names, unless
+# the text mentions Bratislava in any form ("v Bratislave", "Bratislavský kraj").
+_GENERIC_CITY_PARTS = {"Staré Mesto", "Nové Mesto"}
+_MENTIONS_BRATISLAVA = re.compile(r"(?<!\w)bratislav", re.IGNORECASE)
 
 
-def _build_location_patterns() -> list[tuple[re.Pattern, str]]:
+def _place_pattern(name: str) -> re.Pattern:
+    """Whole-word, case-insensitive pattern for a place name. Words may be split
+    by any whitespace, and "nad" may be shortened to "n." — "Nové Mesto n. Váhom"
+    has to read as the town, or its "Nové Mesto" reads as Bratislava's."""
+    body = r"\s+".join(re.escape(w) for w in name.split())
+    body = body.replace(r"\s+nad\s+", r"\s+n(?:ad\s+|\.\s*)")
+    return re.compile(r"(?<!\w)" + body + r"(?!\w)", re.IGNORECASE)
+
+
+def _build_location_patterns() -> list[tuple[re.Pattern, str, str]]:
     suburb_to_city = {
         "Devínska Nová Ves": "Bratislava", "Podunajské Biskupice": "Bratislava",
         "Záhorská Bystrica": "Bratislava", "Karlova Ves": "Bratislava",
@@ -943,22 +972,16 @@ def _build_location_patterns() -> list[tuple[re.Pattern, str]]:
         "Detva", "Lučenec", "Brezno", "Námestovo", "Tvrdošín", "Dolný Kubín",
         "Bytča", "Čadca", "Revúca", "Krupina", "Hnúšťa", "Stupava", "Šaľa",
     ]
-    pats: list[tuple[re.Pattern, str]] = []
+    pats: list[tuple[re.Pattern, str, str]] = []
     # Suburbs first (sorted by length desc so multi-word names win). Matched
     # case-insensitively — Bazos/topreality titles are routinely ALL-CAPS
     # ("PREDAM BYT BRATISLAVA") or all-lowercase, and a case-sensitive match
     # against the diacritic-correct name left those permanently blank.
     for suburb in sorted(suburb_to_city, key=len, reverse=True):
-        pats.append((
-            re.compile(r"(?<!\w)" + re.escape(suburb) + r"(?!\w)", re.IGNORECASE),
-            f"{suburb}, {suburb_to_city[suburb]}",
-        ))
+        pats.append((_place_pattern(suburb), suburb, suburb_to_city[suburb]))
     # Then cities (longest first so "Banská Bystrica" wins over "Bystrica")
     for city in sorted(cities, key=len, reverse=True):
-        pats.append((
-            re.compile(r"(?<!\w)" + re.escape(city) + r"(?!\w)", re.IGNORECASE),
-            city,
-        ))
+        pats.append((_place_pattern(city), city, ""))
     return pats
 
 
@@ -966,7 +989,13 @@ _TEXT_LOCATION_PATTERNS = _build_location_patterns()
 
 
 def _extract_location_from_text(text: str) -> str:
-    """Find the first known Slovak city/suburb in rendered detail-page text.
+    """Find the known Slovak city/suburb in rendered detail-page text.
+
+    A suburb wins over a city, but a name that only occurs inside a longer
+    known name is part of that name, not a place of its own: the "Nové Mesto"
+    in "Nové Mesto nad Váhom" or "Kysucké Nové Mesto" is not Bratislava's.
+    Checking suburbs first used to send both towns to Bratislava's Nové Mesto
+    and its 13 €/m² rent.
 
     Address is almost always near the top of the page; trim the search window
     to keep this O(1) per listing.
@@ -974,10 +1003,28 @@ def _extract_location_from_text(text: str) -> str:
     if not text:
         return ""
     snippet = text[:4000]
-    for pattern, address in _TEXT_LOCATION_PATTERNS:
-        if pattern.search(snippet):
-            return address
-    return ""
+    hits = [
+        (m.start(), m.end(), rank)
+        for rank, (pattern, _, _) in enumerate(_TEXT_LOCATION_PATTERNS)
+        for m in pattern.finditer(snippet)
+    ]
+    hits = [
+        (start, end, rank) for start, end, rank in hits
+        if not any(s <= start and end <= e and e - s > end - start
+                   for s, e, _ in hits)
+    ]
+    if not hits:
+        return ""
+    ranks = sorted({rank for _, _, rank in hits})
+    _, name, parent = _TEXT_LOCATION_PATTERNS[ranks[0]]
+    if not parent:
+        return name
+    if name in _GENERIC_CITY_PARTS and not _MENTIONS_BRATISLAVA.search(snippet):
+        cities = [_TEXT_LOCATION_PATTERNS[r][1] for r in ranks
+                  if not _TEXT_LOCATION_PATTERNS[r][2]]
+        if cities:
+            parent = cities[0]
+    return f"{name}, {parent}"
 
 
 def _apply_detail(listing: dict, detail: dict) -> None:

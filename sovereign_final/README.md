@@ -39,6 +39,7 @@ sovereign_final/
 ├── database.py               ← PostgreSQL + SQLite fallback
 ├── enrich_pending.py         ← Re-read listings missing a price, size or district
 ├── repair_prices.py          ← Re-read listings whose price looks borrowed
+├── repair_districts.py       ← Fix towns misread as Bratislava, then rescore
 ├── diagnose.py               ← Data-quality report (coverage, classification)
 ├── START.bat                 ← Windows one-click launcher
 ├── docker-compose.yml        ← 4 Docker containers
