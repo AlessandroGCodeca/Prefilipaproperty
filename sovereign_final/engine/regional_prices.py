@@ -298,6 +298,15 @@ def pick_sale_price(candidates, size_m2: float = 0.0, district: str = "") -> flo
     return max(values)
 
 
+def _forget_misread_prices(conn, ids) -> None:
+    """A zeroed price was never the listing's asking price, so it must not
+    stay in price_history to be read later as a cut once the real price
+    arrives."""
+    from database import _ensure_price_history, clear_price_history
+    _ensure_price_history(conn)
+    clear_price_history(conn, ids)
+
+
 def zero_below_regional_floor(source: str) -> int:
     """Cleanup pass: zero the price (and reset to PENDING) on rows whose
     €/m² falls below the regional floor (or the global blank-district floor
@@ -320,6 +329,7 @@ def zero_below_regional_floor(source: str) -> int:
             f"WHERE id IN ({placeholders})",
             flagged,
         )
+        _forget_misread_prices(conn, flagged)
         conn.commit()
     conn.close()
     if flagged:
@@ -358,6 +368,7 @@ def zero_above_regional_ceiling(source: str) -> int:
             f"WHERE id IN ({placeholders})",
             flagged,
         )
+        _forget_misread_prices(conn, flagged)
         conn.commit()
     conn.close()
     if flagged:

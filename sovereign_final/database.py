@@ -109,7 +109,17 @@ CREATE TABLE IF NOT EXISTS cashflow_scores (
     mortgage_rate_used    REAL,
     ltv_used              REAL,
     loan_term_years       INTEGER,
-    tax_year              INTEGER DEFAULT 2026
+    tax_year              INTEGER DEFAULT 2026,
+    max_price_green       REAL,
+    max_price_yellow      REAL,
+    market_value_eur      REAL,
+    discount_to_market    REAL,
+    stress_surplus_sro    REAL,
+    stress_ratio_sro      REAL,
+    stress_classification TEXT,
+    irr_sro               REAL,
+    irr_personal          REAL,
+    rent_source           TEXT
 );
 
 CREATE TABLE IF NOT EXISTS location_scores (
@@ -174,7 +184,49 @@ CREATE TABLE IF NOT EXISTS rent_comps (
     sample_count    INTEGER,
     source          TEXT,
     updated_at      TEXT,
+    eur_per_m2      REAL,
     UNIQUE(district, size_band)
+);
+
+CREATE TABLE IF NOT EXISTS rental_listings (
+    id                TEXT PRIMARY KEY,
+    source            TEXT NOT NULL,
+    url               TEXT NOT NULL UNIQUE,
+    title             TEXT,
+    rent_eur          REAL NOT NULL,
+    size_m2           REAL NOT NULL,
+    rooms             REAL,
+    district          TEXT,
+    rent_key          TEXT,
+    energies_included INTEGER DEFAULT 0,
+    furnished         TEXT,
+    scraped_at        TEXT NOT NULL,
+    last_seen_at      TEXT NOT NULL,
+    is_active         INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS price_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id  TEXT NOT NULL,
+    price_eur   REAL NOT NULL,
+    observed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_price_history_listing
+    ON price_history(listing_id, observed_at);
+
+CREATE TABLE IF NOT EXISTS deal_stages (
+    listing_id  TEXT PRIMARY KEY,
+    stage       TEXT NOT NULL,
+    note        TEXT,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS deal_stage_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id  TEXT NOT NULL,
+    stage       TEXT NOT NULL,
+    note        TEXT,
+    changed_at  TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS contract_drafts (
@@ -200,32 +252,6 @@ CREATE TABLE IF NOT EXISTS annotations (
     created_at  TEXT
 );
 """
-
-RENT_COMPS_SEED = [
-    ("bratislava-i-small",   "Bratislava I",   "Bratislava", "small",  850,  820,  312),
-    ("bratislava-i-medium",  "Bratislava I",   "Bratislava", "medium", 1150, 1100, 284),
-    ("bratislava-i-large",   "Bratislava I",   "Bratislava", "large",  1600, 1500, 189),
-    ("bratislava-ii-small",  "Bratislava II",  "Bratislava", "small",  680,  660,  421),
-    ("bratislava-ii-medium", "Bratislava II",  "Bratislava", "medium", 900,  880,  389),
-    ("bratislava-iii-small", "Bratislava III", "Bratislava", "small",  640,  620,  298),
-    ("bratislava-iv-small",  "Bratislava IV",  "Bratislava", "small",  600,  580,  312),
-    ("bratislava-iv-medium", "Bratislava IV",  "Bratislava", "medium", 790,  760,  289),
-    ("bratislava-v-small",   "Bratislava V",   "Bratislava", "small",  620,  600,  278),
-    ("kosice-i-small",       "Košice I",       "Košice",     "small",  480,  460,  412),
-    ("kosice-i-medium",      "Košice I",       "Košice",     "medium", 640,  620,  389),
-    ("zilina-small",         "Žilina",         "Žilina",     "small",  460,  440,  312),
-    ("zilina-medium",        "Žilina",         "Žilina",     "medium", 610,  590,  289),
-    ("nitra-small",          "Nitra",          "Nitra",      "small",  420,  400,  289),
-    ("nitra-medium",         "Nitra",          "Nitra",      "medium", 560,  540,  267),
-    ("trnava-small",         "Trnava",         "Trnava",     "small",  480,  460,  298),
-    ("trnava-medium",        "Trnava",         "Trnava",     "medium", 640,  620,  278),
-    ("presov-small",         "Prešov",         "Prešov",     "small",  380,  360,  312),
-    ("banska-small",         "Banská Bystrica","BB",         "small",  360,  340,  278),
-    ("trencin-small",        "Trenčín",        "Trenčín",    "small",  380,  360,  234),
-    ("martin-small",         "Martin",         "Martin",     "small",  350,  330,  198),
-    ("poprad-small",         "Poprad",         "Poprad",     "small",  340,  320,  187),
-]
-
 
 # Detect dev-project listings (multi-unit projects, not individual buyable
 # apartments). Their "price" field is typically the cheapest unit's starting
@@ -306,6 +332,17 @@ _CASHFLOW_NEW_COLUMNS = {
     "total_roi":                 "REAL",
     "acquisition_costs":         "REAL",
     "total_cash_invested":       "REAL",
+    # Deal extras (engine.financial.deal_extras) and the rent's provenance.
+    "max_price_green":           "REAL",
+    "max_price_yellow":          "REAL",
+    "market_value_eur":          "REAL",
+    "discount_to_market":        "REAL",
+    "stress_surplus_sro":        "REAL",
+    "stress_ratio_sro":          "REAL",
+    "stress_classification":     "TEXT",
+    "irr_sro":                   "REAL",
+    "irr_personal":              "REAL",
+    "rent_source":               "TEXT",
 }
 
 
@@ -342,6 +379,16 @@ _ENRICHMENT_COLUMNS = {
     "lv_risk_level":      "TEXT",
     "lv_summary":         "TEXT",
     "detail_enriched_at": "TEXT",
+    # Further description facts (modules/description_enrichment). floor
+    # already exists and is filled only when the scraper left it empty.
+    "building_floors":    "INTEGER",
+    "has_elevator":       "INTEGER",
+    "has_cellar":         "INTEGER",
+    "has_terrace":        "INTEGER",
+    "has_loggia":         "INTEGER",
+    # Cross-portal duplicates (mark_duplicates): every member of a group
+    # carries the id of the group's primary listing; singletons stay NULL.
+    "dup_group":          "TEXT",
 }
 
 
@@ -353,6 +400,36 @@ def _ensure_enrichment_columns(conn):
     for name, sqltype in _ENRICHMENT_COLUMNS.items():
         if name not in cols:
             conn.execute(f"ALTER TABLE listings ADD COLUMN {name} {sqltype}")
+    conn.commit()
+
+
+# Location-risk provenance (modules/risk_data). construction_detail is in the
+# original schema; the rest arrived with the real noise/flood/construction data.
+_LOCATION_NEW_COLUMNS = {
+    "construction_detail": "TEXT",
+    "noise_detail":        "TEXT",
+    "flood_detail":        "TEXT",
+    "geo_precision":       "TEXT",
+    "risk_checked_at":     "TEXT",
+}
+
+
+def _ensure_location_columns(conn):
+    if not USE_SQLITE_FALLBACK:
+        return
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(location_scores)")]
+    for name, sqltype in _LOCATION_NEW_COLUMNS.items():
+        if name not in cols:
+            conn.execute(f"ALTER TABLE location_scores ADD COLUMN {name} {sqltype}")
+    conn.commit()
+
+
+def _ensure_rent_comps_columns(conn):
+    if not USE_SQLITE_FALLBACK:
+        return
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(rent_comps)")]
+    if "eur_per_m2" not in cols:
+        conn.execute("ALTER TABLE rent_comps ADD COLUMN eur_per_m2 REAL")
     conn.commit()
 
 
@@ -379,14 +456,14 @@ def init_db():
         _ensure_dev_project_column(conn)
         _ensure_cashflow_columns(conn)
         _ensure_enrichment_columns(conn)
+        _ensure_location_columns(conn)
+        _ensure_rent_comps_columns(conn)
         _backfill_listing_coords(conn)
-        now = datetime.now(timezone.utc).isoformat()
-        for row in RENT_COMPS_SEED:
-            conn.execute("""
-                INSERT OR IGNORE INTO rent_comps
-                (id, district, city, size_band, avg_rent_eur, median_rent_eur, sample_count, source, updated_at)
-                VALUES (?,?,?,?,?,?,?,'baseline_2026',?)
-            """, (*row, now))
+        # rent_comps used to be seeded with hand-typed 'baseline_2026' rows
+        # (invented sample counts, never read). The table now holds only live
+        # comps built from scraped rentals (engine/rent_comps), so the seed
+        # rows go — anything in it is real.
+        conn.execute("DELETE FROM rent_comps WHERE source='baseline_2026'")
         conn.commit()
     else:
         # PostgreSQL — schema already applied via docker-entrypoint
@@ -416,10 +493,20 @@ def get_all_active():
                c.maintenance_monthly,  c.management_monthly,
                c.income_tax_personal,
                c.health_levy_personal, c.income_tax_sro,
+               c.acquisition_costs,
+               c.mortgage_rate_used,   c.ltv_used, c.loan_term_years,
+               c.max_price_green,      c.max_price_yellow,
+               c.market_value_eur,     c.discount_to_market,
+               c.stress_surplus_sro,   c.stress_ratio_sro,
+               c.stress_classification,
+               c.irr_sro,              c.irr_personal, c.rent_source,
                lc.location_score,      lc.location_tier,
                lc.nearest_transit_m,   lc.walkability_score,
                lc.industrial_zone,     lc.construction_risk,
-               lc.noise_flag,          lc.amenity_count
+               lc.noise_flag,          lc.amenity_count,
+               lc.flood_zone,          lc.construction_detail,
+               lc.noise_detail,        lc.flood_detail,
+               lc.geo_precision
         FROM listings l
         LEFT JOIN cashflow_scores c  ON l.id = c.listing_id
         LEFT JOIN location_scores lc ON l.id = lc.listing_id
@@ -431,16 +518,197 @@ def get_all_active():
 
 
 def get_rejected():
+    """Every LV rejection with its reason, newest first. A listing re-verified
+    and rejected twice appears twice — each row is one decision."""
     conn = get_conn()
-    rows = conn.execute("""
-        SELECT l.id, l.address_raw, l.url, l.price_eur, l.scraped_at,
-               r.reason, r.detail, r.flagged_at
-        FROM listings l
-        JOIN rejections_log r ON l.id = r.listing_id
-        ORDER BY r.flagged_at DESC
-    """).fetchall()
-    conn.close()
+    try:
+        _ensure_enrichment_columns(conn)
+        rows = conn.execute("""
+            SELECT l.id, l.title, l.district, l.address_raw, l.url, l.source,
+                   l.price_eur, l.size_m2, l.scraped_at, l.is_active,
+                   l.lv_status, l.lv_risk_level, l.lv_summary,
+                   r.reason, r.detail, r.module, r.flagged_at
+            FROM listings l
+            JOIN rejections_log r ON l.id = r.listing_id
+            ORDER BY r.flagged_at DESC
+        """).fetchall()
+    finally:
+        conn.close()
     return [dict(r) for r in rows]
+
+
+# ── Cross-portal duplicates ──────────────────────────────────────────────────
+def mark_duplicates() -> int:
+    """Group copies of the same flat across portals (engine.duplicates) and
+    store each member's primary id in listings.dup_group. Re-run from scratch
+    every time, so a copy that went inactive or changed price leaves its
+    group. Returns the number of listings that are part of a group."""
+    from engine.duplicates import group_duplicates
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        rows = [dict(r) for r in conn.execute("""
+            SELECT id, url, source, district, size_m2, price_eur, rooms, floor,
+                   scraped_at
+            FROM listings
+            WHERE is_active = 1 AND lv_status != 'REJECTED'
+              AND price_eur > 0 AND size_m2 > 0
+              AND (is_dev_project IS NULL OR is_dev_project = 0)
+        """).fetchall()]
+        groups = group_duplicates(rows)
+        conn.execute("UPDATE listings SET dup_group = NULL WHERE dup_group IS NOT NULL")
+        for lid, primary in groups.items():
+            conn.execute("UPDATE listings SET dup_group=? WHERE id=?", (primary, lid))
+        conn.commit()
+    finally:
+        conn.close()
+    return len(groups)
+
+
+# ── Deal stages ──────────────────────────────────────────────────────────────
+DEAL_STAGES = [
+    "NEW", "WATCHING", "VIEWING", "OFFER", "NEGOTIATING",
+    "DUE DILIGENCE", "NOTARY", "CLOSED", "PASSED",
+]
+
+
+def set_deal_stage(listing_id: str, stage: str, note: str = "") -> None:
+    """Move a listing to `stage` and log the move."""
+    stage = (stage or "").upper()
+    if stage not in DEAL_STAGES:
+        raise ValueError(f"unknown deal stage {stage!r}")
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_conn()
+    try:
+        conn.execute("""
+            INSERT INTO deal_stages (listing_id, stage, note, updated_at)
+            VALUES (?,?,?,?)
+            ON CONFLICT(listing_id) DO UPDATE SET
+                stage=excluded.stage, note=excluded.note, updated_at=excluded.updated_at
+        """, (listing_id, stage, note or None, now))
+        conn.execute("""
+            INSERT INTO deal_stage_history (listing_id, stage, note, changed_at)
+            VALUES (?,?,?,?)
+        """, (listing_id, stage, note or None, now))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_deal_stages() -> dict:
+    """{listing_id: {stage, note, updated_at}} for every tracked listing."""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT listing_id, stage, note, updated_at FROM deal_stages").fetchall()
+    finally:
+        conn.close()
+    return {r["listing_id"]: dict(r) for r in rows}
+
+
+def get_deal_stage_history(listing_id: str) -> list[dict]:
+    conn = get_conn()
+    try:
+        rows = conn.execute("""
+            SELECT stage, note, changed_at FROM deal_stage_history
+            WHERE listing_id=? ORDER BY changed_at DESC, id DESC
+        """, (listing_id,)).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_tracked_listings() -> list[dict]:
+    """Every listing with a deal stage, active or not — a deal under offer
+    stays on the board even after the portal pulls the ad."""
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        rows = conn.execute("""
+            SELECT l.id, l.title, l.district, l.url, l.source, l.price_eur,
+                   l.size_m2, l.is_active, l.scraped_at,
+                   c.classification AS cf_class, c.surplus_sro,
+                   c.max_price_yellow, c.max_price_green,
+                   d.stage, d.note, d.updated_at
+            FROM deal_stages d
+            JOIN listings l ON l.id = d.listing_id
+            LEFT JOIN cashflow_scores c ON c.listing_id = l.id
+            ORDER BY d.updated_at DESC
+        """).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+# ── Vibe notes (annotations) ─────────────────────────────────────────────────
+def add_annotation(listing_id: str, note: str, vibe_score: int | None) -> None:
+    import uuid
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO annotations (id, listing_id, note, vibe_score, created_at) "
+            "VALUES (?,?,?,?,?)",
+            (str(uuid.uuid4()), listing_id, note or "", vibe_score,
+             datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_annotations(listing_id: str | None = None) -> list[dict]:
+    """Saved vibe checks, newest first — for one listing or all of them."""
+    conn = get_conn()
+    try:
+        if listing_id:
+            rows = conn.execute(
+                "SELECT * FROM annotations WHERE listing_id=? "
+                "ORDER BY created_at DESC", (listing_id,)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM annotations ORDER BY created_at DESC").fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+def latest_vibes() -> dict:
+    """{listing_id: (latest vibe score, latest note, number of notes)}."""
+    out: dict = {}
+    for a in get_annotations():            # newest first
+        lid = a["listing_id"]
+        if lid in out:
+            score, note, n = out[lid]
+            out[lid] = (score, note, n + 1)
+        else:
+            out[lid] = (a.get("vibe_score"), a.get("note") or "", 1)
+    return out
+
+
+# ── Rental listings (live rent comps) ────────────────────────────────────────
+def upsert_rental(data: dict) -> None:
+    """Store one prenájom listing for engine/rent_comps. Keyed on url; a
+    re-seen rental refreshes its rent and last_seen_at."""
+    conn = get_conn()
+    try:
+        conn.execute("""
+            INSERT INTO rental_listings
+            (id, source, url, title, rent_eur, size_m2, rooms, district, rent_key,
+             energies_included, furnished, scraped_at, last_seen_at, is_active)
+            VALUES
+            (:id,:source,:url,:title,:rent_eur,:size_m2,:rooms,:district,:rent_key,
+             :energies_included,:furnished,:scraped_at,:last_seen_at,1)
+            ON CONFLICT(url) DO UPDATE SET
+                rent_eur=excluded.rent_eur, size_m2=excluded.size_m2,
+                rooms=COALESCE(excluded.rooms, rooms),
+                district=CASE WHEN excluded.district != '' THEN excluded.district ELSE district END,
+                rent_key=excluded.rent_key,
+                energies_included=excluded.energies_included,
+                furnished=excluded.furnished,
+                last_seen_at=excluded.last_seen_at, is_active=1
+        """, data)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def get_stats():
@@ -574,11 +842,18 @@ def set_listing_price(listing_id: str, price_eur: float) -> bool:
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
+        _ensure_price_history(conn)
+        # A repair corrects a misread, so the misread was never an asking
+        # price: the history restarts from the corrected value (or empties),
+        # instead of reporting the correction as a price cut.
+        clear_price_history(conn, [listing_id])
         if price_eur and price_eur > 0:
             n = conn.execute(
                 "UPDATE listings SET price_eur=? WHERE id=?",
                 (float(price_eur), listing_id),
             ).rowcount
+            if n:
+                _record_price(conn, listing_id, float(price_eur))
         else:
             n = conn.execute(
                 "UPDATE listings SET price_eur=0, classification='PENDING', "
@@ -722,15 +997,167 @@ def fill_blank_district(conn, listing_id: str, district: str,
     return n > 0
 
 
+# ── Price history ─────────────────────────────────────────────────────────────
+def _ensure_price_history(conn):
+    """price_history on a DB that hasn't been through init_db since it was
+    added (a scraper subprocess, an old file). Idempotent and cheap."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS price_history (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            listing_id  TEXT NOT NULL,
+            price_eur   REAL NOT NULL,
+            observed_at TEXT NOT NULL
+        )""")
+
+
+def _record_price(conn, listing_id: str, price_eur: float, when: str | None = None):
+    conn.execute(
+        "INSERT INTO price_history (listing_id, price_eur, observed_at) VALUES (?,?,?)",
+        (listing_id, float(price_eur),
+         when or datetime.now(timezone.utc).isoformat()),
+    )
+
+
+def _has_price_history(conn, listing_id: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM price_history WHERE listing_id=? LIMIT 1", (listing_id,)
+    ).fetchone() is not None
+
+
+def clear_price_history(conn, listing_ids) -> int:
+    """Forget the recorded prices of listings whose price turned out to be a
+    misread (a neighbouring listing's, or a deposit). Takes the caller's
+    connection; the caller commits."""
+    ids = [i for i in (listing_ids or []) if i]
+    if not ids:
+        return 0
+    ph = ",".join("?" * len(ids))
+    return conn.execute(
+        f"DELETE FROM price_history WHERE listing_id IN ({ph})", ids
+    ).rowcount
+
+
+def summarize_price_history(rows, now: datetime | None = None) -> dict:
+    """Fold price_history rows (listing_id, price_eur, observed_at — oldest
+    first per listing) into one summary per listing:
+
+      first_price, last_price, change_pct (last vs first, negative = cut),
+      last_change_at, last_change_pct, n_changes, history [(when, price)].
+
+    A row repeating the price before it is not a change. Only listings whose
+    price actually moved are returned.
+    """
+    by_listing: dict[str, list] = {}
+    for lid, price, when in rows:
+        hist = by_listing.setdefault(lid, [])
+        if not hist or hist[-1][1] != price:
+            hist.append((when, price))
+    out = {}
+    for lid, hist in by_listing.items():
+        if len(hist) < 2:
+            continue
+        first, last, prev = hist[0][1], hist[-1][1], hist[-2][1]
+        out[lid] = {
+            "first_price":     first,
+            "last_price":      last,
+            "change_pct":      round(last / first - 1, 4) if first else None,
+            "last_change_at":  hist[-1][0],
+            "last_change_pct": round(last / prev - 1, 4) if prev else None,
+            "n_changes":       len(hist) - 1,
+            "history":         hist,
+        }
+    return out
+
+
+def get_price_history(listing_ids=None) -> dict:
+    """summarize_price_history for every listing (or just `listing_ids`)."""
+    conn = get_conn()
+    try:
+        _ensure_price_history(conn)
+        if listing_ids:
+            ids = list(listing_ids)
+            ph = ",".join("?" * len(ids))
+            rows = conn.execute(
+                f"SELECT listing_id, price_eur, observed_at FROM price_history "
+                f"WHERE listing_id IN ({ph}) ORDER BY listing_id, observed_at, id",
+                ids).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT listing_id, price_eur, observed_at FROM price_history "
+                "ORDER BY listing_id, observed_at, id").fetchall()
+    finally:
+        conn.close()
+    return summarize_price_history([tuple(r) for r in rows])
+
+
+def get_price_drops(days: int = 14, min_drop: float = 0.02,
+                    max_drop: float = 0.40) -> list[dict]:
+    """Active listings whose latest price change was a cut of at least
+    `min_drop`, made within `days`. Cuts deeper than `max_drop` are left out:
+    a 60% "cut" is a misread being corrected, not a motivated seller."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    hist = get_price_history()
+    if not hist:
+        return []
+    conn = get_conn()
+    try:
+        rows = conn.execute("""
+            SELECT l.id, l.title, l.district, l.url, l.source, l.price_eur,
+                   l.size_m2, l.scraped_at, c.classification AS cf_class,
+                   c.max_price_yellow, c.max_price_green
+            FROM listings l LEFT JOIN cashflow_scores c ON c.listing_id = l.id
+            WHERE l.is_active = 1 AND l.lv_status != 'REJECTED'
+        """).fetchall()
+    finally:
+        conn.close()
+    drops = []
+    for r in rows:
+        h = hist.get(r["id"])
+        if not h or h["last_change_at"] < cutoff:
+            continue
+        pct = h["last_change_pct"]
+        if pct is None or not (-max_drop <= pct <= -min_drop):
+            continue
+        drops.append({**dict(r), **{k: h[k] for k in
+                     ("first_price", "last_change_at", "last_change_pct",
+                      "change_pct", "n_changes")}})
+    drops.sort(key=lambda d: d["last_change_at"], reverse=True)
+    return drops
+
+
+def days_on_market(scraped_at: str | None, until: str | None = None) -> int | None:
+    """Whole days since we first saw the listing (scraped_at is set on insert
+    and never updated, so it is first-seen). `until` defaults to now."""
+    if not scraped_at:
+        return None
+    try:
+        start = datetime.fromisoformat(scraped_at)
+        end = datetime.fromisoformat(until) if until else datetime.now(timezone.utc)
+    except ValueError:
+        return None
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    return max((end - start).days, 0)
+
+
 def upsert_listing(data: dict):
     conn = get_conn()
     try:
+        _ensure_price_history(conn)
         # If a row already exists with this URL (e.g. a prior slug-URL variant
         # that _dedupe_canonical_urls rewrote to the canonical form), reuse its
         # id so ON CONFLICT(id) fires instead of hitting the url UNIQUE constraint.
         existing = conn.execute(
-            "SELECT id, district FROM listings WHERE url=?", (data["url"],)
+            "SELECT id, district, price_eur, scraped_at FROM listings WHERE url=?",
+            (data["url"],)
         ).fetchone()
+        if existing is None:
+            existing = conn.execute(
+                "SELECT id, district, price_eur, scraped_at FROM listings WHERE id=?",
+                (data["id"],)
+            ).fetchone()
         if existing and existing[0] != data["id"]:
             data = {**data, "id": existing[0], "url_hash": existing[0]}
         # Auto-detect dev-project listings from URL + title at insert time.
@@ -773,13 +1200,29 @@ def upsert_listing(data: dict):
         if (existing and not (existing[1] or "").strip()
                 and (data.get("district") or "").strip()):
             _drop_cashflow_score(conn, data["id"])
+        # A new asking price: log it, and re-score at the new price (a cut
+        # can turn a WHITE into a YELLOW — that is the alert worth having).
+        new_price = data.get("price_eur") or 0
+        old_price = (existing[2] or 0) if existing else 0
+        if new_price > 0 and new_price != old_price:
+            if existing and old_price > 0 and not _has_price_history(conn, data["id"]):
+                # Rows from before price history existed: the price being
+                # replaced is the first one we ever saw, as of first sight.
+                _record_price(conn, data["id"], old_price, existing[3])
+            _record_price(conn, data["id"], new_price,
+                          data.get("last_seen_at") or data.get("scraped_at"))
+            if existing and old_price > 0:
+                _drop_cashflow_score(conn, data["id"])
         conn.commit()
     finally:
         conn.close()
 
 
 def upsert_cashflow(data: dict):
+    """Store one listing's score. Columns added after the first schema
+    (_CASHFLOW_NEW_COLUMNS) default to NULL when the caller leaves them out."""
     conn = get_conn()
+    _ensure_cashflow_columns(conn)
     conn.execute("""
         INSERT OR REPLACE INTO cashflow_scores
         (listing_id, estimated_rent_eur, mortgage_monthly, hoa_monthly,
@@ -794,7 +1237,10 @@ def upsert_cashflow(data: dict):
          acquisition_costs, total_cash_invested,
          optimal_structure, classification,
          annual_sro_saving, sro_break_even_months,
-         scored_at, mortgage_rate_used, ltv_used, loan_term_years)
+         scored_at, mortgage_rate_used, ltv_used, loan_term_years,
+         max_price_green, max_price_yellow, market_value_eur, discount_to_market,
+         stress_surplus_sro, stress_ratio_sro, stress_classification,
+         irr_sro, irr_personal, rent_source)
         VALUES
         (:listing_id,:estimated_rent_eur,:mortgage_monthly,:hoa_monthly,
          :property_tax_monthly,:vacancy_cost,:maintenance_monthly,:management_monthly,
@@ -808,8 +1254,11 @@ def upsert_cashflow(data: dict):
          :acquisition_costs,:total_cash_invested,
          :optimal_structure,:classification,
          :annual_sro_saving,:sro_break_even_months,
-         :scored_at,:mortgage_rate_used,:ltv_used,:loan_term_years)
-    """, data)
+         :scored_at,:mortgage_rate_used,:ltv_used,:loan_term_years,
+         :max_price_green,:max_price_yellow,:market_value_eur,:discount_to_market,
+         :stress_surplus_sro,:stress_ratio_sro,:stress_classification,
+         :irr_sro,:irr_personal,:rent_source)
+    """, {**dict.fromkeys(_CASHFLOW_NEW_COLUMNS), **data})
     conn.execute(
         "UPDATE listings SET classification=? WHERE id=?",
         (data["classification"], data["listing_id"])
@@ -820,20 +1269,25 @@ def upsert_cashflow(data: dict):
 
 def upsert_location(data: dict):
     conn = get_conn()
+    _ensure_location_columns(conn)
     conn.execute("""
         INSERT OR REPLACE INTO location_scores
         (listing_id, lat, lng, nearest_transit_m, amenity_count,
          grocery_count, pharmacy_count, school_count,
          construction_risk, noise_flag, flood_zone,
          walkability_score, industrial_zone, industrial_zone_name,
-         location_score, location_tier, scored_at)
+         location_score, location_tier, scored_at,
+         construction_detail, noise_detail, flood_detail,
+         geo_precision, risk_checked_at)
         VALUES
         (:listing_id,:lat,:lng,:nearest_transit_m,:amenity_count,
          :grocery_count,:pharmacy_count,:school_count,
          :construction_risk,:noise_flag,:flood_zone,
          :walkability_score,:industrial_zone,:industrial_zone_name,
-         :location_score,:location_tier,:scored_at)
-    """, data)
+         :location_score,:location_tier,:scored_at,
+         :construction_detail,:noise_detail,:flood_detail,
+         :geo_precision,:risk_checked_at)
+    """, {**dict.fromkeys(_LOCATION_NEW_COLUMNS), **data})
     # Mirror coordinates onto the listing row — the dashboard (satellite view,
     # MAPS buttons) reads l["lat"]/l["lng"] via get_all_active's l.*, and
     # location_scores' lat/lng are not part of that select.
@@ -842,6 +1296,45 @@ def upsert_location(data: dict):
             "UPDATE listings SET lat=:lat, lng=:lng WHERE id=:listing_id", data)
     conn.commit()
     conn.close()
+
+
+def get_location_rows_missing_risk(limit: int = 100) -> list[dict]:
+    """Location rows written before real risk data existed (risk_checked_at
+    NULL) for listings still active and LV-clean."""
+    conn = get_conn()
+    try:
+        _ensure_location_columns(conn)
+        rows = conn.execute("""
+            SELECT lc.listing_id, lc.lat, lc.lng, l.address_raw, l.district
+            FROM location_scores lc JOIN listings l ON l.id = lc.listing_id
+            WHERE lc.risk_checked_at IS NULL AND l.is_active = 1
+              AND l.lv_status = 'PASS'
+            LIMIT ?
+        """, (limit,)).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_location_risk(listing_id: str, risk: dict) -> None:
+    """Write construction / noise / flood answers (and the geocode precision
+    they were judged at) onto an existing location row."""
+    conn = get_conn()
+    try:
+        _ensure_location_columns(conn)
+        conn.execute("""
+            UPDATE location_scores SET
+                construction_risk=:construction_risk,
+                construction_detail=:construction_detail,
+                noise_flag=:noise_flag, noise_detail=:noise_detail,
+                flood_zone=:flood_zone, flood_detail=:flood_detail,
+                geo_precision=:geo_precision, risk_checked_at=:risk_checked_at
+            WHERE listing_id=:listing_id
+        """, {**risk, "listing_id": listing_id,
+              "risk_checked_at": datetime.now(timezone.utc).isoformat()})
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def set_lv_status(listing_id: str, status: str, reason: str = "", detail: str = "", module: str = "debt_bot"):
@@ -953,9 +1446,11 @@ def get_unparsed_descriptions(limit: int = 200):
 
 def update_description_features(listing_id: str, features: dict):
     """Persist parsed description features and mark the row parsed.
-    `features` keys: has_parking, has_balcony, furnished, condition, and
-    optionally rooms — which only fills in when the listing has none yet
-    (structured scraper data outranks the description's phrasing)."""
+    `features` keys: has_parking, has_balcony, furnished, condition, the
+    building facts (has_elevator, has_cellar, has_terrace, has_loggia,
+    building_floors) and optionally rooms / floor — which only fill in when
+    the listing has none yet (structured scraper data outranks the
+    description's phrasing)."""
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
@@ -963,7 +1458,11 @@ def update_description_features(listing_id: str, features: dict):
             UPDATE listings SET
                 has_parking = ?, has_balcony = ?,
                 furnished   = ?, condition   = ?,
+                has_elevator = ?, has_cellar = ?,
+                has_terrace  = ?, has_loggia = ?,
+                building_floors = COALESCE(?, building_floors),
                 rooms       = COALESCE(rooms, ?),
+                floor       = COALESCE(floor, ?),
                 desc_parsed = 1
             WHERE id = ?
         """, (
@@ -971,12 +1470,37 @@ def update_description_features(listing_id: str, features: dict):
             features.get("has_balcony"),
             features.get("furnished"),
             features.get("condition"),
+            features.get("has_elevator"),
+            features.get("has_cellar"),
+            features.get("has_terrace"),
+            features.get("has_loggia"),
+            features.get("building_floors"),
             features.get("rooms"),
+            features.get("floor"),
             listing_id,
         ))
         conn.commit()
     finally:
         conn.close()
+
+
+def requeue_descriptions_missing_extras() -> int:
+    """Send listings parsed before the building facts (elevator, cellar,
+    terrace, floors) were kept back through description enrichment once. The
+    parse already returned those facts; they were discarded at the time.
+    Returns the number of rows re-queued."""
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        n = conn.execute("""
+            UPDATE listings SET desc_parsed = 0
+            WHERE is_active = 1 AND desc_parsed = 1 AND has_elevator IS NULL
+              AND description IS NOT NULL AND description != ''
+        """).rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return n
 
 
 def get_unnormalized_addresses(limit: int = 200):

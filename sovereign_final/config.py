@@ -22,6 +22,32 @@ LTV_RATIO              = 0.80    # 80% standard NBS cap for owner-occupied/1st-2
 # residential property (i.e. most pure investors). Use this when modelling an
 # investor who already owns ≥2 properties.
 LTV_RATIO_INVESTOR     = 0.70
+INVESTOR_LTV_FROM      = "2026-10-01"   # date the 70% cap takes effect
+# How many residential properties you already own. At 2 or more, the next
+# purchase is your 3rd+, so scoring uses LTV_RATIO_INVESTOR instead of
+# LTV_RATIO (see engine.financial.default_ltv). Set in .env.
+PROPERTIES_OWNED       = int(os.getenv("PROPERTIES_OWNED", "0") or 0)
+
+# Rate-shock stress test. NBS makes banks test affordability (DSTI) at the
+# offered rate + 2 percentage points; a fixation ending in a higher-rate market
+# does the same thing to a rental's cashflow. The engine re-runs each deal at
+# MORTGAGE_RATE_PA + RATE_SHOCK_PP and reports whether it still pays for itself.
+RATE_SHOCK_PP          = 0.02
+
+# ── Hold-period IRR (engine.financial.project_irr) ───────────────────────────
+# Assumptions for the multi-year return, including selling at the end. All
+# conservative and editable. Appreciation and rent growth are nominal.
+HOLD_YEARS             = 10
+APPRECIATION_RATE      = 0.03   # price growth p.a. (SK long-run nominal ~4–6%)
+RENT_GROWTH_RATE       = 0.025  # rent growth p.a.
+COST_INFLATION_RATE    = 0.025  # HOA / fond opráv growth p.a.
+# Selling costs as a fraction of the sale price: agent commission (~3%, paid by
+# the seller when you are the seller) plus legal/cadastre.
+EXIT_COST_RATE         = 0.035
+# §9 ods. 1 písm. b) ZDP: an individual's gain on a flat held ≥5 years is
+# exempt. Sold sooner, the gain is taxed at the personal income-tax rate. An
+# s.r.o. pays corporate + dividend tax on the gain whenever it sells.
+PERSONAL_CGT_EXEMPT_YEARS = 5
 
 # Income tax — Fyzická osoba (personal), passive rental under §6 ods. 3
 TAX_RATE_PERSONAL_LOW  = 0.19   # 19% up to threshold
@@ -95,6 +121,29 @@ POINTS_ENERGY          = 10
 
 PRIME_THRESHOLD        = 75
 SOLID_THRESHOLD        = 45
+
+# ── Location risk data (modules/risk_data.py) ─────────────────────────────────
+# Open data, no keys. OpenStreetMap via Overpass for construction sites, noise
+# sources, transit and amenities; Nominatim geocodes when there is no Google
+# key; SVP's flood-hazard map service for the Q100 flood area.
+OVERPASS_URL      = os.getenv("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
+NOMINATIM_URL     = os.getenv("NOMINATIM_URL", "https://nominatim.openstreetmap.org/search")
+# Nominatim's usage policy asks for a contact address in the request.
+NOMINATIM_EMAIL   = os.getenv("NOMINATIM_EMAIL", "")
+# SVP (Slovenský vodohospodársky podnik) flood hazard maps, cycle II —
+# "Hranica záplavy Q100" (the 100-year flood extent). An ArcGIS MapServer
+# identify endpoint plus the layer id(s) to test. Override if SVP moves it.
+FLOOD_IDENTIFY_URL = os.getenv(
+    "FLOOD_IDENTIFY_URL",
+    "https://mpt.svp.sk/server/rest/services/MPOMPR_II/Op_Ohrozenie_Q/MapServer/identify",
+)
+FLOOD_LAYER_IDS   = os.getenv("FLOOD_LAYER_IDS", "24")
+# Noise proxy: EU strategic noise maps put ≥65 dB Lden (NOISE_LIMIT_DB) along
+# exactly these sources. Within these distances of one, flag the flat.
+NOISE_MAJOR_ROAD_M = 150   # motorway / trunk (diaľnica, rýchlostná cesta)
+NOISE_PRIMARY_M    = 30    # primary road (cesta I. triedy, city arterial)
+NOISE_RAIL_M       = 80    # main-line railway (not sidings, not trams)
+NOISE_AIRPORT_M    = 1500  # an airport with an IATA code
 
 # ── Industrial Zones (worker demand premium) ──────────────────────────────────
 # Only smaller towns built around a single large employer go here. The big
@@ -290,6 +339,28 @@ RENT_PER_M2 = {
     # Default — smaller towns not listed above
     "default":               6.5,
 }
+
+# ── Live rent comps (engine/rent_comps.py) ────────────────────────────────────
+# The table above is a published-report baseline. scraper/rentals.py reads real
+# "prenájom" listings and engine/rent_comps.py turns them into a live €/m² per
+# RENT_PER_M2 key, which then replaces the baseline for that key.
+#
+# Asking rents run above what a flat actually lets for; this haircut brings a
+# live median back towards achieved rent (and towards the table's conservative
+# lower-bound convention).
+RENT_COMP_ASKING_HAIRCUT = 0.95
+# A district needs this many rentals before its live figure is used at all...
+RENT_COMP_MIN_SAMPLE     = 5
+# ...and even then it is blended with the baseline, which counts as this many
+# comps: rate = (n·live + k·baseline) / (n + k). Five rentals move the rate a
+# third of the way; forty move it 80%.
+RENT_COMP_PRIOR_WEIGHT   = 10
+# Rentals not seen for this long drop out of the comps.
+RENT_COMP_MAX_AGE_DAYS   = 60
+# Plausible long-term monthly rent for a flat. Outside it is a sale price, a
+# per-night rate or a typo.
+RENT_MIN_EUR             = 150
+RENT_MAX_EUR             = 6_000
 
 # ── s.r.o. Setup Cost Estimate ────────────────────────────────────────────────
 SRO_SETUP_COST = 2_500  # Notary + registry + first year accounting

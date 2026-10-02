@@ -43,7 +43,7 @@ def run_pipeline():
 
     # Step 1 — Nehnutelnosti
     try:
-        log.info("Step 1/9 — Nehnutelnosti.sk")
+        log.info("Step 1/12 — Nehnutelnosti.sk")
         from scraper.nehnutelnosti import run as s1
         n = s1(max_pages=10)
         log.info(f"   ✅ {n} listings")
@@ -52,7 +52,7 @@ def run_pipeline():
 
     # Step 2 — Bazos
     try:
-        log.info("Step 2/9 — Bazos.sk")
+        log.info("Step 2/12 — Bazos.sk")
         from scraper.bazos import run as s2
         n = s2(max_pages=10)
         log.info(f"   ✅ {n} listings")
@@ -61,16 +61,29 @@ def run_pipeline():
 
     # Step 3 — Topreality
     try:
-        log.info("Step 3/9 — Topreality.sk")
+        log.info("Step 3/12 — Topreality.sk")
         from scraper.topreality import run as s3
         n = s3(max_pages=10)
         log.info(f"   ✅ {n} listings")
     except Exception as e:
         log.error(f"   ❌ {e}")
 
-    # Step 4 — Housekeeping (stale-listing deactivation + dev-project flagging)
+    # Step 4 — Rent comps. Rentals (prenájom) feed the live €/m² rents; the
+    # rebuild drops the scores of listings whose district rate moved, so the
+    # scoring step below re-scores them on the new rent.
     try:
-        log.info("Step 4/9 — Housekeeping")
+        log.info("Step 4/12 — Rent comps (prenájom)")
+        from scraper.rentals import run as rentals
+        summary = rentals(max_pages=5)
+        log.info(f"   ✅ {summary.get('rentals', 0)} rentals | "
+                 f"{summary.get('keys', 0)} districts | "
+                 f"{summary.get('rescored', 0)} queued for re-scoring")
+    except Exception as e:
+        log.error(f"   ❌ {e}")
+
+    # Step 5 — Housekeeping (stale-listing deactivation + dev-project flagging)
+    try:
+        log.info("Step 5/12 — Housekeeping")
         from database import deactivate_stale_listings, backfill_dev_project_flags
         stale = deactivate_stale_listings(days=21)
         dev   = backfill_dev_project_flags()
@@ -78,52 +91,72 @@ def run_pipeline():
     except Exception as e:
         log.error(f"   ❌ {e}")
 
-    # Step 5 — LV Debt Filter
+    # Step 6 — LV Debt Filter
     try:
-        log.info("Step 5/9 — LV Debt Filter")
+        log.info("Step 6/12 — LV Debt Filter")
         from modules.debt_bot import run_debt_filter
         p, r = run_debt_filter()
         log.info(f"   ✅ Passed: {p} | Rejected: {r}")
     except Exception as e:
         log.error(f"   ❌ {e}")
 
-    # Step 6 — Address Normalization (optional; needs ANTHROPIC_API_KEY).
+    # Step 7 — Address Normalization (optional; needs ANTHROPIC_API_KEY).
     # No-op when no key is set. Runs before scoring so blank districts resolve
     # to a real rent rate instead of the €6.50/m² default.
     try:
-        log.info("Step 6/9 — Address Normalization")
+        log.info("Step 7/12 — Address Normalization")
         from modules.address_enrichment import run_address_enrichment
         n = run_address_enrichment()
         log.info(f"   ✅ {n} districts resolved")
     except Exception as e:
         log.error(f"   ❌ {e}")
 
-    # Step 7 — Description Enrichment (optional; needs ANTHROPIC_API_KEY).
+    # Step 8 — Description Enrichment (optional; needs ANTHROPIC_API_KEY).
     # No-op when no key is set. Runs before scoring so parking/furnished
     # rent premiums are available to the cashflow engine.
     try:
-        log.info("Step 7/9 — Description Enrichment")
+        log.info("Step 8/12 — Description Enrichment")
         from modules.description_enrichment import run_description_enrichment
         n = run_description_enrichment()
         log.info(f"   ✅ {n} descriptions parsed")
     except Exception as e:
         log.error(f"   ❌ {e}")
 
-    # Step 8 — Cash-Flow Scoring
+    # Step 9 — Cash-Flow Scoring
     try:
-        log.info("Step 8/9 — Cash-Flow Scoring")
+        log.info("Step 9/12 — Cash-Flow Scoring")
         from modules.cashflow_runner import run_scoring
         n = run_scoring()
         log.info(f"   ✅ {n} scored")
     except Exception as e:
         log.error(f"   ❌ {e}")
 
-    # Step 9 — Location IQ
+    # Step 10 — Location IQ
     try:
-        log.info("Step 9/9 — Location IQ")
+        log.info("Step 10/12 — Location IQ")
         from modules.location_iq import run_location_scoring
-        n = run_location_scoring()
+        n = run_location_scoring(limit=200)
         log.info(f"   ✅ {n} scored")
+    except Exception as e:
+        log.error(f"   ❌ {e}")
+
+    # Step 11 — Risk backfill: noise / flood / construction for listings
+    # located before the real risk data existed (bounded per run).
+    try:
+        log.info("Step 11/12 — Risk backfill")
+        from modules.location_iq import run_risk_backfill
+        n = run_risk_backfill(limit=100)
+        log.info(f"   ✅ {n} listings")
+    except Exception as e:
+        log.error(f"   ❌ {e}")
+
+    # Step 12 — Merge the same flat listed on several portals. Last, so it
+    # sees today's prices and LV verdicts.
+    try:
+        log.info("Step 12/12 — Merge portal copies")
+        from database import mark_duplicates
+        n = mark_duplicates()
+        log.info(f"   ✅ {n} listings in multi-portal groups")
     except Exception as e:
         log.error(f"   ❌ {e}")
 

@@ -4,10 +4,11 @@
   satellite view / MAPS buttons read l["lat"] via get_all_active's l.*, and
   location_scores' coordinates are not part of that select).
 - _backfill_listing_coords repairs rows scored before that fix.
-- run_location_scoring refuses to run without a Google key instead of
-  fabricating coordinates (±2.5 km jitter) and random risk flags.
-- check_construction / check_noise return False until real data sources are
-  wired (they used to hash coordinates into random 15%/20% penalties).
+- run_location_scoring never fabricates coordinates (it used to jitter a city
+  centre by ±2.5 km without a Google key): without a key it geocodes through
+  Nominatim, real data either way.
+- check_construction / check_noise never invent a flag (they used to hash
+  coordinates into random 15%/20% penalties): an unreachable source is None.
 """
 
 import os
@@ -101,15 +102,35 @@ class TestCoordSync:
 
 
 class TestLocationGate:
-    def test_skips_without_google_key(self, monkeypatch):
+    def test_without_google_key_geocodes_through_nominatim(self, monkeypatch):
         monkeypatch.setattr(liq, "GOOGLE_API_KEY", "")
-        # Must return before ever querying the DB.
-        monkeypatch.setattr(liq, "get_unscored_location",
-                            lambda: (_ for _ in ()).throw(AssertionError("queried DB")))
-        assert liq.run_location_scoring() == 0
+        monkeypatch.setattr(liq, "SCRAPE_DELAY_SEC", 0)
+        monkeypatch.setattr(liq, "get_unscored_location", lambda: [
+            {"id": "l1", "address_raw": "Miletičova 12, Bratislava",
+             "energy_class": "B", "district": "Ružinov, Bratislava"}])
+        monkeypatch.setattr(liq.risk_data, "geocode_nominatim",
+                            lambda a: (48.1501, 17.1302, "address"))
+        monkeypatch.setattr(liq.risk_data, "assess", lambda lat, lng, p: {
+            "nearest_transit_m": 120.0, "grocery_count": 3, "pharmacy_count": 1,
+            "school_count": 1, "construction": False, "construction_detail": "none",
+            "noise": True, "noise_detail": "primary road", "flood": None,
+            "flood_detail": "flood service unreachable"})
+        stored = []
+        monkeypatch.setattr(liq, "upsert_location", stored.append)
+        assert liq.run_location_scoring() == 1
+        row = stored[0]
+        assert (row["lat"], row["lng"]) == (48.1501, 17.1302)
+        assert row["geo_precision"] == "address"
+        assert row["noise_flag"] == 1 and row["construction_risk"] == 0
+        assert row["flood_zone"] is None          # unknown is not "no flood"
+        assert row["nearest_transit_m"] == 120.0
 
-    def test_no_fabricated_risk_flags(self):
-        # Until real data sources exist, absence of evidence is not risk.
+    def test_unreachable_source_is_unknown_not_a_flag(self, monkeypatch):
+        def boom(*a, **k):
+            raise ConnectionError("offline")
+        monkeypatch.setattr(liq.risk_data.requests, "post", boom)
+        monkeypatch.setattr(liq.risk_data.requests, "get", boom)
         for lat, lng in [(48.15, 17.11), (49.22, 18.74), (48.72, 21.26)]:
-            assert liq.check_construction(lat, lng) is False
-            assert liq.check_noise(lat, lng) is False
+            assert liq.check_construction(lat, lng) is None
+            assert liq.check_noise(lat, lng) is None
+            assert liq.check_flood(lat, lng) is None
