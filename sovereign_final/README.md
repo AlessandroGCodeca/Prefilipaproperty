@@ -25,7 +25,7 @@ CI runs on every PR. To run locally from `sovereign_final/`:
 python3 -m pytest tests/
 ```
 
-Expected: ~397 passing, 1 xfailed (known Slovak-declension limitation).
+Expected: ~482 passing, 1 xfailed (known Slovak-declension limitation).
 
 ---
 
@@ -37,7 +37,7 @@ sovereign_final/
 ├── scheduler.py              ← Daily 06:00 CET automation
 ├── config.py                 ← All 2026 Slovak tax rates
 ├── database.py               ← PostgreSQL + SQLite fallback
-├── enrich_pending.py         ← Backfill listings missing a price or size
+├── enrich_pending.py         ← Re-read listings missing a price, size or district
 ├── repair_prices.py          ← Re-read listings whose price looks borrowed
 ├── diagnose.py               ← Data-quality report (coverage, classification)
 ├── START.bat                 ← Windows one-click launcher
@@ -83,6 +83,9 @@ NEHNUT → BAZOS → TOPREAL → housekeeping → LV DEBT FILTER → CASHFLOW SC
 ```
 
 Housekeeping = deactivate stale listings (>21d unseen) + flag dev projects.
+A nehnutelnosti listing is deactivated sooner, the moment any read of its page
+finds a grid of similar listings where the listing was — that is what a
+removed listing's URL serves.
 Runs automatically every morning at 06:00 CET via scheduler container.
 Or click buttons in sidebar to run manually anytime.
 

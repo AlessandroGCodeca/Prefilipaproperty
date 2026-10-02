@@ -572,7 +572,7 @@ class TestScrapePageOrchestration:
 
     def test_fresh_listing_is_touched_not_upserted(self, two_page_run):
         page, _seen, pages = two_page_run
-        listings, enriched, touch = pages[1]
+        listings, enriched, touch, _gone = pages[1]
         # It is not upserted — a card-text record would overwrite better data.
         assert listings == []
         # It is touched instead, so the staleness sweep leaves it alone...
