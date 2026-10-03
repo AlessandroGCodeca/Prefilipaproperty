@@ -121,6 +121,29 @@ class TestIsExcludedListing:
     def test_missing_text_is_kept(self, texts):
         assert not is_excluded_listing(*texts)
 
+    @pytest.mark.parametrize("title", [
+        "3-izbový byt, Michalovce",                  # "chal" inside a town name
+        "Byt v Michalovciach",
+        "2-izbový byt, Michalská ulica, Staré Mesto",
+        "Novovybudovaný 2-izbový byt, Nitra",        # "budov" inside "vybudovaný"
+        "Rozbudovaný 3-izbový byt",
+    ])
+    def test_stem_inside_a_longer_word_is_kept(self, title):
+        # The keywords are stems that catch every declension, so they have to
+        # start a word — not turn up anywhere in one.
+        assert not is_excluded_listing(title, "https://www.nehnutelnosti.sk/detail/JuXyZ123")
+
+    @pytest.mark.parametrize("text", [
+        "Chata pri jazere",
+        "Predaj chaty, Orava",
+        "Budova na predaj",
+        "Garážové státie",
+        "predaj-garaz-bratislava",       # URL slug: a hyphen is a word boundary
+        "2garaz",                        # a digit is not a letter
+    ])
+    def test_stem_at_the_start_of_a_word_still_excludes(self, text):
+        assert is_excluded_listing(text)
+
 
 class TestDeactivateNonApartments:
     """The retroactive cleanup on both scrapers used to be SQL LIKE clauses,

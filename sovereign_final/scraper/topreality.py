@@ -24,7 +24,7 @@ from database import (
 )
 from scraper._http import get, make_session
 from scraper.nehnutelnosti import _extract_location_from_text
-from scraper.textparse import rooms_from_title, EXCLUDE_KEYWORDS, is_excluded_listing
+from scraper.textparse import rooms_from_title, is_excluded_listing
 from engine.regional_prices import pick_sale_price as _pick_sale_price
 from scraper.geo import pin_from_ld, pin_from_meta
 
@@ -158,7 +158,7 @@ def _extract_listing_links(html: str) -> list[str]:
         path = urlparse(full).path
         if not any(p.search(path) for p in DETAIL_HREF_PATTERNS):
             continue
-        if any(kw in path.lower() for kw in EXCLUDE_KEYWORDS):
+        if is_excluded_listing(path):
             continue
         # Strip query/fragment so the same listing isn't seen twice
         clean = full.split("#")[0].split("?")[0]
