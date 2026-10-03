@@ -9,7 +9,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import requests
 from config import SCRAPER_API_KEY
 
-SCRAPER_API_BASE = "http://api.scraperapi.com"
+# https: the key rides in the query string, and over plain http it (and every
+# URL being scraped) crosses the network in the clear.
+SCRAPER_API_BASE = "https://api.scraperapi.com"
 
 BROWSER_HEADERS = {
     "User-Agent": (
@@ -32,6 +34,15 @@ BROWSER_HEADERS = {
 }
 
 
+def _redacted(exc: requests.RequestException) -> requests.RequestException:
+    """The same kind of exception with the ScraperAPI key masked in its text."""
+    text = str(exc).replace(SCRAPER_API_KEY, "***")
+    try:
+        return type(exc)(text)
+    except Exception:
+        return requests.RequestException(text)
+
+
 def get(url: str, session: requests.Session = None, timeout: int = 20, render: bool = False) -> requests.Response:
     """Make a GET request, routing through ScraperAPI if key is configured.
     render=True uses ScraperAPI's headless Chrome to execute JavaScript (needed for SPAs).
@@ -43,7 +54,12 @@ def get(url: str, session: requests.Session = None, timeout: int = 20, render: b
             f"&url={requests.utils.quote(url, safe='')}"
             + ("&render=true" if render else "")
         )
-        return sess.get(proxy_url, timeout=timeout)
+        try:
+            return sess.get(proxy_url, timeout=timeout)
+        except requests.RequestException as e:
+            # requests puts the full URL — api_key included — in its error
+            # text, and the pipeline logs that text to logs/scheduler.log.
+            raise _redacted(e) from None
     else:
         sess.headers.update(BROWSER_HEADERS)
         return sess.get(url, timeout=timeout)

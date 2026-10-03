@@ -35,7 +35,7 @@ CI runs on every PR. To run locally from `sovereign_final/`:
 python3 -m pytest tests/
 ```
 
-Expected: ~920 passing.
+Expected: ~960 passing (the dashboard smoke test in `tests/test_app_smoke.py` needs `streamlit` installed and is skipped without it).
 
 ---
 

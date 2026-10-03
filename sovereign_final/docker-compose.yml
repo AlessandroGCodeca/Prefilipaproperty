@@ -45,6 +45,10 @@ services:
       - ./logs:/app/logs
       - sovereign_data:/app/data
     command: python scheduler.py
+    # The image's HEALTHCHECK curls the Streamlit port; this container never
+    # serves one, so it would sit "unhealthy" forever.
+    healthcheck:
+      disable: true
 
 volumes:
   sovereign_data:

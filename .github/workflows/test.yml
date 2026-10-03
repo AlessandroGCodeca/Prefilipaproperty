@@ -23,9 +23,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Skip playwright/streamlit/curl_cffi — heavy runtime-only deps not
-          # imported anywhere the unit tests reach.
-          grep -v -E "^(playwright|streamlit|curl_cffi)" requirements.txt > requirements-test.txt
+          # Skip playwright/curl_cffi — heavy runtime-only deps not imported
+          # anywhere the tests reach. streamlit stays: tests/test_app_smoke.py
+          # runs the dashboard script with it.
+          grep -v -E "^(playwright|curl_cffi)" requirements.txt > requirements-test.txt
           pip install -r requirements-test.txt pytest ruff
 
       - name: Lint with ruff

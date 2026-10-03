@@ -1,0 +1,15 @@
+# Keep local state and caches out of the image and the build context.
+# data/ matters most: COPY . . would otherwise bake a local sovereign.db into
+# the image, and Docker seeds a new named volume from it. (To carry a local
+# database into Docker on purpose, see "docker compose cp" in the README.)
+.git
+data/
+logs/
+contracts/
+__pycache__/
+*.pyc
+*.db
+*.db-shm
+*.db-wal
+.pytest_cache/
+.ruff_cache/
