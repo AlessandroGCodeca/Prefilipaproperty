@@ -39,7 +39,10 @@ from database import (
 from kataster_scraper import enrich_parcel, enrich_lv, parcel_at, fold
 from modules.lv_screen import screen_lv, describe
 from engine.regional_prices import kraj_for_district
-from modules.llm_enrichment import is_enabled as claude_enabled, analyze_lv as claude_analyze_lv
+from modules.llm_enrichment import (
+    is_enabled as claude_enabled, analyze_lv as claude_analyze_lv,
+    LV_ANALYSIS_MAX_CHARS,
+)
 
 _VERIFY_HINT = "Enter the flat's own LV number on its card to verify it."
 
@@ -231,8 +234,10 @@ def _decide_lv(api_result: dict) -> dict:
     Runs only on LV text that is the flat's own (`raw`); an UNVERIFIED result
     carries none. When Claude is enabled its read is authoritative in both
     directions — it can REJECT what the screen missed and PASS a lien the
-    screen couldn't attribute to a bank — with one exception: a distress hit
-    (exekúcia, konkurz, súdny spor) stays REJECTED whatever Claude says.
+    screen couldn't attribute to a bank — with two exceptions: a distress hit
+    (exekúcia, konkurz, súdny spor) stays REJECTED whatever Claude says, and so
+    does any hit on an LV longer than Claude was shown (see
+    LV_ANALYSIS_MAX_CHARS). Claude can still REJECT in both cases.
 
     Degrades gracefully — returns the screen's decision untouched when Claude
     is disabled, there's no LV text, the call fails, or it returns an UNKNOWN
@@ -248,6 +253,9 @@ def _decide_lv(api_result: dict) -> dict:
     if not analysis or analysis.get("risk_level") == "UNKNOWN":
         return api_result  # fall back to the screen's decision
 
+    # analyze_lv() truncates; on a longer LV Claude never saw the end, where the
+    # encumbrances are, so its "safe" cannot overrule what the screen found.
+    saw_whole_lv = len(str(raw)) <= LV_ANALYSIS_MAX_CHARS
     flags = analysis.get("flags") or []
     summary = (analysis.get("summary") or "").strip()
     level = analysis.get("risk_level")
@@ -266,12 +274,16 @@ def _decide_lv(api_result: dict) -> dict:
             "detail": note or api_result.get("detail", "LV risk flagged by Claude"),
         })
     elif (api_result.get("status") == "REJECT"
-          and not api_result.get("claude_may_clear", True)):
+          and not (api_result.get("claude_may_clear", True) and saw_whole_lv)):
+        why = ("exekúcia / konkurz / súdny spor still blocks"
+               if not api_result.get("claude_may_clear", True) else
+               f"it only read the first {LV_ANALYSIS_MAX_CHARS} characters of a "
+               f"longer LV and the encumbrances are listed last")
         decided.update({
             "status": "REJECT",
             "flag": api_result.get("flag", "LV_RISK"),
             "detail": f"{api_result.get('detail', '')} (Claude read it as "
-                      f"{level}; exekúcia / konkurz / súdny spor still blocks)",
+                      f"{level}; {why})",
         })
     else:
         decided.update({
