@@ -24,7 +24,7 @@ from database import (
 )
 from scraper._http import get, make_session
 from scraper.nehnutelnosti import _extract_location_from_text
-from scraper.textparse import rooms_from_title, EXCLUDE_KEYWORDS
+from scraper.textparse import rooms_from_title, EXCLUDE_KEYWORDS, is_excluded_listing
 from engine.regional_prices import pick_sale_price as _pick_sale_price
 from scraper.geo import pin_from_ld, pin_from_meta
 
@@ -372,20 +372,25 @@ def _deactivate_non_apartments() -> int:
     URL-level filtering catches most cases at scrape time, but rows already in
     the DB from earlier runs need this cleanup pass. Also zero the price and
     set classification='WHITE' so they drop out of the GREEN/YELLOW lists.
+
+    The match runs in Python through is_excluded_listing rather than as SQL
+    LIKE clauses built from EXCLUDE_KEYWORDS: the keywords are mostly ASCII
+    while titles keep their diacritics ("Predaj garáže"), and SQLite's LOWER()
+    only folds ASCII, so LIKE '%garaz%' never matched those titles.
     """
     from database import get_conn
     conn = get_conn()
-    clauses = " OR ".join(
-        f"LOWER(title) LIKE '%{kw}%' OR LOWER(url) LIKE '%{kw}%'"
-        for kw in EXCLUDE_KEYWORDS
+    rows = conn.execute(
+        "SELECT id, title, url FROM listings "
+        "WHERE source='topreality' AND is_active=1"
+    ).fetchall()
+    ids = [(rid,) for rid, title, url in rows if is_excluded_listing(title, url)]
+    conn.executemany(
+        "UPDATE listings SET is_active=0, price_eur=0, classification='WHITE' "
+        "WHERE id=?",
+        ids,
     )
-    sql = f"""
-        UPDATE listings
-           SET is_active=0, price_eur=0, classification='WHITE'
-         WHERE source='topreality' AND is_active=1
-           AND ({clauses})
-    """
-    n = conn.execute(sql).rowcount
+    n = len(ids)
     conn.commit()
     conn.close()
     if n:

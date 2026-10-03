@@ -50,10 +50,17 @@ EXCLUDE_KEYWORDS = (
 
 def is_excluded_listing(*texts: str) -> bool:
     """True when any of the given strings (title, URL, …) names a
-    non-apartment listing per EXCLUDE_KEYWORDS."""
+    non-apartment listing per EXCLUDE_KEYWORDS.
+
+    Each text is checked raw and with diacritics folded: most keywords are
+    ASCII ("garaz", "kancelar") while titles keep their diacritics ("Predaj
+    garáže", "Kancelárske priestory"), and a nehnutelnosti URL (/detail/{id})
+    carries no ASCII slug to fall back on. The raw check keeps the diacritic
+    keywords ("reštaur", "dražb") matching."""
     for t in texts:
         low = (t or "").lower()
-        if any(kw in low for kw in EXCLUDE_KEYWORDS):
+        folded = strip_diacritics(low)
+        if any(kw in low or kw in folded for kw in EXCLUDE_KEYWORDS):
             return True
     return False
 
