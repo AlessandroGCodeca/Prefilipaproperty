@@ -205,7 +205,13 @@ def run_location_scoring(progress_callback=None, limit: int | None = 200) -> int
         if progress_callback:
             progress_callback(i + 1, len(listings), addr[:50])
 
-        lat, lng, precision = geocode_precise(addr)
+        # The portal's own map pin beats geocoding an address that is often
+        # just "Petržalka, Bratislava". Pins are street-level at best (some
+        # agencies offset them), so that is the precision claimed for them.
+        if row.get("coords_source") == "listing" and row.get("lat") is not None:
+            lat, lng, precision = row["lat"], row["lng"], "street"
+        else:
+            lat, lng, precision = geocode_precise(addr)
         if lat is None:
             print(f"  ⚠️ No geocode: {addr[:50]}")
             continue

@@ -93,3 +93,33 @@ class TestClaudeAuthoritative:
             out = debt_bot._decide_lv(SUBSTRING_PASS)
             assert "status" in out and "detail" in out
             assert out.get("flag", "DEBT_FLAG")  # never empty/missing
+
+
+class TestDistressStaysRejected:
+    """Claude may clear a lien the screen couldn't attribute to a bank, but an
+    exekúcia / konkurz / súdny spor hit on the flat's LV stays REJECTED."""
+
+    SAFE = {"risk_level": "LOW", "is_safe_to_proceed": True,
+            "flags": [], "summary": "Looks fine."}
+
+    def test_claude_cannot_clear_an_exekucia(self, monkeypatch):
+        _patch_claude(monkeypatch, enabled=True, analysis=self.SAFE)
+        screened = debt_bot._parse_lv("Exekúcia EX 55/2021 na podiel vlastníka")
+        out = debt_bot._decide_lv(screened)
+        assert out["status"] == "REJECT"
+        assert out["flag"] == "exekúcia"
+        assert out["llm_risk_level"] == "LOW"     # Claude's read is still recorded
+
+    def test_claude_can_clear_an_unattributed_lien(self, monkeypatch):
+        _patch_claude(monkeypatch, enabled=True, analysis=self.SAFE)
+        screened = debt_bot._parse_lv("Záložné právo zapísané V 12/2010.")
+        assert screened["status"] == "REJECT"
+        assert debt_bot._decide_lv(screened)["status"] == "PASS"
+
+    def test_unverified_never_reaches_claude(self, monkeypatch):
+        def _boom(_t):
+            raise AssertionError("Claude must not read a plot LV")
+        monkeypatch.setattr(debt_bot, "claude_enabled", lambda: True)
+        monkeypatch.setattr(debt_bot, "claude_analyze_lv", _boom)
+        res = {"status": "UNVERIFIED", "detail": "plot only", "raw": "LV text"}
+        assert debt_bot._decide_lv(res) == res

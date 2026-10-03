@@ -20,15 +20,21 @@ What it CAN reliably return (straight from the OData entities):
     utilisation (≈ parcel type), ownership type, municipality
   - LV (list vlastníctva) number + a link to the official HTML report
   - owner names + registered addresses (via parcel participants → subjects)
-  - the raw text of the LV HTML report (sections A/B/C), scanned for the
-    LV_REJECT_FLAGS keywords from config.py
+  - the raw text of the LV HTML report (sections A/B/C), screened entry by
+    entry by modules/lv_screen.py
 
 Best-effort only (verify against the raw LV text / official report):
   - ownership share (podiel): the portal's participant records don't
     documentedly expose it; we extract it opportunistically from participant
     fields when present, else it is None — the authoritative share is in the
     raw LV text ("spoluvlastnícky podiel").
-  - structured encumbrance (ťarchy) records: only keyword hits in raw text.
+  - structured encumbrance (ťarchy) records: only what lv_screen reads out of
+    the raw text.
+  - WHICH LV a flat is on. A parcel's Folio is the LV of the land (the
+    building plot). A flat in a bytový dom is registered with its own entry —
+    often on a different LV, sometimes on one shared by the whole building —
+    so the plot's LV is never a flat's title deed. parcel_at() finds the plot;
+    a flat is verified only through its own LV number (enrich_lv).
 Always verify the title deed via the official portal or a notary before
 committing money.
 
@@ -36,7 +42,8 @@ Entry points:
   enrich_parcel(area, parcel_no)  — main: parcel → details, LV, owners,
                                     LV text + derived risk flags
   enrich_lv(area, lv_no)          — direct LV lookup: LV text + risk flags
-  identify_parcels(lat, lon)      — coordinates → parcel ids (demo/debug)
+  identify_parcels(lat, lon)      — coordinates → parcel ids
+  parcel_at(lat, lon)             — the built-up parcel under a map pin
 
 Demo (real parcel, resolved live from central Bratislava coordinates):
   python3 kataster_scraper.py                      # coordinate demo
@@ -60,10 +67,8 @@ import requests
 sys.path.insert(0, os.path.dirname(__file__))
 
 import database
-from config import (
-    CADASTRAL_DELAY_SEC, CADASTRAL_BACKOFF_MAX,
-    LV_REJECT_FLAGS, LV_BANK_NAMES,
-)
+from config import CADASTRAL_DELAY_SEC, CADASTRAL_BACKOFF_MAX
+from modules.lv_screen import screen_lv, fold
 
 PORTAL_ODATA = "https://kataster.skgeodesy.sk/PortalOData/"
 # Official LV (list vlastníctva) report generator — returns the full title
@@ -238,7 +243,10 @@ def _flatten_parcel(p: dict, register: str) -> dict:
         v = p.get(key)
         return v.get("Name") if isinstance(v, dict) else None
 
+    ku = p.get("CadastralUnit") if isinstance(p.get("CadastralUnit"), dict) else {}
     return {
+        "cadastral_unit":     ({"name": ku.get("Name"), "code": ku.get("Code")}
+                               if ku.get("Code") is not None else None),
         "id":                 p.get("Id"),
         "register":           register,
         "no":                 p.get("No"),
@@ -298,6 +306,47 @@ def identify_parcels(lat: float, lon: float, tolerance: float = 0.000005) -> lis
                if "PARCELS" in r.get("layerName", "")]
     return [{"register": r["layerName"][-1], "parcel_id": r["attributes"]["ID"]}
             for r in results]
+
+
+def _is_building_parcel(parcel: dict) -> bool:
+    """A parcel a block of flats can stand on: a C-register parcel carrying a
+    súpisné číslo (HouseNo) or used for a bytový dom. A pin on a road, a
+    courtyard or a garden lands on a parcel without either."""
+    if parcel.get("register") != "C":
+        return False
+    return bool(parcel.get("house_no")) or "bytov" in fold(parcel.get("utilisation") or "")
+
+
+def parcel_at(lat: float, lon: float) -> dict:
+    """The built-up parcel under a map pin.
+
+    Returns {status: OK | NOT_FOUND | ERROR, detail, parcel}; `parcel` is the
+    flat dict from _flatten_parcel, including its cadastral_unit. E-register
+    parcels (the historical land register, overlapping the C map) are never
+    the building plot, and a pin that lands on no built-up parcel is reported
+    as NOT_FOUND rather than resolved to whatever parcel is there — an
+    approximate pin would otherwise hand back a neighbour's plot.
+    """
+    try:
+        hits = identify_parcels(lat, lon)
+        seen = []
+        for hit in hits:
+            if hit["register"] != "C":
+                continue
+            parcel = get_parcel_by_id(hit["parcel_id"], "C")
+            if _is_building_parcel(parcel):
+                return {"status": "OK", "parcel": parcel,
+                        "detail": f"parcel {parcel['no']}"}
+            seen.append(f"{parcel.get('no')} ({parcel.get('land_use') or '?'})")
+    except CadastreError as e:
+        return {"status": "ERROR", "parcel": None, "detail": str(e)}
+    if not hits:
+        detail = "no parcel at the map pin"
+    else:
+        detail = ("the map pin is not on a built-up parcel"
+                  + (f" — it is on {', '.join(seen)}" if seen else "")
+                  + "; the pin is probably approximate")
+    return {"status": "NOT_FOUND", "parcel": None, "detail": detail}
 
 
 # Participant field names that may carry the ownership share (podiel) as a
@@ -382,17 +431,10 @@ def fetch_lv_text(lv_no, ku_code) -> str:
 
 
 def scan_risk_flags(lv_text: str) -> list:
-    """Keyword scan of raw LV text for the config LV_REJECT_FLAGS. Coarse,
-    document-level (same heuristic as modules/debt_bot._parse_lv): bank_related
-    means SOME bank name appears in the document, not that this specific flag
-    is a bank lien. A human or the Claude LV analysis must make the final call."""
-    low = (lv_text or "").lower()
-    found = []
-    for flag in LV_REJECT_FLAGS:
-        if flag in low:
-            found.append({"flag": flag,
-                          "bank_related": any(b in low for b in LV_BANK_NAMES)})
-    return found
+    """Encumbrances in raw LV text, one per entry (modules/lv_screen).
+    bank_related is True only for a lien whose OWN creditor is a bank."""
+    return [{"flag": e["flag"], "bank_related": not e["blocking"]}
+            for e in screen_lv(lv_text)]
 
 
 # ── cache (avoid re-scraping the same parcel/LV) ─────────────────────────────

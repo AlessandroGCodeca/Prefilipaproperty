@@ -26,6 +26,7 @@ from scraper._http import get, make_session
 from scraper.nehnutelnosti import _extract_location_from_text
 from scraper.textparse import rooms_from_title, EXCLUDE_KEYWORDS
 from engine.regional_prices import pick_sale_price as _pick_sale_price
+from scraper.geo import pin_from_ld, pin_from_meta
 
 BASE = "https://www.topreality.sk"
 
@@ -225,6 +226,8 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
                     ld_data["size"] = float(fs["value"])
                 except Exception:
                     pass
+            if not ld_data.get("pin"):
+                ld_data["pin"] = pin_from_ld(b)
 
     # Size and address first: both feed the price sanity check below, which
     # needs a €/m² to judge a candidate against its region.
@@ -260,6 +263,9 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
         # Listing has no usable data — likely an archived page or category link
         return None
 
+    # The listing's own map pin, which the LV filter finds the building by.
+    pin = ld_data.get("pin") or pin_from_meta(html)
+
     uid = hashlib.md5(url.encode()).hexdigest()
     return {
         "id": uid, "source": "topreality", "url": url, "url_hash": uid,
@@ -273,6 +279,7 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
         "primary_image_url": img, "image_urls": img,
         "classification": "PENDING", "lv_status": "PENDING",
         "scraped_at": now, "last_seen_at": now,
+        "lat": pin[0] if pin else None, "lng": pin[1] if pin else None,
     }
 
 

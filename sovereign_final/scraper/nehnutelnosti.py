@@ -22,6 +22,8 @@ from database import (
     touch_listings, deactivate_listings,
 )
 from scraper.textparse import EXCLUDE_KEYWORDS, is_excluded_listing
+from scraper.geo import pin_from_item, pin_from_ld, pin_from_meta
+from scraper.slovak_cases import locative_words
 
 BASE        = "https://www.nehnutelnosti.sk"
 SEARCH_PAGE = BASE + "/vysledky/byty/slovensko/predaj?page={page}"
@@ -496,6 +498,10 @@ def _parse_api_item(item: dict, now: str, require_url_field: bool = False) -> di
             addr = addr or slug_data.get("address", "")
             district = district or slug_data.get("district", "")
 
+        # The item's own map pin, when it ships one — the LV filter finds the
+        # building by it (see scraper/geo.py).
+        pin = pin_from_item(item)
+
         uid = hashlib.md5(canon.encode()).hexdigest()
         return {
             "id": uid, "source": "nehnutelnosti", "url": canon, "url_hash": uid,
@@ -507,6 +513,7 @@ def _parse_api_item(item: dict, now: str, require_url_field: bool = False) -> di
             "primary_image_url": img, "image_urls": img,
             "classification": "PENDING", "lv_status": "PENDING",
             "scraped_at": now, "last_seen_at": now,
+            "lat": pin[0] if pin else None, "lng": pin[1] if pin else None,
         }
     except Exception as e:
         print(f"    ⚠️  parse error: {e}", flush=True)
@@ -697,6 +704,11 @@ def _merge_ld(data: dict, ld) -> None:
     elif isinstance(addr, str) and not data.get("address"):
         data["address"] = addr
 
+    if not data.get("pin"):
+        pin = pin_from_ld(ld)
+        if pin:
+            data["pin"] = pin
+
     fs = ld.get("floorSize")
     if isinstance(fs, dict):
         v = fs.get("value")
@@ -778,6 +790,11 @@ def _scrape_detail_page(page, url: str) -> dict:
             if m:
                 t = re.sub(r'\s*[\|\-]\s*[Nn]ehnute.*$', '', m.group(1)).strip()
                 data["title"] = t[:200]
+
+    if not data.get("pin"):
+        pin = pin_from_meta(html)
+        if pin:
+            data["pin"] = pin
 
     # Description — JSON-LD carries the full free text when present; fall back
     # to the meta description (truncated, but enough for feature extraction).
@@ -938,13 +955,39 @@ _GENERIC_CITY_PARTS = {"Staré Mesto", "Nové Mesto"}
 _MENTIONS_BRATISLAVA = re.compile(r"(?<!\w)bratislav", re.IGNORECASE)
 
 
+def _words_pattern(words) -> str:
+    """Words (each a tuple of alternative forms) joined by any whitespace, with
+    "nad" allowed as "n." — "Nové Mesto n. Váhom" has to read as the town, or
+    its "Nové Mesto" reads as Bratislava's."""
+    parts = []
+    for forms in words:
+        alts = "|".join(re.escape(f) for f in forms)
+        parts.append(f"(?:{alts})" if len(forms) > 1 else alts)
+    body = r"\s+".join(parts)
+    return body.replace(r"\s+nad\s+", r"\s+n(?:ad\s+|\.\s*)")
+
+
+# Where a locative place name counts as the flat's location: after "v"/"vo"
+# ("byt v Nitre"), or as the part after a declined city ("v Bratislave -
+# Ružinove"). Without the preposition a declined name is usually where the
+# flat is NOT ("20 min do Bratislavy", "pri Trnave") — see scraper/slovak_cases.
+_LOCATIVE_LEAD = r"(?:vo?\s+|(?:bratislave|košiciach)\s*[-–]\s*)"
+
+
 def _place_pattern(name: str) -> re.Pattern:
-    """Whole-word, case-insensitive pattern for a place name. Words may be split
-    by any whitespace, and "nad" may be shortened to "n." — "Nové Mesto n. Váhom"
-    has to read as the town, or its "Nové Mesto" reads as Bratislava's."""
-    body = r"\s+".join(re.escape(w) for w in name.split())
-    body = body.replace(r"\s+nad\s+", r"\s+n(?:ad\s+|\.\s*)")
-    return re.compile(r"(?<!\w)" + body + r"(?!\w)", re.IGNORECASE)
+    """Whole-word, case-insensitive pattern for a place name: its nominative
+    anywhere, or its locative after "v"/"vo". _place_span() gives the span of
+    the name itself, without the preposition."""
+    nominative = _words_pattern((w,) for w in name.split())
+    loc = _words_pattern(locative_words(name))
+    return re.compile(
+        r"(?<!\w)(?:" + _LOCATIVE_LEAD + r"(?P<loc>" + loc + r")"
+        r"|(?P<nom>" + nominative + r"))(?!\w)",
+        re.IGNORECASE)
+
+
+def _place_span(m: re.Match) -> tuple[int, int]:
+    return m.span("loc") if m.group("loc") is not None else m.span("nom")
 
 
 def _build_location_patterns() -> list[tuple[re.Pattern, str, str]]:
@@ -991,6 +1034,9 @@ _TEXT_LOCATION_PATTERNS = _build_location_patterns()
 def _extract_location_from_text(text: str) -> str:
     """Find the known Slovak city/suburb in rendered detail-page text.
 
+    Names match in the nominative and, after "v"/"vo", in the locative
+    ("v Nitre", "v Košiciach" — see scraper/slovak_cases).
+
     A suburb wins over a city, but a name that only occurs inside a longer
     known name is part of that name, not a place of its own: the "Nové Mesto"
     in "Nové Mesto nad Váhom" or "Kysucké Nové Mesto" is not Bratislava's.
@@ -1004,7 +1050,7 @@ def _extract_location_from_text(text: str) -> str:
         return ""
     snippet = text[:4000]
     hits = [
-        (m.start(), m.end(), rank)
+        (*_place_span(m), rank)
         for rank, (pattern, _, _) in enumerate(_TEXT_LOCATION_PATTERNS)
         for m in pattern.finditer(snippet)
     ]
@@ -1049,6 +1095,8 @@ def _apply_detail(listing: dict, detail: dict) -> None:
     if detail.get("image"):
         listing["primary_image_url"] = detail["image"]
         listing["image_urls"] = detail["image"]
+    if detail.get("pin"):
+        listing["lat"], listing["lng"] = detail["pin"]
 
     # Slug fallback — covers "PREMIUM"-titled paid listings and JSON-LD blobs
     # that omit address. Always runs but only fills empty fields. The stored

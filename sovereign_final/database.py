@@ -1,32 +1,28 @@
 """
 database.py — Sovereign Investor Dashboard
-Handles both PostgreSQL (Docker) and SQLite (local fallback).
+SQLite storage (data/sovereign.db), locally and in Docker alike.
+
+There used to be a PostgreSQL mode, selected whenever DATABASE_URL was set.
+It never worked: every query here is SQLite dialect (? and :name placeholders,
+INSERT OR REPLACE, PRAGMA, conn.execute on the connection, which psycopg2
+connections don't have), and no Postgres schema file existed. Copying
+.env.example to .env set DATABASE_URL and broke even local runs. DATABASE_URL
+is now ignored.
 """
 
 import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from config import DATABASE_URL, USE_SQLITE_FALLBACK, SQLITE_PATH
+from config import SQLITE_PATH
 
 
 # ── Connection ────────────────────────────────────────────────────────────────
 def get_conn():
-    if USE_SQLITE_FALLBACK:
-        os.makedirs("data", exist_ok=True)
-        conn = sqlite3.connect(SQLITE_PATH)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
-    else:
-        import psycopg2
-        import psycopg2.extras
-        conn = psycopg2.connect(DATABASE_URL)
-        conn.cursor_factory = psycopg2.extras.RealDictCursor
-        return conn
-
-
-def is_postgres():
-    return not USE_SQLITE_FALLBACK
+    os.makedirs(os.path.dirname(SQLITE_PATH) or ".", exist_ok=True)
+    conn = sqlite3.connect(SQLITE_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
 
 
 # ── Schema Init ───────────────────────────────────────────────────────────────
@@ -69,6 +65,12 @@ CREATE TABLE IF NOT EXISTS listings (
     addr_normalized   INTEGER DEFAULT 0,
     lv_risk_level     TEXT,
     lv_summary        TEXT,
+    coords_source     TEXT,
+    cadastral_unit_code TEXT,
+    plot_lv_number    TEXT,
+    lv_number         TEXT,
+    lv_detail         TEXT,
+    lv_checked_at     TEXT,
     notes             TEXT
 );
 
@@ -99,6 +101,8 @@ CREATE TABLE IF NOT EXISTS cashflow_scores (
     principal_paydown_monthly REAL,
     total_return_annual   REAL,
     total_roi             REAL,
+    regional_median_m2    REAL,
+    market_discount       REAL,
     acquisition_costs     REAL,
     total_cash_invested   REAL,
     optimal_structure     TEXT,
@@ -112,11 +116,8 @@ CREATE TABLE IF NOT EXISTS cashflow_scores (
     tax_year              INTEGER DEFAULT 2026,
     max_price_green       REAL,
     max_price_yellow      REAL,
-    market_value_eur      REAL,
-    discount_to_market    REAL,
     stress_surplus_sro    REAL,
     stress_ratio_sro      REAL,
-    stress_classification TEXT,
     irr_sro               REAL,
     irr_personal          REAL,
     rent_source           TEXT
@@ -287,8 +288,6 @@ def detect_dev_project(url: str, title: str) -> int:
 def _ensure_dev_project_column(conn):
     """Add is_dev_project column to existing DBs that pre-date this column.
     Safe no-op when the column already exists."""
-    if not USE_SQLITE_FALLBACK:
-        return
     cols = [row[1] for row in conn.execute("PRAGMA table_info(listings)")]
     if "is_dev_project" not in cols:
         conn.execute("ALTER TABLE listings ADD COLUMN is_dev_project INTEGER DEFAULT 0")
@@ -332,14 +331,13 @@ _CASHFLOW_NEW_COLUMNS = {
     "total_roi":                 "REAL",
     "acquisition_costs":         "REAL",
     "total_cash_invested":       "REAL",
+    "regional_median_m2":        "REAL",
+    "market_discount":           "REAL",
     # Deal extras (engine.financial.deal_extras) and the rent's provenance.
     "max_price_green":           "REAL",
     "max_price_yellow":          "REAL",
-    "market_value_eur":          "REAL",
-    "discount_to_market":        "REAL",
     "stress_surplus_sro":        "REAL",
     "stress_ratio_sro":          "REAL",
-    "stress_classification":     "TEXT",
     "irr_sro":                   "REAL",
     "irr_personal":              "REAL",
     "rent_source":               "TEXT",
@@ -347,13 +345,25 @@ _CASHFLOW_NEW_COLUMNS = {
 
 
 def _ensure_cashflow_columns(conn):
-    """Add P1 cashflow_scores columns to pre-existing DBs. No-op when present."""
-    if not USE_SQLITE_FALLBACK:
-        return
+    """Add P1 cashflow_scores columns to pre-existing DBs. No-op when present.
+
+    A DB that predates market_discount holds classes from the old
+    self-funding-ratio rule (see config.py, Classification Thresholds), so its
+    scores are dropped once, when the column arrives; the next 💰 CASHFLOW
+    SCORE run reclassifies every listing against the regional median."""
     cols = [row[1] for row in conn.execute("PRAGMA table_info(cashflow_scores)")]
     for name, sqltype in _CASHFLOW_NEW_COLUMNS.items():
         if name not in cols:
             conn.execute(f"ALTER TABLE cashflow_scores ADD COLUMN {name} {sqltype}")
+    if cols and "market_discount" not in cols:
+        n = conn.execute("DELETE FROM cashflow_scores").rowcount
+        conn.execute(
+            "UPDATE listings SET classification='PENDING' "
+            "WHERE classification IN ('GREEN','YELLOW','WHITE')")
+        if n:
+            print(f"♻️  Cleared {n} cashflow scores classed by the old self-funding "
+                  f"rule — run 💰 CASHFLOW SCORE to reclassify against the "
+                  f"regional median.")
     conn.commit()
 
 
@@ -369,6 +379,15 @@ def _ensure_cashflow_columns(conn):
 #   - detail_enriched_at records when a scraper last opened the listing's own
 #     detail page. Scrapers read it back via get_fresh_detail_urls() to skip
 #     re-opening pages they already have full data for (see that docstring).
+#   - coords_source says where lat/lng came from: 'listing' (the portal's own
+#     map pin, which modules/debt_bot resolves to a building parcel) or
+#     'geocode' (Google's guess from the address — a street or district
+#     centroid, never good enough to pick a parcel).
+#   - cadastral_unit_code / plot_lv_number: the katastrálne územie code and
+#     the LV of the building plot found under the map pin. The plot's LV is
+#     NOT the flat's title deed; lv_number is the flat's own LV, entered by
+#     hand, and the only thing that can verify a flat.
+#   - lv_detail / lv_checked_at: the last LV check's reason and time.
 _ENRICHMENT_COLUMNS = {
     "has_parking":        "INTEGER",
     "has_balcony":        "INTEGER",
@@ -379,6 +398,12 @@ _ENRICHMENT_COLUMNS = {
     "lv_risk_level":      "TEXT",
     "lv_summary":         "TEXT",
     "detail_enriched_at": "TEXT",
+    "coords_source":      "TEXT",
+    "cadastral_unit_code": "TEXT",
+    "plot_lv_number":     "TEXT",
+    "lv_number":          "TEXT",
+    "lv_detail":          "TEXT",
+    "lv_checked_at":      "TEXT",
     # Further description facts (modules/description_enrichment). floor
     # already exists and is filled only when the scraper left it empty.
     "building_floors":    "INTEGER",
@@ -394,8 +419,6 @@ _ENRICHMENT_COLUMNS = {
 
 def _ensure_enrichment_columns(conn):
     """Add optional LLM-enrichment columns to pre-existing DBs. No-op when present."""
-    if not USE_SQLITE_FALLBACK:
-        return
     cols = [row[1] for row in conn.execute("PRAGMA table_info(listings)")]
     for name, sqltype in _ENRICHMENT_COLUMNS.items():
         if name not in cols:
@@ -415,8 +438,6 @@ _LOCATION_NEW_COLUMNS = {
 
 
 def _ensure_location_columns(conn):
-    if not USE_SQLITE_FALLBACK:
-        return
     cols = [row[1] for row in conn.execute("PRAGMA table_info(location_scores)")]
     for name, sqltype in _LOCATION_NEW_COLUMNS.items():
         if name not in cols:
@@ -425,8 +446,6 @@ def _ensure_location_columns(conn):
 
 
 def _ensure_rent_comps_columns(conn):
-    if not USE_SQLITE_FALLBACK:
-        return
     cols = [row[1] for row in conn.execute("PRAGMA table_info(rent_comps)")]
     if "eur_per_m2" not in cols:
         conn.execute("ALTER TABLE rent_comps ADD COLUMN eur_per_m2 REAL")
@@ -437,11 +456,14 @@ def _backfill_listing_coords(conn):
     """One-time repair: copy lat/lng from existing location_scores rows onto
     their listings. upsert_location now mirrors coordinates as it writes, but
     rows scored before that fix left listings.lat/lng NULL — and the satellite
-    view / MAPS buttons read the listing columns. Idempotent (fills NULLs only)."""
+    view / MAPS buttons read the listing columns. Idempotent (fills NULLs only).
+    Those coordinates were geocoded from the address, so they're marked so."""
+    _ensure_enrichment_columns(conn)
     conn.execute("""
         UPDATE listings SET
             lat = (SELECT lc.lat FROM location_scores lc WHERE lc.listing_id = listings.id),
-            lng = (SELECT lc.lng FROM location_scores lc WHERE lc.listing_id = listings.id)
+            lng = (SELECT lc.lng FROM location_scores lc WHERE lc.listing_id = listings.id),
+            coords_source = 'geocode'
         WHERE lat IS NULL
           AND EXISTS (SELECT 1 FROM location_scores lc
                       WHERE lc.listing_id = listings.id AND lc.lat IS NOT NULL)
@@ -449,25 +471,40 @@ def _backfill_listing_coords(conn):
     conn.commit()
 
 
+def _mark_legacy_lv_passes_unverified(conn) -> int:
+    """Relabel LV 'PASS' rows written before UNVERIFIED existed.
+
+    The debt filter used to store PASS for every listing it could not check —
+    which was every listing, since none carried parcel data — and the
+    dashboard showed each as ✅ CLEAN. A PASS now always comes with an
+    lv_checked_at stamp, so an unstamped one is one of those. Idempotent.
+    """
+    n = conn.execute(
+        "UPDATE listings SET lv_status='UNVERIFIED', "
+        "lv_detail=COALESCE(lv_detail, 'No title deed was read (checked before "
+        "parcel lookup existed).') "
+        "WHERE lv_status IN ('PASS', 'CLEAN') AND lv_checked_at IS NULL"
+    ).rowcount
+    conn.commit()
+    return n
+
+
 def init_db():
     conn = get_conn()
-    if USE_SQLITE_FALLBACK:
-        conn.executescript(SQLITE_SCHEMA)
-        _ensure_dev_project_column(conn)
-        _ensure_cashflow_columns(conn)
-        _ensure_enrichment_columns(conn)
-        _ensure_location_columns(conn)
-        _ensure_rent_comps_columns(conn)
-        _backfill_listing_coords(conn)
-        # rent_comps used to be seeded with hand-typed 'baseline_2026' rows
-        # (invented sample counts, never read). The table now holds only live
-        # comps built from scraped rentals (engine/rent_comps), so the seed
-        # rows go — anything in it is real.
-        conn.execute("DELETE FROM rent_comps WHERE source='baseline_2026'")
-        conn.commit()
-    else:
-        # PostgreSQL — schema already applied via docker-entrypoint
-        pass
+    conn.executescript(SQLITE_SCHEMA)
+    _ensure_dev_project_column(conn)
+    _ensure_cashflow_columns(conn)
+    _ensure_enrichment_columns(conn)
+    _ensure_location_columns(conn)
+    _ensure_rent_comps_columns(conn)
+    _backfill_listing_coords(conn)
+    _mark_legacy_lv_passes_unverified(conn)
+    # rent_comps used to be seeded with hand-typed 'baseline_2026' rows
+    # (invented sample counts, never read). The table now holds only live
+    # comps built from scraped rentals (engine/rent_comps), so the seed rows
+    # go — anything in it is real.
+    conn.execute("DELETE FROM rent_comps WHERE source='baseline_2026'")
+    conn.commit()
     conn.close()
     print("✅ Database ready.")
 
@@ -485,6 +522,7 @@ def get_all_active():
                c.noi_monthly,          c.cap_rate,
                c.principal_paydown_monthly, c.total_return_annual,
                c.total_roi,            c.total_cash_invested,
+               c.market_discount,      c.regional_median_m2,
                c.estimated_rent_eur,   c.total_costs_personal,
                c.total_costs_sro,      c.annual_sro_saving,
                c.sro_break_even_months,
@@ -496,9 +534,7 @@ def get_all_active():
                c.acquisition_costs,
                c.mortgage_rate_used,   c.ltv_used, c.loan_term_years,
                c.max_price_green,      c.max_price_yellow,
-               c.market_value_eur,     c.discount_to_market,
                c.stress_surplus_sro,   c.stress_ratio_sro,
-               c.stress_classification,
                c.irr_sro,              c.irr_personal, c.rent_source,
                lc.location_score,      lc.location_tier,
                lc.nearest_transit_m,   lc.walkability_score,
@@ -511,7 +547,7 @@ def get_all_active():
         LEFT JOIN cashflow_scores c  ON l.id = c.listing_id
         LEFT JOIN location_scores lc ON l.id = lc.listing_id
         WHERE l.is_active = 1 AND l.lv_status != 'REJECTED'
-        ORDER BY c.surplus_sro DESC NULLS LAST
+        ORDER BY c.market_discount DESC NULLS LAST
     """).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -997,6 +1033,24 @@ def fill_blank_district(conn, listing_id: str, district: str,
     return n > 0
 
 
+# A pin that moves further than this (~20–25 m) points at another building.
+_PIN_MOVE_DEG = 0.0002
+
+
+# The row upsert_listing finds for a listing it is about to write. _pin_moved
+# reads lat/lng/coords_source at 2–4; the price history reads 5–6.
+_EXISTING_COLS = "id, district, lat, lng, coords_source, price_eur, scraped_at"
+
+
+def _pin_moved(existing, lat, lng) -> bool:
+    """`existing` is upsert_listing's _EXISTING_COLS row."""
+    old_lat, old_lng, source = existing[2], existing[3], existing[4]
+    if source != "listing" or old_lat is None:
+        return True
+    return (abs(old_lat - lat) > _PIN_MOVE_DEG
+            or abs(old_lng - lng) > _PIN_MOVE_DEG)
+
+
 # ── Price history ─────────────────────────────────────────────────────────────
 def _ensure_price_history(conn):
     """price_history on a DB that hasn't been through init_db since it was
@@ -1143,19 +1197,28 @@ def days_on_market(scraped_at: str | None, until: str | None = None) -> int | No
 
 
 def upsert_listing(data: dict):
+    """Insert or refresh a scraped listing. `lat`/`lng`, when present, are the
+    portal's own map pin; they outrank geocoded coordinates, and a new or
+    moved pin sends an UNVERIFIED LV check back to PENDING so the debt filter
+    looks up the building parcel under it."""
+    lat, lng = data.get("lat"), data.get("lng")
+    has_pin = lat is not None and lng is not None
+    data = {**data, "lat": lat if has_pin else None, "lng": lng if has_pin else None,
+            "coords_source": "listing" if has_pin else None}
     conn = get_conn()
     try:
+        _ensure_enrichment_columns(conn)
         _ensure_price_history(conn)
         # If a row already exists with this URL (e.g. a prior slug-URL variant
         # that _dedupe_canonical_urls rewrote to the canonical form), reuse its
         # id so ON CONFLICT(id) fires instead of hitting the url UNIQUE constraint.
         existing = conn.execute(
-            "SELECT id, district, price_eur, scraped_at FROM listings WHERE url=?",
+            f"SELECT {_EXISTING_COLS} FROM listings WHERE url=?",
             (data["url"],)
         ).fetchone()
         if existing is None:
             existing = conn.execute(
-                "SELECT id, district, price_eur, scraped_at FROM listings WHERE id=?",
+                f"SELECT {_EXISTING_COLS} FROM listings WHERE id=?",
                 (data["id"],)
             ).fetchone()
         if existing and existing[0] != data["id"]:
@@ -1169,12 +1232,12 @@ def upsert_listing(data: dict):
             (id, source, url, url_hash, title, description, price_eur, size_m2,
              rooms, floor, year_built, energy_class, address_raw, district, city,
              primary_image_url, image_urls, classification, lv_status, scraped_at,
-             last_seen_at, is_dev_project)
+             last_seen_at, is_dev_project, lat, lng, coords_source)
             VALUES
             (:id,:source,:url,:url_hash,:title,:description,:price_eur,:size_m2,
              :rooms,:floor,:year_built,:energy_class,:address_raw,:district,:city,
              :primary_image_url,:image_urls,:classification,:lv_status,:scraped_at,
-             :last_seen_at,:is_dev_project)
+             :last_seen_at,:is_dev_project,:lat,:lng,:coords_source)
             ON CONFLICT(id) DO UPDATE SET
                 last_seen_at=excluded.last_seen_at,
                 title=CASE WHEN excluded.title != '' THEN excluded.title ELSE title END,
@@ -1194,8 +1257,23 @@ def upsert_listing(data: dict):
                                        THEN excluded.primary_image_url ELSE primary_image_url END,
                 image_urls=CASE WHEN excluded.image_urls != '' THEN excluded.image_urls ELSE image_urls END,
                 is_active=1,
-                is_dev_project=CASE WHEN excluded.is_dev_project=1 THEN 1 ELSE is_dev_project END
+                is_dev_project=CASE WHEN excluded.is_dev_project=1 THEN 1 ELSE is_dev_project END,
+                lat=CASE WHEN excluded.lat IS NOT NULL THEN excluded.lat ELSE lat END,
+                lng=CASE WHEN excluded.lat IS NOT NULL THEN excluded.lng ELSE lng END,
+                coords_source=CASE WHEN excluded.lat IS NOT NULL THEN 'listing'
+                                   ELSE coords_source END
         """, data)
+        # A new or moved pin: the parcel found under the old one (if any) is
+        # stale, and an UNVERIFIED check can now get further.
+        if existing and has_pin and _pin_moved(existing, lat, lng):
+            conn.execute(
+                "UPDATE listings SET cadastral_area=NULL, cadastral_number=NULL, "
+                "cadastral_unit_code=NULL, plot_lv_number=NULL "
+                "WHERE id=? AND (lv_number IS NULL OR lv_number='')",
+                (data["id"],))
+            conn.execute(
+                "UPDATE listings SET lv_status='PENDING' "
+                "WHERE id=? AND lv_status='UNVERIFIED'", (data["id"],))
         # A district arriving for a row that had none: its score is stale.
         if (existing and not (existing[1] or "").strip()
                 and (data.get("district") or "").strip()):
@@ -1203,12 +1281,12 @@ def upsert_listing(data: dict):
         # A new asking price: log it, and re-score at the new price (a cut
         # can turn a WHITE into a YELLOW — that is the alert worth having).
         new_price = data.get("price_eur") or 0
-        old_price = (existing[2] or 0) if existing else 0
+        old_price = (existing[5] or 0) if existing else 0
         if new_price > 0 and new_price != old_price:
             if existing and old_price > 0 and not _has_price_history(conn, data["id"]):
                 # Rows from before price history existed: the price being
                 # replaced is the first one we ever saw, as of first sight.
-                _record_price(conn, data["id"], old_price, existing[3])
+                _record_price(conn, data["id"], old_price, existing[6])
             _record_price(conn, data["id"], new_price,
                           data.get("last_seen_at") or data.get("scraped_at"))
             if existing and old_price > 0:
@@ -1234,12 +1312,13 @@ def upsert_cashflow(data: dict):
          noi_monthly, cap_rate,
          cash_on_cash, net_rental_yield, gross_yield,
          principal_paydown_monthly, total_return_annual, total_roi,
+         regional_median_m2, market_discount,
          acquisition_costs, total_cash_invested,
          optimal_structure, classification,
          annual_sro_saving, sro_break_even_months,
          scored_at, mortgage_rate_used, ltv_used, loan_term_years,
-         max_price_green, max_price_yellow, market_value_eur, discount_to_market,
-         stress_surplus_sro, stress_ratio_sro, stress_classification,
+         max_price_green, max_price_yellow,
+         stress_surplus_sro, stress_ratio_sro,
          irr_sro, irr_personal, rent_source)
         VALUES
         (:listing_id,:estimated_rent_eur,:mortgage_monthly,:hoa_monthly,
@@ -1251,12 +1330,13 @@ def upsert_cashflow(data: dict):
          :noi_monthly,:cap_rate,
          :cash_on_cash,:net_rental_yield,:gross_yield,
          :principal_paydown_monthly,:total_return_annual,:total_roi,
+         :regional_median_m2,:market_discount,
          :acquisition_costs,:total_cash_invested,
          :optimal_structure,:classification,
          :annual_sro_saving,:sro_break_even_months,
          :scored_at,:mortgage_rate_used,:ltv_used,:loan_term_years,
-         :max_price_green,:max_price_yellow,:market_value_eur,:discount_to_market,
-         :stress_surplus_sro,:stress_ratio_sro,:stress_classification,
+         :max_price_green,:max_price_yellow,
+         :stress_surplus_sro,:stress_ratio_sro,
          :irr_sro,:irr_personal,:rent_source)
     """, {**dict.fromkeys(_CASHFLOW_NEW_COLUMNS), **data})
     conn.execute(
@@ -1290,10 +1370,14 @@ def upsert_location(data: dict):
     """, {**dict.fromkeys(_LOCATION_NEW_COLUMNS), **data})
     # Mirror coordinates onto the listing row — the dashboard (satellite view,
     # MAPS buttons) reads l["lat"]/l["lng"] via get_all_active's l.*, and
-    # location_scores' lat/lng are not part of that select.
+    # location_scores' lat/lng are not part of that select. A portal's own pin
+    # is never overwritten by a geocode.
     if data.get("lat") is not None and data.get("lng") is not None:
+        _ensure_enrichment_columns(conn)
         conn.execute(
-            "UPDATE listings SET lat=:lat, lng=:lng WHERE id=:listing_id", data)
+            "UPDATE listings SET lat=:lat, lng=:lng, coords_source='geocode' "
+            "WHERE id=:listing_id "
+            "  AND (coords_source IS NULL OR coords_source != 'listing')", data)
     conn.commit()
     conn.close()
 
@@ -1338,9 +1422,16 @@ def update_location_risk(listing_id: str, risk: dict) -> None:
 
 
 def set_lv_status(listing_id: str, status: str, reason: str = "", detail: str = "", module: str = "debt_bot"):
+    """Record an LV check. status: PASS (the flat's own LV was read and is
+    clean), UNVERIFIED (no title deed of this flat was read — lv_detail says
+    why), or REJECTED (the flat's LV carries a blocking encumbrance)."""
     import uuid
     conn = get_conn()
-    conn.execute("UPDATE listings SET lv_status=? WHERE id=?", (status, listing_id))
+    _ensure_enrichment_columns(conn)
+    conn.execute(
+        "UPDATE listings SET lv_status=?, lv_detail=?, lv_checked_at=? WHERE id=?",
+        (status, (detail or "")[:1000] or None,
+         datetime.now(timezone.utc).isoformat(), listing_id))
     if status == "REJECTED":
         conn.execute("""
             INSERT INTO rejections_log (id, listing_id, reason, detail, module, flagged_at)
@@ -1354,7 +1445,7 @@ def set_lv_status(listing_id: str, status: str, reason: str = "", detail: str = 
 def reset_demo_rejections() -> int:
     """Undo rejections fabricated by the old demo LV mode.
 
-    Before the fix in modules/debt_bot.query_lv_api, listings without a
+    Before modules/debt_bot stopped inventing verdicts, listings without a
     cadastral parcel number (i.e. all of them) were REJECTED with invented
     "[DEMO] ..." liens — every one sharing the same hash seed — which hid the
     entire dashboard. Flip those rows back to PENDING and drop their fabricated
@@ -1397,14 +1488,88 @@ def set_lv_analysis(listing_id: str, risk_level: str, summary: str = ""):
         conn.close()
 
 
-def get_pending_lv():
+_LV_ROW_COLUMNS = """
+    id, address_raw, district, lat, lng, coords_source,
+    cadastral_area, cadastral_number, cadastral_unit_code,
+    plot_lv_number, lv_number
+"""
+
+
+def get_pending_lv(recheck_days: int = 7):
+    """Listings the LV debt filter should (re)check: every PENDING one, and an
+    UNVERIFIED one that has something new to check with — a portal map pin or
+    a flat LV number — once its last check is `recheck_days` old (a portal
+    outage or a pin off the building shouldn't park it forever)."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=recheck_days)).isoformat()
     conn = get_conn()
-    rows = conn.execute("""
-        SELECT id, cadastral_number, cadastral_area, address_raw
-        FROM listings WHERE lv_status='PENDING' AND is_active=1
-    """).fetchall()
-    conn.close()
+    try:
+        _ensure_enrichment_columns(conn)
+        rows = conn.execute(f"""
+            SELECT {_LV_ROW_COLUMNS}
+            FROM listings
+            WHERE is_active=1 AND (
+                lv_status='PENDING'
+                OR (lv_status='UNVERIFIED'
+                    AND (coords_source='listing' OR COALESCE(lv_number, '') != '')
+                    AND (lv_checked_at IS NULL OR lv_checked_at < ?))
+            )
+        """, (cutoff,)).fetchall()
+    finally:
+        conn.close()
     return [dict(r) for r in rows]
+
+
+def get_lv_row(listing_id: str) -> dict | None:
+    """One listing's LV inputs, shaped like a get_pending_lv() row."""
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        row = conn.execute(
+            f"SELECT {_LV_ROW_COLUMNS} FROM listings WHERE id=?", (listing_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    return dict(row) if row else None
+
+
+def set_parcel_data(listing_id: str, cadastral_area: str, parcel_no: str,
+                    ku_code=None, plot_lv=None):
+    """Store the building parcel found under a listing's map pin."""
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        conn.execute(
+            "UPDATE listings SET cadastral_area=?, cadastral_number=?, "
+            "cadastral_unit_code=?, plot_lv_number=? WHERE id=?",
+            (cadastral_area, parcel_no,
+             str(ku_code) if ku_code is not None else None,
+             str(plot_lv) if plot_lv is not None else None, listing_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_flat_lv(listing_id: str, lv_number: str, cadastral_area: str = ""):
+    """Store the flat's own LV number — typed in from the seller's papers or
+    the agent; blank clears it. A katastrálne územie that differs from the
+    stored one replaces it, and drops the plot data found under the map pin
+    (its parcel number belongs to the old unit; the next check re-finds it)."""
+    lv_number = (lv_number or "").strip() or None
+    area = (cadastral_area or "").strip()
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        conn.execute("UPDATE listings SET lv_number=? WHERE id=?",
+                     (lv_number, listing_id))
+        if area:
+            conn.execute(
+                "UPDATE listings SET cadastral_area=?, cadastral_unit_code=NULL, "
+                "cadastral_number=NULL, plot_lv_number=NULL "
+                "WHERE id=? AND COALESCE(cadastral_area, '') != ?",
+                (area, listing_id, area))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def get_unscored_cashflow():
@@ -1555,13 +1720,56 @@ def update_address(listing_id: str, district: str, city: str):
 
 def get_unscored_location():
     conn = get_conn()
-    rows = conn.execute("""
-        SELECT l.id, l.address_raw, l.energy_class, l.district
-        FROM listings l
-        LEFT JOIN location_scores lc ON l.id = lc.listing_id
-        WHERE l.lv_status='PASS' AND lc.listing_id IS NULL AND l.is_active=1
-    """).fetchall()
-    conn.close()
+    try:
+        _ensure_enrichment_columns(conn)
+        rows = conn.execute("""
+            SELECT l.id, l.address_raw, l.energy_class, l.district,
+                   l.lat, l.lng, l.coords_source
+            FROM listings l
+            LEFT JOIN location_scores lc ON l.id = lc.listing_id
+            WHERE l.lv_status IN ('PASS', 'UNVERIFIED')
+              AND lc.listing_id IS NULL AND l.is_active=1
+        """).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+def save_contract_draft(listing_id: str, ownership_type: str, agreed_price: float,
+                        buyer_name: str, buyer_ico: str, notary_name: str,
+                        draft_text: str) -> str:
+    """Keep a generated contract draft, so the text sent to the notár can be
+    found again after the page reloads. Returns the new draft's id."""
+    import uuid
+    draft_id = str(uuid.uuid4())
+    conn = get_conn()
+    try:
+        conn.execute("""
+            INSERT INTO contract_drafts
+            (id, listing_id, ownership_type, agreed_price, buyer_name, buyer_ico,
+             notary_name, draft_text, generated_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
+        """, (draft_id, listing_id, ownership_type, float(agreed_price),
+              buyer_name, buyer_ico or None, notary_name or None, draft_text,
+              datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+    return draft_id
+
+
+def get_contract_drafts(listing_id: str) -> list[dict]:
+    """Saved contract drafts for one listing, newest first."""
+    conn = get_conn()
+    try:
+        rows = conn.execute("""
+            SELECT id, ownership_type, agreed_price, buyer_name, buyer_ico,
+                   notary_name, draft_text, generated_at, status
+            FROM contract_drafts WHERE listing_id=?
+            ORDER BY generated_at DESC
+        """, (listing_id,)).fetchall()
+    finally:
+        conn.close()
     return [dict(r) for r in rows]
 
 

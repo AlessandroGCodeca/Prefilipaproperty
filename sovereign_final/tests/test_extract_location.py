@@ -36,14 +36,8 @@ class TestSuburbsWinOverCity:
         result = _extract_location_from_text(text)
         assert result == expected
 
-    @pytest.mark.xfail(
-        reason="Slovak grammatical declension not handled — 'v Petržalke' "
-               "(locative case) doesn't match 'Petržalka' nominative pattern. "
-               "Known limitation; revisit if it materially affects coverage."
-    )
     def test_declension_locative_form(self):
-        # "byt v Petržalke" — locative case ('-e' suffix) — would need either
-        # a stemmer or expanded regex patterns to recognise.
+        # "byt v Petržalke" — the locative case listings use (scraper/slovak_cases).
         assert _extract_location_from_text("byt v Petržalke") == "Petržalka, Bratislava"
 
 
@@ -149,3 +143,96 @@ class TestSmallTownsKeepTheirRent:
         location = _extract_location_from_text("Košice - Staré Mesto")
         assert get_rent_estimate(location, 1) < \
             get_rent_estimate("Staré Mesto, Bratislava", 1)
+
+
+class TestDeclinedPlaceNames:
+    """Listings say where a flat is in the locative: "byt v Nitre". Only the
+    nominative used to match, so none of these resolved a district."""
+
+    @pytest.mark.parametrize("text,expected", [
+        ("byt v Nitre",                    "Nitra"),
+        ("na predaj v Žiline",             "Žilina"),
+        ("2-izbový byt v Košiciach",       "Košice"),
+        ("v Banskej Bystrici, centrum",    "Banská Bystrica"),
+        ("v Trnave",                       "Trnava"),
+        ("v Prešove",                      "Prešov"),
+        ("v Trenčíne",                     "Trenčín"),
+        ("v Poprade",                      "Poprad"),
+        ("v Martine",                      "Martin"),
+        ("vo Zvolene",                     "Zvolen"),
+        ("v Liptovskom Mikuláši",          "Liptovský Mikuláš"),
+        ("v Senci",                        "Senec"),
+        ("v Pezinku",                      "Pezinok"),
+        ("v Piešťanoch",                   "Piešťany"),
+        ("v Nových Zámkoch",               "Nové Zámky"),
+        ("v Dunajskej Strede",             "Dunajská Streda"),
+        ("v Spišskej Novej Vsi",           "Spišská Nová Ves"),
+        ("v Starej Ľubovni",               "Stará Ľubovňa"),
+        ("vo Vranove nad Topľou",          "Vranov nad Topľou"),
+        ("v Žiari nad Hronom",             "Žiar nad Hronom"),
+        ("v Zlatých Moravciach",           "Zlaté Moravce"),
+        ("v Humennom",                     "Humenné"),
+        ("v Malackách",                    "Malacky"),
+        ("v Revúcej",                      "Revúca"),
+        ("vo Veľkom Krtíši",               "Veľký Krtíš"),
+        ("BYT V NITRE",                    "Nitra"),
+        ("v Bratislave",                   "Bratislava"),
+    ])
+    def test_city_locative(self, text, expected):
+        assert _extract_location_from_text(text) == expected
+
+    @pytest.mark.parametrize("text,expected", [
+        ("byt v Rači",                     "Rača, Bratislava"),
+        ("vo Vrakuni",                     "Vrakuňa, Bratislava"),
+        ("v Karlovej Vsi",                 "Karlova Ves, Bratislava"),
+        ("v Devínskej Novej Vsi",          "Devínska Nová Ves, Bratislava"),
+        ("v Podunajských Biskupiciach",    "Podunajské Biskupice, Bratislava"),
+        ("byt v Bratislave - Ružinove",    "Ružinov, Bratislava"),
+        ("v Starom Meste",                 "Staré Mesto, Bratislava"),
+        ("v Starom Meste v Košiciach",     "Staré Mesto, Košice"),
+    ])
+    def test_city_part_locative(self, text, expected):
+        assert _extract_location_from_text(text) == expected
+
+    def test_longer_town_still_wins_when_declined(self):
+        assert _extract_location_from_text("byt v Novom Meste nad Váhom") == \
+            "Nové Mesto nad Váhom"
+        assert _extract_location_from_text("v Kysuckom Novom Meste") == \
+            "Kysucké Nové Mesto"
+
+    @pytest.mark.parametrize("text,expected", [
+        # Direction and proximity say where the flat is NOT.
+        ("Senec, 20 min do Bratislavy",    "Senec"),
+        ("Senec pri Bratislave",           "Senec"),
+        ("Ivanka pri Dunaji, blízko Nitry", ""),
+        # Street names are adjectives of a town, not the town.
+        ("Trnavská cesta 12, Bratislava",  "Bratislava"),
+        ("Košická ulica, Ružinov",         "Ružinov, Bratislava"),
+        ("Nitrianska 5, Petržalka",        "Petržalka, Bratislava"),
+        # A person named Martina is not the town of Martin.
+        ("Martina Kováčová, maklérka",     ""),
+    ])
+    def test_not_a_location(self, text, expected):
+        assert _extract_location_from_text(text) == expected
+
+
+class TestLocativeRules:
+    @pytest.mark.parametrize("word,forms", [
+        ("Žilina", ("žiline",)), ("Bystrica", ("bystrici",)),
+        ("Vrakuňa", ("vrakuni",)), ("Šaľa", ("šali",)),
+        ("Prešov", ("prešove",)), ("Lamač", ("lamači",)),
+        ("Senec", ("senci",)), ("Pezinok", ("pezinku",)),
+        ("Mesto", ("meste",)), ("Košice", ("košiciach",)),
+        ("Michalovce", ("michalovciach",)), ("Ves", ("vsi",)),
+        ("Banská", ("banskej",)), ("Devínska", ("devínskej",)),
+        ("Liptovský", ("liptovskom",)), ("Nové", ("novom", "nových")),
+        ("Partizánske", ("partizánskom",)),
+    ])
+    def test_word(self, word, forms):
+        from scraper.slovak_cases import locative
+        assert locative(word) == forms
+
+    def test_nad_tail_is_kept(self):
+        from scraper.slovak_cases import locative_words
+        assert locative_words("Nové Mesto nad Váhom") == \
+            [("novom", "nových"), ("meste",), ("nad",), ("Váhom",)]

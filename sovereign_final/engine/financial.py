@@ -3,7 +3,9 @@ engine/financial.py — Sovereign Investor Dashboard
 Module B: 2026 Slovak Financial Engine
 
 Dual-scenario analysis: Personal (Fyzická osoba) vs s.r.o.
-Outputs: CoC, Net Yield, Self-Funding Ratio, Optimal Structure
+Outputs: CoC, Net Yield, Self-Funding Ratio, Optimal Structure, and the
+class — how far the asking €/m² sits below the regional median (see the
+Classification Thresholds note in config.py for why not the ratio).
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from config import (
     HEALTH_LEVY_PERSONAL, PROPERTY_TAX_RATE_PA, VACANCY_RATE, OWNER_RESERVE_RATE, PROPERTY_MGMT_RATE,
     ACQUISITION_COST_RATE,
     HOA_SMALL, HOA_MEDIUM, HOA_LARGE, HOA_PREMIUM,
-    GREEN_RATIO, YELLOW_RATIO, SRO_SETUP_COST,
+    GREEN_DISCOUNT, YELLOW_DISCOUNT, NEAR_FLOOR_DISCOUNT, SRO_SETUP_COST,
     RENT_PER_M2, INDUSTRIAL_ZONES, INDUSTRIAL_RENT_PREMIUM,
     PARKING_RENT_PREMIUM, FURNISHED_RENT_PREMIUM, SEMI_FURNISHED_PREMIUM,
     BALCONY_RENT_PREMIUM,
@@ -31,6 +33,7 @@ from config import (
     HOLD_YEARS, APPRECIATION_RATE, RENT_GROWTH_RATE, COST_INFLATION_RATE,
     EXIT_COST_RATE, PERSONAL_CGT_EXEMPT_YEARS,
 )
+from engine.regional_prices import regional_median_price, REGIONAL_PRICE_FLOOR_RATIO
 
 
 @dataclass
@@ -78,6 +81,8 @@ class FinancialResult:
     principal_paydown_monthly: float
     total_return_annual:    float   # cashflow + principal paydown (excl. appreciation)
     total_roi:              float   # total return / total cash invested
+    regional_median_m2:     Optional[float]  # the region's median asking €/m²
+    market_discount:        Optional[float]  # 1 − (€/m²) / median; >0 = below market
 
     # Decision
     optimal_structure:      str
@@ -423,22 +428,28 @@ def analyse(
     break_even          = math.ceil(SRO_SETUP_COST / (annual_sro_saving / 12)) \
                          if annual_sro_saving > 0 else None
 
-    # Classification uses s.r.o. ratio (optimal scenario)
-    if ratio_s >= GREEN_RATIO:
-        cls = "GREEN"
-    elif ratio_s >= YELLOW_RATIO:
-        cls = "YELLOW"
-    else:
-        cls = "WHITE"
+    # ── Class: discount to the regional median €/m² ───────────────
+    median = regional_median_price(district)
+    discount = (1 - (price_eur / size_m2) / median
+                if median and size_m2 > 0 and price_eur > 0 else None)
+    cls = classify(discount)
 
     # Recommendation
     parts = []
-    if cls == "GREEN":
-        parts.append(f"🟢 GREEN — self-funding via s.r.o. (ratio {ratio_s*100:.1f}%). Hold 20+ years.")
-    elif cls == "YELLOW":
-        parts.append(f"🟡 YELLOW — yield play (ratio {ratio_s*100:.1f}%). Strong income asset.")
+    if discount is None:
+        parts.append("⚪ WHITE — no regional price benchmark for this district.")
     else:
-        parts.append(f"⚪ WHITE — below threshold ({ratio_s*100:.1f}%). Flip or pass.")
+        where = (f"{abs(discount)*100:.0f}% {'below' if discount >= 0 else 'above'} "
+                 f"the regional median (€{price_eur/size_m2:,.0f} vs €{median:,.0f}/m²)")
+        label = {"GREEN": "🟢 GREEN", "YELLOW": "🟡 YELLOW", "WHITE": "⚪ WHITE"}[cls]
+        parts.append(f"{label} — {where}, gross yield {gross_yield*100:.1f}%.")
+        if discount > 1 - REGIONAL_PRICE_FLOOR_RATIO:
+            parts.append("⚠️ Below the sanity floor — almost certainly not this "
+                         "flat's own price.")
+        elif discount >= NEAR_FLOOR_DISCOUNT:
+            parts.append("⚠️ Close to the sanity floor — confirm the price is this "
+                         "flat's own, not a deposit, an 'od €X' price or another listing's.")
+    parts.append(f"Self-funding at {ltv*100:.0f}% LTV: {ratio_s*100:.0f}% (s.r.o.).")
 
     if annual_sro_saving > 0:
         parts.append(f"s.r.o. saves €{annual_sro_saving:,.0f}/yr vs personal. "
@@ -494,6 +505,8 @@ def analyse(
         principal_paydown_monthly = round(principal_mo, 2),
         total_return_annual   = round(total_return_annual, 2),
         total_roi             = round(total_roi, 4),
+        regional_median_m2    = median,
+        market_discount       = round(discount, 4) if discount is not None else None,
         optimal_structure     = optimal,
         annual_sro_saving     = round(annual_sro_saving, 2),
         sro_break_even_months = break_even,
@@ -505,77 +518,51 @@ def analyse(
     )
 
 
+def classify(market_discount: Optional[float]) -> str:
+    """GREEN / YELLOW / WHITE from the discount to the regional median €/m².
+    No benchmark (blank or unknown district) is WHITE: nothing says it's cheap.
+    Neither is a price below the sanity floor — the scrapers zero those as
+    deposits, "od €X" starting prices or another listing's price."""
+    if market_discount is None or market_discount > 1 - REGIONAL_PRICE_FLOOR_RATIO:
+        return "WHITE"
+    if market_discount >= GREEN_DISCOUNT:
+        return "GREEN"
+    if market_discount >= YELLOW_DISCOUNT:
+        return "YELLOW"
+    return "WHITE"
+
+
 # ── Max offer price ───────────────────────────────────────────────────────────
-TARGET_RATIOS = {"GREEN": GREEN_RATIO, "YELLOW": YELLOW_RATIO}
+TARGET_DISCOUNTS = {"GREEN": GREEN_DISCOUNT, "YELLOW": YELLOW_DISCOUNT}
 
 
 def max_offer_price(size_m2: float, district: str, target: str = "YELLOW", *,
-                    rent: Optional[float] = None, ltv: Optional[float] = None,
-                    rate: float = MORTGAGE_RATE_PA,
-                    term_years: int = LOAN_TERM_YEARS,
-                    rooms=None, parking=None, furnished=None, balcony=None,
-                    rent_rates=None, step: float = 500.0) -> Optional[float]:
-    """The highest price at which the deal still classifies as `target`
-    (GREEN or YELLOW on the s.r.o. self-funding ratio), rounded DOWN to `step`.
+                    step: float = 500.0) -> Optional[float]:
+    """The highest price at which the listing still classifies as `target`,
+    rounded DOWN to `step`.
 
-    Solves analyse() itself rather than a re-derived formula, so the answer
-    can never drift from the classification it promises. The ratio falls as
-    price rises — every cost grows with the loan and the property tax, and the
-    s.r.o. tax shrinks by only a fraction of that — so bisection finds the
-    single crossing. None when even a near-free flat misses the target (rent
-    can't cover HOA, vacancy and reserve).
+    The class is the discount to the regional median €/m² (classify), so the
+    boundary is median × size × (1 − threshold). That figure is then checked
+    through analyse() itself and stepped down if rounding left it a hair
+    short, so the answer can never promise a class analyse() wouldn't give.
+    Financing doesn't enter: the class doesn't depend on it. None when the
+    district has no regional median (such a listing is WHITE at any price).
     """
-    target_ratio = TARGET_RATIOS[target.upper()]
+    threshold = TARGET_DISCOUNTS[target.upper()]
     if not size_m2 or size_m2 <= 0:
         return None
-    if rent is None:
-        rent = get_rent_estimate(district, size_m2, rooms, parking, furnished,
-                                 balcony, rates=rent_rates)
-    if not rent or rent <= 0:
-        return None
-
-    def ratio_at(price: float) -> float:
-        return analyse(price, size_m2, district, rent_override=rent, ltv=ltv,
-                       rate=rate, term_years=term_years).ratio_sro
-
-    lo = step
-    if ratio_at(lo) < target_ratio:
-        return None
-    hi = max(rent * 12 * 25, lo * 2)          # a 4% gross yield to start
-    while ratio_at(hi) >= target_ratio:
-        lo, hi = hi, hi * 2
-        if hi > 50_000_000:                    # rent covers anything — cap it
-            return None
-    for _ in range(60):
-        mid = (lo + hi) / 2
-        if ratio_at(mid) >= target_ratio:
-            lo = mid
-        else:
-            hi = mid
-        if hi - lo < 1:
-            break
-    return math.floor(lo / step) * step
-
-
-def market_value(size_m2: float, district: str) -> Optional[float]:
-    """Regional median €/m² (engine.regional_prices) × size, or None when the
-    district resolves to no region. The medians are for older 3-room flats, so
-    small flats and new builds sit above them by nature."""
-    from engine.regional_prices import regional_median_price
     median = regional_median_price(district or "")
-    if not median or not size_m2:
+    if not median:
         return None
-    return round(median * size_m2, 0)
-
-
-def discount_to_market(price_eur: float, size_m2: float,
-                       district: str) -> Optional[float]:
-    """Fraction below the regional median value: 0.15 = 15% under market,
-    negative = above it. None when there is no market value to compare."""
-    mv = market_value(size_m2, district)
-    if not mv or not price_eur:
-        return None
-    return round(1 - price_eur / mv, 4)
+    wanted = ("GREEN",) if target.upper() == "GREEN" else ("GREEN", "YELLOW")
+    price = math.floor(median * size_m2 * (1 - threshold) / step) * step
+    for _ in range(4):
+        if price <= 0:
+            return None
+        if classify(1 - (price / size_m2) / median) in wanted:
+            return price
+        price -= step
+    return None
 
 
 # ── Stress test ───────────────────────────────────────────────────────────────
@@ -747,29 +734,25 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
     )
 
 
-def deal_extras(r: FinancialResult, rooms=None) -> dict:
-    """The derived figures stored next to a score: max offer prices, value vs
-    the regional market, the +2 pp rate shock and the hold-period IRRs. All
-    are worked out on the score's own rent and financing, so they agree with
-    it."""
+def deal_extras(r: FinancialResult) -> dict:
+    """The derived figures stored next to a score: max offer prices, the
+    +2 pp rate shock and the hold-period IRRs. All are worked out on the
+    score's own rent and financing, so they agree with it. (Value vs the
+    regional market is already on the score: market_discount.)"""
     kw = dict(rent=r.estimated_rent, ltv=r.ltv, rate=r.mortgage_rate,
               term_years=r.loan_term_years)
     shocked = rate_shock(r.price_eur, r.size_m2, r.district,
                          rent_override=r.estimated_rent, ltv=r.ltv,
                          rate=r.mortgage_rate, term_years=r.loan_term_years)
-    mv = market_value(r.size_m2, r.district)
     return {
-        "max_price_green":       max_offer_price(r.size_m2, r.district, "GREEN", **kw),
-        "max_price_yellow":      max_offer_price(r.size_m2, r.district, "YELLOW", **kw),
-        "market_value_eur":      mv,
-        "discount_to_market":    round(1 - r.price_eur / mv, 4) if mv else None,
-        "stress_surplus_sro":    shocked.surplus_sro,
-        "stress_ratio_sro":      shocked.ratio_sro,
-        "stress_classification": shocked.classification,
-        "irr_sro":               project_irr(r.price_eur, r.size_m2, r.district,
-                                             structure="SRO", **kw).irr,
-        "irr_personal":          project_irr(r.price_eur, r.size_m2, r.district,
-                                             structure="PERSONAL", **kw).irr,
+        "max_price_green":    max_offer_price(r.size_m2, r.district, "GREEN"),
+        "max_price_yellow":   max_offer_price(r.size_m2, r.district, "YELLOW"),
+        "stress_surplus_sro": shocked.surplus_sro,
+        "stress_ratio_sro":   shocked.ratio_sro,
+        "irr_sro":            project_irr(r.price_eur, r.size_m2, r.district,
+                                          structure="SRO", **kw).irr,
+        "irr_personal":       project_irr(r.price_eur, r.size_m2, r.district,
+                                          structure="PERSONAL", **kw).irr,
     }
 
 
@@ -783,7 +766,7 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
     so a missing location score (no Google API) doesn't unfairly sink the grade.
 
     Components & weights:
-      Financial (50): cap rate (25) + self-funding ratio (25)
+      Financial (50): cap rate (25) + discount to the regional median (25)
       Location  (30): location_score / 100
       Energy    (10): A→10, B→7, C→4, else partial
       Condition (10): new→10, renovated→8, good→5, original→2, poor→0
@@ -796,16 +779,19 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
     points = 0.0
     max_pts = 0.0
 
-    # ── Financial (cap rate + self-funding ratio) ──
+    # ── Financial (yield + discount) ──
+    # The self-funding ratio used to be the second half. It sits at 0.60–0.75
+    # for flats at the median price everywhere (see config.py), so its
+    # 0.80 → 1.15 scale gave nearly every listing zero points.
     cap = row.get("cap_rate")
-    ratio = row.get("ratio_sro")
-    if cap is not None or ratio is not None:
+    discount = row.get("market_discount")
+    if cap is not None or discount is not None:
         if cap is not None:
             points += max(0.0, min(cap / 0.06, 1.0)) * 25   # 6%+ cap = full marks
             max_pts += 25
-        if ratio is not None:
-            # 0.80 ratio → 0 pts, 1.15+ (GREEN) → full 25
-            points += max(0.0, min((ratio - 0.80) / 0.35, 1.0)) * 25
+        if discount is not None:
+            # At or above the median → 0 pts, 30%+ below → full 25
+            points += max(0.0, min(discount / 0.30, 1.0)) * 25
             max_pts += 25
     else:
         return 0, "—"
@@ -881,6 +867,8 @@ def result_to_db_dict(r: FinancialResult) -> dict:
         "principal_paydown_monthly": r.principal_paydown_monthly,
         "total_return_annual":    r.total_return_annual,
         "total_roi":              r.total_roi,
+        "regional_median_m2":     r.regional_median_m2,
+        "market_discount":        r.market_discount,
         "acquisition_costs":      r.acquisition_costs,
         "total_cash_invested":    r.total_cash_invested,
         "optimal_structure":      r.optimal_structure,
@@ -909,5 +897,6 @@ if __name__ == "__main__":
         print(f"  PERSONAL: surplus €{r.surplus_personal:+,.0f}/mo | ratio {r.ratio_personal*100:.1f}%")
         print(f"  s.r.o.:   surplus €{r.surplus_sro:+,.0f}/mo | ratio {r.ratio_sro*100:.1f}%")
         print(f"  CoC: {r.cash_on_cash*100:.2f}% | Yield: {r.net_rental_yield*100:.2f}%")
-        print(f"  → {r.classification} | Optimal: {r.optimal_structure}")
+        print(f"  → {r.classification} | below market: "
+              f"{(r.market_discount or 0)*100:.0f}% | Optimal: {r.optimal_structure}")
         print(f"  💡 {r.recommendation}")

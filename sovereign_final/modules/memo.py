@@ -166,13 +166,14 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
         pdf.para(f"Max offer to stay YELLOW: {_eur(my)} · to make GREEN: {_eur(mg)}{gap}.")
 
     pdf.h2("Price & market")
-    disc = l.get("discount_to_market")
+    disc = l.get("market_discount")
+    median_m2 = l.get("regional_median_m2")
     dom = days_on_market(l.get("scraped_at"))
     pdf.kv([
         ("Asking price", _eur(price)),
         ("Size", f"{size:.0f} m²" if size else "—"),
         ("Price / m²", _eur(price / size) if size else "—"),
-        ("Regional median value", _eur(l.get("market_value_eur"))),
+        ("Regional median", f"{_eur(median_m2)}/m²" if median_m2 else "—"),
         ("Vs market", "—" if disc is None else
          (f"{disc * 100:.1f}% below" if disc >= 0 else f"{-disc * 100:.1f}% above")),
         ("Days on market", "—" if dom is None else f"{dom} (first seen {str(l.get('scraped_at'))[:10]})"),
@@ -228,8 +229,7 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
         ("Cash in (deposit + costs)", _eur(l.get("total_cash_invested"))),
         ("Principal paydown", f"{_eur(l.get('principal_paydown_monthly'))}/mo"),
         ("At rate +2 pp: surplus", f"{_eur(l.get('stress_surplus_sro'), True)}/mo"),
-        ("At rate +2 pp: ratio",
-         f"{_pct(l.get('stress_ratio_sro'))} ({l.get('stress_classification') or '—'})"),
+        ("At rate +2 pp: self-funding", _pct(l.get("stress_ratio_sro"))),
     ])
 
     if price and size and l.get("estimated_rent_eur"):

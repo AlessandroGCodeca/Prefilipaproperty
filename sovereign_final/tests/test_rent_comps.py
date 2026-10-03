@@ -245,8 +245,8 @@ class TestRebuild:
         c.close()
         assert row["rent_source"] == "live"
         assert row["estimated_rent_eur"] == pytest.approx(rc.load_live_rates()["nitra"] * 50, abs=0.01)
-        for col in ("max_price_yellow", "max_price_green", "market_value_eur",
-                    "discount_to_market", "stress_ratio_sro", "irr_sro", "irr_personal"):
+        for col in ("max_price_yellow", "max_price_green", "market_discount",
+                    "regional_median_m2", "stress_ratio_sro", "irr_sro", "irr_personal"):
             assert row[col] is not None, col
 
     def test_no_comps_means_baseline(self, full_db):

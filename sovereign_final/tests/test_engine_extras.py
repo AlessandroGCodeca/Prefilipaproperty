@@ -1,7 +1,7 @@
 """Tests for the deal figures added to engine/financial:
 
-- max_offer_price: the highest price that still scores YELLOW / GREEN
-- market_value / discount_to_market: asking vs the regional median
+- max_offer_price: the highest price that still scores YELLOW / GREEN (the
+  classes are the discount to the regional median €/m², engine.classify)
 - default_ltv: the NBS 70% cap on a 3rd+ property from 1 Oct 2026
 - rate / term flow through analyse(); rate_shock is analyse at +2 pp
 - amortization_schedule, irr, project_irr: hold-period return with exit costs
@@ -12,11 +12,11 @@
 import pytest
 
 from config import (
-    GREEN_RATIO, YELLOW_RATIO, LTV_RATIO, LTV_RATIO_INVESTOR, MORTGAGE_RATE_PA,
-    ACQUISITION_COST_RATE,
+    GREEN_DISCOUNT, YELLOW_DISCOUNT, LTV_RATIO, LTV_RATIO_INVESTOR,
+    MORTGAGE_RATE_PA, ACQUISITION_COST_RATE,
 )
 from engine.financial import (
-    analyse, max_offer_price, market_value, discount_to_market, default_ltv,
+    analyse, max_offer_price, default_ltv,
     rate_shock, amortization_schedule, irr, project_irr, deal_extras,
     result_to_db_dict, compute_deal_score, calc_mortgage,
 )
@@ -24,55 +24,33 @@ from engine.regional_prices import CITY_MEDIAN_PRICE_PER_M2
 
 
 class TestMaxOfferPrice:
-    @pytest.mark.parametrize("target,ratio", [("YELLOW", YELLOW_RATIO), ("GREEN", GREEN_RATIO)])
-    def test_lands_exactly_on_the_boundary(self, target, ratio):
-        p = max_offer_price(58, "Žilina", target, ltv=0.8)
-        assert p is not None and p % 500 == 0
-        assert analyse(p, 58, "Žilina", ltv=0.8).ratio_sro >= ratio
-        assert analyse(p + 500, 58, "Žilina", ltv=0.8).ratio_sro < ratio
+    ZILINA = CITY_MEDIAN_PRICE_PER_M2["žilina"]
 
-    def test_classification_at_the_offer_is_the_target(self):
-        assert analyse(max_offer_price(58, "Žilina", "GREEN", ltv=0.8), 58,
-                       "Žilina", ltv=0.8).classification == "GREEN"
-        assert analyse(max_offer_price(58, "Žilina", "YELLOW", ltv=0.8), 58,
-                       "Žilina", ltv=0.8).classification in ("YELLOW", "GREEN")
+    @pytest.mark.parametrize("target,discount,above", [
+        ("YELLOW", YELLOW_DISCOUNT, "WHITE"), ("GREEN", GREEN_DISCOUNT, "YELLOW"),
+    ])
+    def test_lands_on_the_boundary(self, target, discount, above):
+        p = max_offer_price(58, "Žilina", target)
+        assert p == (self.ZILINA * 58 * (1 - discount)) // 500 * 500
+        assert analyse(p, 58, "Žilina").classification in (target, "GREEN")
+        assert analyse(p + 500, 58, "Žilina").classification == above
 
     def test_green_is_cheaper_than_yellow(self):
-        assert (max_offer_price(58, "Žilina", "GREEN", ltv=0.8)
-                < max_offer_price(58, "Žilina", "YELLOW", ltv=0.8))
+        assert max_offer_price(58, "Žilina", "GREEN") < max_offer_price(58, "Žilina", "YELLOW")
 
-    def test_more_rent_allows_a_higher_price(self):
-        assert (max_offer_price(58, "Žilina", rent=800, ltv=0.8)
-                > max_offer_price(58, "Žilina", rent=600, ltv=0.8))
+    def test_financing_does_not_move_it(self):
+        # The class is price vs the regional median; LTV and rate move the
+        # cashflow, not the class.
+        p = max_offer_price(58, "Žilina", "GREEN")
+        assert analyse(p, 58, "Žilina", ltv=0.5, rate=0.07).classification == "GREEN"
 
-    def test_less_debt_allows_a_higher_price(self):
-        assert (max_offer_price(58, "Žilina", ltv=0.5)
-                > max_offer_price(58, "Žilina", ltv=0.8))
+    def test_bigger_flat_higher_offer(self):
+        assert max_offer_price(80, "Žilina") > max_offer_price(58, "Žilina")
 
-    def test_a_dearer_loan_lowers_it(self):
-        assert (max_offer_price(58, "Žilina", ltv=0.8, rate=0.058)
-                < max_offer_price(58, "Žilina", ltv=0.8, rate=0.038))
-
-    def test_none_when_rent_cannot_cover_running_costs(self):
-        # €40/mo can't pay the €60 HOA at any price.
-        assert max_offer_price(58, "Žilina", rent=40) is None
-
-    def test_none_without_a_size(self):
+    def test_none_without_a_benchmark_or_size(self):
+        assert max_offer_price(58, "Atlantis") is None
+        assert max_offer_price(58, "") is None
         assert max_offer_price(0, "Žilina") is None
-
-
-class TestMarketValue:
-    def test_city_median_times_size(self):
-        assert market_value(58, "Žilina") == CITY_MEDIAN_PRICE_PER_M2["žilina"] * 58
-
-    def test_unknown_district_has_no_market(self):
-        assert market_value(58, "Atlantis") is None
-        assert discount_to_market(100_000, 58, "Atlantis") is None
-
-    def test_below_market_is_positive(self):
-        mv = market_value(58, "Žilina")
-        assert discount_to_market(mv * 0.8, 58, "Žilina") == pytest.approx(0.2, abs=1e-4)
-        assert discount_to_market(mv * 1.1, 58, "Žilina") == pytest.approx(-0.1, abs=1e-4)
 
 
 class TestDefaultLtv:
@@ -196,14 +174,15 @@ class TestDealExtras:
         r = analyse(98_000, 58, "Žilina", ltv=0.8)
         e = deal_extras(r)
         assert e["max_price_green"] < e["max_price_yellow"]
-        assert e["market_value_eur"] == market_value(58, "Žilina")
-        assert e["discount_to_market"] == pytest.approx(1 - 98_000 / e["market_value_eur"], abs=1e-4)
+        assert e["max_price_yellow"] == max_offer_price(58, "Žilina", "YELLOW")
         assert e["stress_ratio_sro"] < r.ratio_sro
+        assert e["stress_surplus_sro"] < r.surplus_sro
         assert e["irr_sro"] is not None and e["irr_personal"] is not None
 
-    def test_extras_use_the_scores_rent(self):
-        r = analyse(98_000, 58, "Žilina", ltv=0.8, rent_override=900)
-        assert deal_extras(r)["max_price_yellow"] == max_offer_price(58, "Žilina", rent=900, ltv=0.8)
+    def test_extras_use_the_scores_rent_and_financing(self):
+        r = analyse(98_000, 58, "Žilina", ltv=0.7, rate=0.045, rent_override=900)
+        assert deal_extras(r)["irr_sro"] == project_irr(
+            98_000, 58, "Žilina", rent=900, ltv=0.7, rate=0.045).irr
 
 
 class TestFloodInDealScore:
