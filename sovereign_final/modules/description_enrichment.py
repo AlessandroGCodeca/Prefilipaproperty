@@ -25,24 +25,45 @@ from database import get_unparsed_descriptions, update_description_features
 from modules.llm_enrichment import is_enabled, parse_description
 
 
+def _int_or_none(value, lo: int, hi: int):
+    """An integer in [lo, hi], else None — the schema's -1 / 0 "not stated"
+    sentinels and anything implausible both become None."""
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return None
+    return v if lo <= v <= hi else None
+
+
 def _to_features(parsed: dict) -> dict:
     """Map a parse_description() result onto the DB column shape.
 
     Booleans become 0/1 so the rent-premium check stays a simple truthiness
-    test. rooms uses 0 as the schema's "not stated" sentinel → None here, and
-    update_description_features only fills it when the listing has no rooms
-    yet (structured scraper data wins). floor isn't used for rent yet.
+    test. has_balcony counts a loggia or terrace too — BALCONY_RENT_PREMIUM is
+    priced for any private outdoor space — while has_loggia / has_terrace keep
+    the detail. rooms uses 0 as "not stated" and floor / building_floors use
+    -1; those become None, and update_description_features only fills rooms
+    and floor when the scraper left them empty (structured data wins).
     """
-    try:
-        rooms = int(parsed.get("rooms") or 0)
-    except (TypeError, ValueError):
-        rooms = 0
+    rooms = _int_or_none(parsed.get("rooms"), 1, 10)
+    floor = _int_or_none(parsed.get("floor"), 0, 60)
+    building_floors = _int_or_none(parsed.get("building_floors"), 1, 60)
+    if floor is not None and building_floors is not None and floor > building_floors:
+        building_floors = None        # one of the two is wrong; keep the flat's
+    terrace = bool(parsed.get("terrace"))
+    loggia = bool(parsed.get("loggia"))
     return {
-        "has_parking": 1 if parsed.get("parking") else 0,
-        "has_balcony": 1 if parsed.get("balcony") else 0,
-        "furnished":   parsed.get("furnished") or "unknown",
-        "condition":   parsed.get("condition") or "unknown",
-        "rooms":       rooms if 1 <= rooms <= 10 else None,
+        "has_parking":     1 if parsed.get("parking") else 0,
+        "has_balcony":     1 if (parsed.get("balcony") or terrace or loggia) else 0,
+        "has_terrace":     1 if terrace else 0,
+        "has_loggia":      1 if loggia else 0,
+        "has_cellar":      1 if parsed.get("cellar") else 0,
+        "has_elevator":    1 if parsed.get("elevator") else 0,
+        "furnished":       parsed.get("furnished") or "unknown",
+        "condition":       parsed.get("condition") or "unknown",
+        "rooms":           rooms,
+        "floor":           floor,
+        "building_floors": building_floors,
     }
 
 

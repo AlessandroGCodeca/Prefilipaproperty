@@ -35,7 +35,7 @@ CI runs on every PR. To run locally from `sovereign_final/`:
 python3 -m pytest tests/
 ```
 
-Expected: ~750 passing.
+Expected: ~920 passing.
 
 ---
 
@@ -43,7 +43,7 @@ Expected: ~750 passing.
 
 ```
 sovereign_final/
-├── app.py                    ← Streamlit dashboard (4 tabs)
+├── app.py                    ← Streamlit dashboard (9 tabs)
 ├── scheduler.py              ← Daily 06:00 CET automation
 ├── config.py                 ← All 2026 Slovak tax rates
 ├── database.py               ← SQLite storage
@@ -61,15 +61,21 @@ sovereign_final/
 │   ├── bazos.py              ← Bazos.sk scraper
 │   ├── topreality.py         ← Topreality.sk scraper
 │   ├── geo.py                ← A listing's own map pin (JSON-LD / API / meta)
-│   └── slovak_cases.py       ← Locative place names ("v Nitre", "v Košiciach")
+│   ├── slovak_cases.py       ← Locative place names ("v Nitre", "v Košiciach")
+│   └── rentals.py            ← Prenájom (to-let) listings for live rent comps
 ├── engine/
-│   ├── financial.py          ← 2026 Slovak tax + cashflow engine
-│   └── regional_prices.py    ← Sale-price floor + ceiling sanity filters
+│   ├── financial.py          ← 2026 Slovak tax + cashflow engine, max offer,
+│   │                           rate shock, hold-period IRR
+│   ├── regional_prices.py    ← Sale-price medians, floor + ceiling filters
+│   ├── rent_comps.py         ← Live €/m² rents from scraped rentals
+│   └── duplicates.py         ← Same flat listed on several portals
 ├── modules/
 │   ├── debt_bot.py           ← LV title deed checker (PASS / UNVERIFIED / REJECTED)
 │   ├── lv_screen.py          ← Entry-by-entry LV encumbrance screen
 │   ├── cashflow_runner.py    ← Financial scoring runner
-│   └── location_iq.py        ← Google Places location scorer
+│   ├── location_iq.py        ← Location scorer (Google, or OpenStreetMap)
+│   ├── risk_data.py          ← Real noise / flood / construction data
+│   └── memo.py               ← PDF investment memo
 └── dev/                      ← One-off debug/exploration scripts (not runtime)
 ```
 
@@ -79,10 +85,18 @@ sovereign_final/
 
 | Tab | What it does |
 |-----|-------------|
-| TRIAGE TABLE | Flat, sortable view of every scored listing — composite grade, cap rate, surplus, yield. Default sort: best deal grade first |
-| ACTIVE SNAG LIST | 🟢🟡 deals with full cost breakdown, location IQ, LV status, flat-LV verify |
-| SATELLITE VIEWER | Listing photo vs Google satellite + Street View + vibe score |
+| TRIAGE TABLE | Flat, sortable view of every scored listing — grade, price, **max offer** (🟡/🟢), ask vs max offer, below-market %, rent, surplus, **+2 pp stress**, gross yield, cap rate, **IRR**, **days listed**, **price change**, **portals**, deal stage, vibe, LV status |
+| ACTIVE SNAG LIST | 🟢🟡 deal cards: cost breakdown, financing stress (+2 pp, 70% LTV), location risk with sources, price history, other portals' copies, deal stage, vibe notes, **PDF memo**, LV status and flat-LV verify |
+| MAP | Every listing with coordinates, coloured by class (faded = area-level geocode) |
+| WHAT-IF / TAX | The tax toggle calculator: any listing (or a custom one) re-run with your own price, rate, LTV, term, rent, hold period, growth and exit costs — personal vs s.r.o. side by side, rate-shock table, IRR, max offer |
+| DEAL PIPELINE | Board of the deals you're working: WATCHING → VIEWING → OFFER → NEGOTIATING → DUE DILIGENCE → NOTARY → CLOSED / PASSED, with a timeline per deal |
+| SATELLITE VIEWER | Listing photo vs Google satellite + Street View + vibe score, and every note saved for the listing |
+| REJECTED | Every LV rejection with its reason, detail and LV risk read; re-verify from here |
+| RENT COMPS | Live €/m² per district from prenájom listings vs the baseline table |
 | ONE-CLICK CLOSE | Pre-filled Slovak notary contract draft with download |
+
+A 🔻 banner above the tabs lists price cuts from the last 14 days, and says
+whether the new price now sits inside the max YELLOW offer.
 
 Each listing also gets a **composite deal grade (A–D)** blending financial
 (cap rate + discount to the regional median), location, energy class,
@@ -94,7 +108,9 @@ a genuinely solid one. An LV that is verified clean scores above an unverified o
 ## Pipeline (Sidebar Buttons)
 
 ```
-NEHNUT → BAZOS → TOPREAL → housekeeping → LV DEBT FILTER → CASHFLOW SCORE → LOCATION IQ
+NEHNUT → BAZOS → TOPREAL → RENT COMPS → housekeeping → LV DEBT FILTER
+       → NORM ADDR → PARSE DESC → CASHFLOW SCORE → LOCATION IQ → RISK BACKFILL
+       → MERGE PORTAL COPIES
 ```
 
 Housekeeping = deactivate stale listings (>21d unseen) + flag dev projects.
@@ -106,7 +122,59 @@ Or click buttons in sidebar to run manually anytime.
 
 Changed the rent/tax assumptions in `config.py`? Click **♻️ RESCORE ALL** to
 clear existing scores and re-run scoring (the plain CASHFLOW SCORE button only
-processes listings that have never been scored).
+processes listings that have never been scored). A listing whose asking price
+changes, or whose district's live rent moves, is re-scored automatically.
+
+---
+
+## What each score carries
+
+- **Max offer 🟡 / 🟢** — the highest price at which the listing still scores
+  YELLOW / GREEN: the regional median €/m² × size × (1 − 10% / 20%), checked
+  against `analyse()` itself (`max_offer_price`). Financing doesn't move it —
+  the class is the discount to the median. "Ask vs 🟡" is the discount you
+  need to negotiate.
+- **Below%** — asking €/m² vs the regional median
+  (`regional_prices.regional_median_price`; medians are for older 3-room flats).
+- **+2 pp** — the s.r.o. surplus and self-funding ratio at the mortgage rate
+  + 2 percentage points (the NBS affordability stress).
+- **IRR** — 10-year return on the cash put in: rent growth, appreciation,
+  amortisation, selling costs and tax on the sale (a personal sale is exempt
+  after 5 years; an s.r.o. sale is revenue and usually costs the 10% rate).
+  Assumptions in `config.py` (`HOLD_YEARS`, `APPRECIATION_RATE`, …).
+- **Rent source** — live prenájom comps when the district has enough of them,
+  else the `RENT_PER_M2` baseline.
+
+Set `PROPERTIES_OWNED` in `.env`: at 2 or more, the next purchase is a 3rd+
+property, NBS caps the loan at **70% LTV** (from 1 Oct 2026), and scoring uses
+that instead of 80%.
+
+## Live rent comps
+
+`scraper/rentals.py` reads prenájom listings from bazos and topreality into
+`rental_listings` (never into `listings` — they are evidence, not deals).
+`engine/rent_comps.py` drops ads with energies in the price, restates each
+rent as a bare, unfurnished 2-izb flat's €/m², takes the median per
+`RENT_PER_M2` key, cuts it 5% (asking → achieved) and blends it with the
+baseline by sample size. Needs 5+ rentals per district. The rental-page
+parsing mirrors the sale scrapers' selectors; check the 🏘️ RENT COMPS output
+after the first run.
+
+## Location risk data
+
+`modules/risk_data.py` replaces the old always-"clear" stubs with open data —
+no keys needed:
+
+| Flag | Source |
+|------|--------|
+| Construction | OpenStreetMap `landuse/building=construction` within 300 m |
+| Noise | OpenStreetMap: motorway/trunk ≤150 m, primary road ≤30 m, main railway ≤80 m, airport ≤1.5 km — a proxy for the ≥65 dB Lden zones of the EU strategic noise maps |
+| Flood | SVP flood hazard maps — inside the mapped Q100 extent (`FLOOD_IDENTIFY_URL`) |
+
+A flag nobody could determine (service down, or an address that only geocodes
+to a district centroid) is stored as unknown and costs nothing. Without a
+Google key, Location IQ now geocodes with Nominatim and counts transit and
+amenities from OpenStreetMap instead of skipping.
 
 ---
 
@@ -201,7 +269,7 @@ Slovak IP — skgeodesy.sk geo-blocks many foreign ones.
 
 | Key | Where | Enables |
 |-----|-------|---------|
-| GOOGLE_PLACES_API_KEY | console.cloud.google.com | Real location scoring + satellite view |
+| GOOGLE_PLACES_API_KEY | console.cloud.google.com | Google geocoding/places + inline satellite view (OpenStreetMap is used without it) |
 
 > LV debt checking needs **no key**: ÚGKK SR has no public API, so
 > `kataster_scraper.py` scrapes kataster.skgeodesy.sk directly (unofficial —

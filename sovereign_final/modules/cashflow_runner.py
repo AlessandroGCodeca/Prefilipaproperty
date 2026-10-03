@@ -7,7 +7,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from database import get_unscored_cashflow, upsert_cashflow, init_db
-from engine.financial import analyse, result_to_db_dict
+from engine.financial import analyse, result_to_db_dict, deal_extras, base_rent_rate
 
 
 def run_scoring(progress_callback=None) -> int:
@@ -15,6 +15,13 @@ def run_scoring(progress_callback=None) -> int:
     if not listings:
         print("✅ No new listings to score.")
         return 0
+
+    # Live €/m² from prenájom comps (engine/rent_comps), read once per run.
+    # Empty when no rentals have been scraped yet — the baseline then applies.
+    from engine.rent_comps import load_live_rates
+    rates = load_live_rates()
+    if rates:
+        print(f"🏘️  Using live rent comps for {len(rates)} districts.")
 
     print(f"💰 Scoring {len(listings)} listings...")
     scored = 0
@@ -25,17 +32,21 @@ def run_scoring(progress_callback=None) -> int:
             progress_callback(i + 1, len(listings))
 
         try:
+            district = row.get("district") or ""
             result = analyse(
                 price_eur  = row["price_eur"],
                 size_m2    = row["size_m2"],
-                district   = row.get("district") or "",
+                district   = district,
                 listing_id = row["id"],
                 rooms      = row.get("rooms"),
                 parking    = row.get("has_parking"),
                 furnished  = row.get("furnished"),
                 balcony    = row.get("has_balcony"),
+                rent_rates = rates,
             )
             db_data = result_to_db_dict(result)
+            db_data.update(deal_extras(result))
+            db_data["rent_source"] = base_rent_rate(district, rates)[2]
             upsert_cashflow(db_data)
             scored += 1
             e = emojis.get(result.classification, "")

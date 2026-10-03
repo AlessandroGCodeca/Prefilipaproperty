@@ -29,7 +29,8 @@ def temp_db(monkeypatch):
     conn = sqlite3.connect(path)
     conn.execute("""
         CREATE TABLE listings (
-            id TEXT PRIMARY KEY, source TEXT, url TEXT UNIQUE, rooms REAL
+            id TEXT PRIMARY KEY, source TEXT, url TEXT UNIQUE, rooms REAL,
+            floor INTEGER
         )
     """)
     conn.execute("INSERT INTO listings (id, source, url, rooms) VALUES ('norooms','t','http://x/1', NULL)")
