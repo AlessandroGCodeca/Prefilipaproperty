@@ -5,11 +5,21 @@ Run: streamlit run app.py
 """
 
 import os, sys
+from html import escape as _html_escape
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
+
+
+def esc(v) -> str:
+    """HTML-escape text that came from a portal, an API or a typed note before
+    it goes into st.markdown(..., unsafe_allow_html=True). Scraped titles, LV
+    details and URLs are written by strangers; unescaped, a "<" garbles the
+    page and an <img onerror=…> runs in the dashboard's origin."""
+    return _html_escape("" if v is None else str(v), quote=True)
+
 
 st.set_page_config(
     page_title="Sovereign RE",
@@ -556,14 +566,27 @@ data = [l for l in data
 
 
 # ── Stats bar ─────────────────────────────────────────────────────────────────
+# The counts describe the listings below. `x or demo_count` used to fill in a
+# real zero (no YELLOW deals yet) with the demo rows' count; the demo counts
+# belong only to the demo rows.
+if using_demo:
+    shown = {
+        "total":    len(DEMO),
+        "green":    sum(1 for d in DEMO if d["cf_class"] == "GREEN"),
+        "yellow":   sum(1 for d in DEMO if d["cf_class"] == "YELLOW"),
+        "white":    sum(1 for d in DEMO if d["cf_class"] == "WHITE"),
+        "rejected": 0, "pending": 0,
+    }
+else:
+    shown = stats
 st.markdown(f"""
 <div class="sg">
-  <div class="sc b"><div class="sn">{stats['total'] or len(DEMO)}</div><div class="sl">Total</div></div>
-  <div class="sc g"><div class="sn">{stats['green']  or sum(1 for d in DEMO if d['cf_class']=='GREEN')}</div><div class="sl">Green</div></div>
-  <div class="sc y"><div class="sn">{stats['yellow'] or sum(1 for d in DEMO if d['cf_class']=='YELLOW')}</div><div class="sl">Yellow</div></div>
-  <div class="sc w"><div class="sn">{stats['white']}</div><div class="sl">White</div></div>
-  <div class="sc r"><div class="sn">{stats['rejected']}</div><div class="sl">Rejected</div></div>
-  <div class="sc a"><div class="sn">{stats['pending']}</div><div class="sl">Pending</div></div>
+  <div class="sc b"><div class="sn">{shown['total']}</div><div class="sl">Total</div></div>
+  <div class="sc g"><div class="sn">{shown['green']}</div><div class="sl">Green</div></div>
+  <div class="sc y"><div class="sn">{shown['yellow']}</div><div class="sl">Yellow</div></div>
+  <div class="sc w"><div class="sn">{shown['white']}</div><div class="sl">White</div></div>
+  <div class="sc r"><div class="sn">{shown['rejected']}</div><div class="sl">Rejected</div></div>
+  <div class="sc a"><div class="sn">{shown['pending']}</div><div class="sl">Pending</div></div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -579,10 +602,10 @@ if _drops:
                 reach = (" · now within YELLOW" if d["price_eur"] <= my
                          else f" · {d['price_eur'] / my - 1:+.1%} above max YELLOW €{my:,.0f}")
             st.markdown(
-                f'<div class="brow"><span class="l">{(d.get("title") or d.get("district") or "—")[:60]}</span>'
+                f'<div class="brow"><span class="l">{esc((d.get("title") or d.get("district") or "—")[:60])}</span>'
                 f'<span class="v">€{d["price_eur"]:,.0f} ({d["last_change_pct"]:+.1%}, '
                 f'{str(d["last_change_at"])[:10]}){reach} · '
-                f'<a href="{d["url"]}" target="_blank">open ↗</a></span></div>',
+                f'<a href="{esc(d["url"])}" target="_blank">open ↗</a></span></div>',
                 unsafe_allow_html=True)
 
 
@@ -764,7 +787,7 @@ def render_card(l):
         for lv_note in (l.get("lv_detail"), l.get("lv_summary")):
             if lv_note:
                 st.markdown(
-                    f'<div class="muted" style="margin-top:6px">⚖️ LV: {lv_note}</div>',
+                    f'<div class="muted" style="margin-top:6px">⚖️ LV: {esc(lv_note)}</div>',
                     unsafe_allow_html=True,
                 )
         if ph:
@@ -773,7 +796,7 @@ def render_card(l):
                         f'[{ph["change_pct"]:+.1%}]</div>', unsafe_allow_html=True)
         if len(l.get("_copies") or []) > 1:
             links = " · ".join(
-                f'<a href="{c.get("url")}" target="_blank">{(c.get("source") or "").upper()} '
+                f'<a href="{esc(c.get("url"))}" target="_blank">{esc((c.get("source") or "").upper())} '
                 f'€{(c.get("price_eur") or 0):,.0f}</a>'
                 for c in sorted(l["_copies"], key=lambda c: c.get("price_eur") or 0))
             st.markdown(f'<div class="muted" style="margin-top:6px">📡 Same flat on: {links}</div>',
@@ -855,7 +878,7 @@ def render_card(l):
                                    l.get("flood_detail")) if d]
             if details:
                 st.markdown('<div class="muted" style="margin-top:6px">' +
-                            "<br>".join(details) + "</div>", unsafe_allow_html=True)
+                            "<br>".join(esc(d) for d in details) + "</div>", unsafe_allow_html=True)
 
         st.markdown('<hr class="div">', unsafe_allow_html=True)
 
@@ -878,7 +901,7 @@ def render_card(l):
             if v:
                 score, note, n = v
                 st.markdown(f'<div class="muted">VIBE {score or "—"}/10 · {n} note(s)</div>'
-                            f'<div class="mono" style="font-size:.75rem">{note}</div>',
+                            f'<div class="mono" style="font-size:.75rem">{esc(note)}</div>',
                             unsafe_allow_html=True)
             else:
                 st.markdown('<div class="muted">No vibe notes yet — add one in SATELLITE VIEWER.</div>',
@@ -934,7 +957,7 @@ def render_card(l):
             except Exception as e:
                 st.warning(f"Re-verify: {e}")
 
-        st.markdown(f'<div class="muted">Source: {(l.get("source") or "").upper()} · First seen: {(l.get("scraped_at") or "")[:10]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="muted">Source: {esc((l.get("source") or "").upper())} · First seen: {esc((l.get("scraped_at") or "")[:10])}</div>', unsafe_allow_html=True)
 
 
 def render_memo_button(l, key):
@@ -1107,7 +1130,7 @@ with t1:
                     price = l.get("price_eur") or 0
                     size  = l.get("size_m2") or 0
                     src   = (l.get("source") or "").upper()
-                    st.markdown(f'<div class="brow"><span class="l">{title[:60]}</span><span class="v">€{price:,.0f} · {size:.0f}m² · {src}</span></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="brow"><span class="l">{esc(title[:60])}</span><span class="v">€{price:,.0f} · {size:.0f}m² · {esc(src)}</span></div>', unsafe_allow_html=True)
 
 
 # ── Map ───────────────────────────────────────────────────────────────────────
@@ -1234,7 +1257,7 @@ with t_whatif:
     k1.metric("Class", r.classification,
               help=(f"{r.market_discount:+.0%} vs the regional median €/m² · "
                     f"s.r.o. self-funding {r.ratio_sro:.0%}")
-              if r.market_discount is not None else "No regional median for this district."),
+              if r.market_discount is not None else "No regional median for this district.")
     k2.metric("Best structure", "s.r.o." if r.optimal_structure == "SRO" else "Personal",
               delta=f"€{r.annual_sro_saving:+,.0f}/yr s.r.o. vs personal")
     k3.metric("Cash in", f"€{r.total_cash_invested:,.0f}")
@@ -1315,12 +1338,12 @@ with t_pipe:
                     gone = "" if t.get("is_active") else " · OFF MARKET"
                     maxy = (f" · max🟡 €{t['max_price_yellow']:,.0f}"
                             if t.get("max_price_yellow") else "")
-                    note = f'<div class="muted">{t["note"]}</div>' if t.get("note") else ""
-                    name = (t.get("title") or t.get("district") or "—")[:40]
+                    note = f'<div class="muted">{esc(t["note"])}</div>' if t.get("note") else ""
+                    name = esc((t.get("title") or t.get("district") or "—")[:40])
                     st.markdown(
                         f'<div class="sc" style="margin-bottom:6px;padding:8px">'
                         f'<div class="mono" style="font-size:.7rem;color:#e4eaf5">'
-                        f'<a href="{t["url"]}" target="_blank">{name}</a></div>'
+                        f'<a href="{esc(t["url"])}" target="_blank">{name}</a></div>'
                         f'<div class="muted">€{(t.get("price_eur") or 0):,.0f}{maxy}'
                         f' · {str(t.get("updated_at"))[:10]}{gone}</div>{note}</div>',
                         unsafe_allow_html=True)
@@ -1347,7 +1370,7 @@ with t_pipe:
         if hist:
             st.markdown("".join(
                 f'<div class="brow"><span class="l">{str(h["changed_at"])[:16].replace("T", " ")}</span>'
-                f'<span class="v">{h["stage"]}{" — " + h["note"] if h.get("note") else ""}</span></div>'
+                f'<span class="v">{esc(h["stage"])}{" — " + esc(h["note"]) if h.get("note") else ""}</span></div>'
                 for h in hist), unsafe_allow_html=True)
 
 
@@ -1376,7 +1399,7 @@ with t_rej:
         pick_reasons = st.multiselect("Reason", reasons, default=reasons, key="rej_reasons")
         view = rej_df[rej_df["Reason"].isin(pick_reasons)]
         st.markdown(f'<div class="muted">{len(view)} rejection(s) · '
-                    + " · ".join(f"{k}: {v}" for k, v in view["Reason"].value_counts().items())
+                    + " · ".join(f"{esc(k)}: {v}" for k, v in view["Reason"].value_counts().items())
                     + '</div>', unsafe_allow_html=True)
         st.dataframe(view, hide_index=True, use_container_width=True,
                      column_config={"Price": st.column_config.NumberColumn(format="€%d"),
@@ -1430,7 +1453,8 @@ with t2:
     if not data:
         st.info("No listings loaded.")
     else:
-        opts = {f"{l.get('title','?')} — €{l.get('price_eur',0):,.0f}": l for l in data}
+        opts = {f"{l.get('title') or '?'} — €{l.get('price_eur') or 0:,.0f} [{(l.get('id') or '')[:6]}]": l
+                for l in data}
         sel  = opts[st.selectbox("Select listing", list(opts.keys()), label_visibility="collapsed")]
 
         lat, lng = sel.get("lat"), sel.get("lng")
@@ -1489,7 +1513,7 @@ with t2:
             for n in notes:
                 html += (f'<div class="brow"><span class="l">{str(n.get("created_at"))[:16].replace("T", " ")}'
                          f' · {n.get("vibe_score") or "—"}/10</span>'
-                         f'<span class="v">{n.get("note") or ""}</span></div>')
+                         f'<span class="v">{esc(n.get("note"))}</span></div>')
             st.markdown(html, unsafe_allow_html=True)
 
 
@@ -1502,7 +1526,8 @@ with t3:
     if not data:
         st.info("No listings loaded.")
     else:
-        opts = {f"{l.get('title','?')} — €{l.get('price_eur',0):,.0f}": l for l in data}
+        opts = {f"{l.get('title') or '?'} — €{l.get('price_eur') or 0:,.0f} [{(l.get('id') or '')[:6]}]": l
+                for l in data}
         sel3 = opts[st.selectbox("Select listing", list(opts.keys()), key="close_sel")]
 
         f1, f2 = st.columns(2)

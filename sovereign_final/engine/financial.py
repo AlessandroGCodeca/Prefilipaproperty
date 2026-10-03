@@ -405,7 +405,6 @@ def analyse(
     # ── s.r.o. scenario (deducts interest; corporate tax + dividend tax) ──
     taxable_s       = max(noi_annual - interest_mo * 12, 0)
     tax_s_annual    = calc_tax_sro(taxable_s, annual_rent)
-    levy_s_annual   = 0.0  # Exempt
     tax_s_mo        = tax_s_annual / 12
     levy_s_mo       = 0.0
     total_s_mo      = operating_mo + tax_s_mo + levy_s_mo

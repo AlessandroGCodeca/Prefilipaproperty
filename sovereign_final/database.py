@@ -19,7 +19,10 @@ from config import SQLITE_PATH
 # ── Connection ────────────────────────────────────────────────────────────────
 def get_conn():
     os.makedirs(os.path.dirname(SQLITE_PATH) or ".", exist_ok=True)
-    conn = sqlite3.connect(SQLITE_PATH)
+    # The dashboard and the scheduler are two processes on one file. The default
+    # 5 s wait for the other's write lock is shorter than a scraper's batch
+    # commit can take, and "database is locked" then kills a pipeline step.
+    conn = sqlite3.connect(SQLITE_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
@@ -752,11 +755,11 @@ def get_stats():
     r = conn.execute("""
         SELECT
             COUNT(*)                                       AS total,
-            SUM(CASE WHEN classification='GREEN'    THEN 1 ELSE 0 END) AS green,
-            SUM(CASE WHEN classification='YELLOW'   THEN 1 ELSE 0 END) AS yellow,
-            SUM(CASE WHEN classification='WHITE'    THEN 1 ELSE 0 END) AS white,
-            SUM(CASE WHEN lv_status='REJECTED'      THEN 1 ELSE 0 END) AS rejected,
-            SUM(CASE WHEN classification='PENDING'  THEN 1 ELSE 0 END) AS pending
+            COALESCE(SUM(CASE WHEN classification='GREEN'    THEN 1 ELSE 0 END), 0) AS green,
+            COALESCE(SUM(CASE WHEN classification='YELLOW'   THEN 1 ELSE 0 END), 0) AS yellow,
+            COALESCE(SUM(CASE WHEN classification='WHITE'    THEN 1 ELSE 0 END), 0) AS white,
+            COALESCE(SUM(CASE WHEN lv_status='REJECTED'      THEN 1 ELSE 0 END), 0) AS rejected,
+            COALESCE(SUM(CASE WHEN classification='PENDING'  THEN 1 ELSE 0 END), 0) AS pending
         FROM listings WHERE is_active=1
     """).fetchone()
     conn.close()

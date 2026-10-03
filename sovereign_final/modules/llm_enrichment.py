@@ -31,6 +31,11 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
 
+# analyze_lv() sends Claude at most this many characters of an LV. The report
+# lists the encumbrances (ťarchy, part C) LAST, so on a longer LV Claude never
+# sees them — modules/debt_bot must not let such a read clear a screen REJECT.
+LV_ANALYSIS_MAX_CHARS = 6000
+
 # Lazily-constructed singleton client. Kept module-private so the key object
 # never leaves this file.
 _client = None
@@ -205,7 +210,8 @@ def analyze_lv(lv_text: str) -> dict | None:
     lv_text = (lv_text or "").strip()
     if not lv_text:
         return None
-    return _ask_json(_LV_SYSTEM, f"LV DATA:\n{lv_text[:6000]}", _LV_SCHEMA)
+    return _ask_json(_LV_SYSTEM, f"LV DATA:\n{lv_text[:LV_ANALYSIS_MAX_CHARS]}",
+                     _LV_SCHEMA)
 
 
 if __name__ == "__main__":

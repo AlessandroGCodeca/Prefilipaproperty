@@ -34,7 +34,8 @@ from database import upsert_rental, init_db
 from scraper._http import get, make_session
 from scraper.nehnutelnosti import _extract_location_from_text
 from scraper.textparse import (
-    rooms_from_title, area_from_text, EXCLUDE_KEYWORDS, strip_diacritics,
+    rooms_from_title, area_from_text, EXCLUDE_KEYWORDS, keyword_pattern,
+    matches_keywords, strip_diacritics,
 )
 
 BAZOS_BASE = "https://reality.bazos.sk"
@@ -49,7 +50,7 @@ TOPREALITY_SEARCH_CANDIDATES = [
 _TOPREALITY_DETAIL_RE = re.compile(r"-r\d{6,8}\.html(?:$|[?#])")
 
 # The sale exclusion list, minus the word for "rental" itself.
-_RENTAL_EXCLUDE = tuple(k for k in EXCLUDE_KEYWORDS if k != "prenajom")
+_RENTAL_EXCLUDE_RE = keyword_pattern(k for k in EXCLUDE_KEYWORDS if k != "prenajom")
 
 _AMOUNT_RE = re.compile(r"(\d{1,3}(?:[\s\xa0  ]\d{3})+|\d{2,5})(?:[.,]\d{1,2})?\s*(?:€|eur\b)", re.I)
 _MONTHLY_AFTER_RE = re.compile(r"^\s*(?:/\s*mes|mesacne|za\s+mesiac|/\s*mesiac|mes\.)", re.I)
@@ -92,15 +93,9 @@ def rent_from_text(text: str) -> float:
 
 
 def _is_excluded(*texts: str) -> bool:
-    """EXCLUDE_KEYWORDS (minus "prenajom") against each text, with diacritics
-    folded too: the keywords are ASCII ("garaz", "kancelar") and an ad title
-    keeps its diacritics ("garáže", "kancelárie")."""
-    for t in texts:
-        low = (t or "").lower()
-        folded = strip_diacritics(low)
-        if any(kw in low or kw in folded for kw in _RENTAL_EXCLUDE):
-            return True
-    return False
+    """EXCLUDE_KEYWORDS (minus "prenajom") against each text — see
+    textparse.matches_keywords for the diacritic folding and word-start rule."""
+    return matches_keywords(_RENTAL_EXCLUDE_RE, *texts)
 
 
 def build_rental(source: str, url: str, title: str, text: str, location: str = "",

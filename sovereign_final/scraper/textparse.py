@@ -48,9 +48,17 @@ EXCLUDE_KEYWORDS = (
 )
 
 
-def is_excluded_listing(*texts: str) -> bool:
-    """True when any of the given strings (title, URL, …) names a
-    non-apartment listing per EXCLUDE_KEYWORDS.
+def keyword_pattern(keywords) -> "re.Pattern[str]":
+    """One regex for a list of word stems. A stem may carry any ending (that is
+    how a single entry catches every declension) but must START a word: matched
+    anywhere, "chal" excluded every flat in Michalovce and on Michalská, and
+    "budov" every "novovybudovaný" new build. A digit or punctuation before the
+    stem still counts as a boundary, so URL slugs ("predaj-garaz") match."""
+    return re.compile(r"(?<![^\W\d_])(?:" + "|".join(map(re.escape, keywords)) + ")")
+
+
+def matches_keywords(pattern: "re.Pattern[str]", *texts: str) -> bool:
+    """True when `pattern` (from keyword_pattern) hits any of the texts.
 
     Each text is checked raw and with diacritics folded: most keywords are
     ASCII ("garaz", "kancelar") while titles keep their diacritics ("Predaj
@@ -59,10 +67,19 @@ def is_excluded_listing(*texts: str) -> bool:
     keywords ("reštaur", "dražb") matching."""
     for t in texts:
         low = (t or "").lower()
-        folded = strip_diacritics(low)
-        if any(kw in low or kw in folded for kw in EXCLUDE_KEYWORDS):
+        if pattern.search(low) or pattern.search(strip_diacritics(low)):
             return True
     return False
+
+
+_EXCLUDE_RE = keyword_pattern(EXCLUDE_KEYWORDS)
+
+
+def is_excluded_listing(*texts: str) -> bool:
+    """True when any of the given strings (title, URL, …) names a
+    non-apartment listing per EXCLUDE_KEYWORDS (see matches_keywords)."""
+    return matches_keywords(_EXCLUDE_RE, *texts)
+
 
 # "3-izbový", "3 izbový", "3-izb.", "3izb", "3 - izbovy" … (diacritics stripped
 # before matching, so izbový/izbovy both hit).

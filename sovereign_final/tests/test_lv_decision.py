@@ -123,3 +123,51 @@ class TestDistressStaysRejected:
         monkeypatch.setattr(debt_bot, "claude_analyze_lv", _boom)
         res = {"status": "UNVERIFIED", "detail": "plot only", "raw": "LV text"}
         assert debt_bot._decide_lv(res) == res
+
+
+class TestClaudeSawOnlyAPrefix:
+    """analyze_lv() sends Claude the first LV_ANALYSIS_MAX_CHARS characters, and
+    an LV lists its encumbrances (part C) last. On a longer LV Claude's "safe"
+    is a read of owners and parcels, so it must not clear what the screen found
+    in the full text — but it can still reject."""
+
+    SAFE = {"risk_level": "LOW", "is_safe_to_proceed": True,
+            "flags": [], "summary": "Nothing wrong in what I was shown."}
+
+    @staticmethod
+    def _long_lv_with_private_lien():
+        filler = "Vlastník: Ján Novák, Hlavná 1, Žilina. " * 300   # well past the cap
+        return filler + "Časť C: ŤARCHY Záložné právo v prospech Ján Škrabák, Nitra."
+
+    def test_claude_cannot_clear_a_lien_on_an_lv_it_only_partly_read(self, monkeypatch):
+        from modules.llm_enrichment import LV_ANALYSIS_MAX_CHARS
+        lv = self._long_lv_with_private_lien()
+        assert len(lv) > LV_ANALYSIS_MAX_CHARS
+        _patch_claude(monkeypatch, enabled=True, analysis=self.SAFE)
+        screened = debt_bot._parse_lv(lv)
+        assert screened["status"] == "REJECT"
+        assert screened["claude_may_clear"] is True      # a lien, not distress
+        out = debt_bot._decide_lv(screened)
+        assert out["status"] == "REJECT"
+        assert "only read the first" in out["detail"]
+        assert out["llm_risk_level"] == "LOW"            # the read is still recorded
+
+    def test_the_same_lien_on_a_short_lv_can_still_be_cleared(self, monkeypatch):
+        _patch_claude(monkeypatch, enabled=True, analysis=self.SAFE)
+        screened = debt_bot._parse_lv("Časť C: ŤARCHY Záložné právo v prospech Ján Škrabák.")
+        assert screened["status"] == "REJECT"
+        assert debt_bot._decide_lv(screened)["status"] == "PASS"
+
+    def test_claude_can_still_reject_a_long_lv_the_screen_passed(self, monkeypatch):
+        long_clean = "Vlastník: Ján Novák, Hlavná 1, Žilina. " * 300
+        _patch_claude(monkeypatch, enabled=True, analysis={
+            "risk_level": "HIGH", "is_safe_to_proceed": False,
+            "flags": ["vecné bremeno"], "summary": "Easement."})
+        screened = debt_bot._parse_lv(long_clean)
+        assert screened["status"] == "PASS"
+        assert debt_bot._decide_lv(screened)["status"] == "REJECT"
+
+    def test_a_long_clean_lv_still_passes(self, monkeypatch):
+        long_clean = "Vlastník: Ján Novák, Hlavná 1, Žilina. " * 300
+        _patch_claude(monkeypatch, enabled=True, analysis=self.SAFE)
+        assert debt_bot._decide_lv(debt_bot._parse_lv(long_clean))["status"] == "PASS"
