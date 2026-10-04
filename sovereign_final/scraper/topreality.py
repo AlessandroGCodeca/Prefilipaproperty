@@ -317,22 +317,24 @@ def _deactivate_category_pages() -> int:
     inactive — they have no price/size/district and just inflate counts."""
     from database import get_conn
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT id, url FROM listings WHERE source='topreality' AND is_active=1"
-    ).fetchall()
-    stale = [
-        rid for rid, url in rows
-        if not any(p.search(url or "") for p in DETAIL_HREF_PATTERNS)
-    ]
-    if stale:
-        ph = ",".join("?" * len(stale))
-        conn.execute(
-            f"UPDATE listings SET is_active=0, classification='WHITE' "
-            f"WHERE id IN ({ph})",
-            stale,
-        )
-        conn.commit()
-    conn.close()
+    try:
+        rows = conn.execute(
+            "SELECT id, url FROM listings WHERE source='topreality' AND is_active=1"
+        ).fetchall()
+        stale = [
+            rid for rid, url in rows
+            if not any(p.search(url or "") for p in DETAIL_HREF_PATTERNS)
+        ]
+        if stale:
+            ph = ",".join("?" * len(stale))
+            conn.execute(
+                f"UPDATE listings SET is_active=0, classification='WHITE' "
+                f"WHERE id IN ({ph})",
+                stale,
+            )
+            conn.commit()
+    finally:
+        conn.close()
     if stale:
         print(f"  ↳ deactivated {len(stale)} topreality category-page rows "
               f"(URL not a -r{{ID}}.html detail page)")
@@ -346,20 +348,22 @@ def _backfill_blank_districts() -> int:
     match — title and og:title address_raw normally retain the diacritics."""
     from database import get_conn, fill_blank_district
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT id, title, address_raw FROM listings "
-        "WHERE source='topreality' AND (district IS NULL OR district='')"
-    ).fetchall()
-    updated = 0
-    for row_id, title, addr in rows:
-        for text in (addr, title):
-            matched = _extract_location_from_text(text or "")
-            if matched:
-                if fill_blank_district(conn, row_id, matched):
-                    updated += 1
-                break
-    conn.commit()
-    conn.close()
+    try:
+        rows = conn.execute(
+            "SELECT id, title, address_raw FROM listings "
+            "WHERE source='topreality' AND (district IS NULL OR district='')"
+        ).fetchall()
+        updated = 0
+        for row_id, title, addr in rows:
+            for text in (addr, title):
+                matched = _extract_location_from_text(text or "")
+                if matched:
+                    if fill_blank_district(conn, row_id, matched):
+                        updated += 1
+                    break
+        conn.commit()
+    finally:
+        conn.close()
     if updated:
         print(f"  ↳ backfilled district on {updated} topreality rows")
     return updated
@@ -380,19 +384,21 @@ def _deactivate_non_apartments() -> int:
     """
     from database import get_conn
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT id, title, url FROM listings "
-        "WHERE source='topreality' AND is_active=1"
-    ).fetchall()
-    ids = [(rid,) for rid, title, url in rows if is_excluded_listing(title, url)]
-    conn.executemany(
-        "UPDATE listings SET is_active=0, price_eur=0, classification='WHITE' "
-        "WHERE id=?",
-        ids,
-    )
-    n = len(ids)
-    conn.commit()
-    conn.close()
+    try:
+        rows = conn.execute(
+            "SELECT id, title, url FROM listings "
+            "WHERE source='topreality' AND is_active=1"
+        ).fetchall()
+        ids = [(rid,) for rid, title, url in rows if is_excluded_listing(title, url)]
+        conn.executemany(
+            "UPDATE listings SET is_active=0, price_eur=0, classification='WHITE' "
+            "WHERE id=?",
+            ids,
+        )
+        n = len(ids)
+        conn.commit()
+    finally:
+        conn.close()
     if n:
         print(f"  ↳ deactivated {n} non-apartment topreality listings (title/url match)", flush=True)
     return n
@@ -407,13 +413,15 @@ def _zero_bogus_prices() -> int:
     """
     from database import get_conn
     conn = get_conn()
-    n = conn.execute(
-        "UPDATE listings SET price_eur=0, classification='PENDING' "
-        "WHERE source='topreality' AND price_eur > 0 AND price_eur < ?",
-        (_PRICE_MIN,),
-    ).rowcount
-    conn.commit()
-    conn.close()
+    try:
+        n = conn.execute(
+            "UPDATE listings SET price_eur=0, classification='PENDING' "
+            "WHERE source='topreality' AND price_eur > 0 AND price_eur < ?",
+            (_PRICE_MIN,),
+        ).rowcount
+        conn.commit()
+    finally:
+        conn.close()
     if n:
         print(f"  ↳ zeroed {n} topreality listings with bogus prices "
               f"(< €{_PRICE_MIN:,})", flush=True)

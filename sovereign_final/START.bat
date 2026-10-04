@@ -20,9 +20,17 @@ if errorlevel 1 (
     timeout /t 30 /nobreak >nul
 )
 
-REM Start all containers
-echo Launching containers...
-docker compose up -d
+REM Start all containers. --build rebuilds the image from this folder first:
+REM without it, code updated here never reaches the containers, which keep
+REM running the image built the first time. An unchanged rebuild is quick.
+echo Building and launching containers...
+docker compose up -d --build
+if errorlevel 1 (
+    echo.
+    echo Docker could not build or start the containers - see the messages above.
+    pause
+    exit /b 1
+)
 
 echo.
 echo ✅ Sovereign Dashboard starting...

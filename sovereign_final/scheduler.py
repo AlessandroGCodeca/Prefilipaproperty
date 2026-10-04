@@ -1,30 +1,76 @@
 """
 scheduler.py — Sovereign Investor Dashboard
 Runs the full pipeline every day at 06:00 CET.
-Starts immediately on launch, then repeats daily.
+On launch it runs only to catch up: when no run has finished since the last
+06:00 (first start, or the machine was off at 06:00). Restarting the
+container, Docker Desktop or the PC does not re-run a pipeline that already ran
+today.
 Keep this running alongside the dashboard.
 """
 
 import logging, sys, os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
 
-os.makedirs("logs", exist_ok=True)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from config import DATA_DIR, LOGS_DIR
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.FileHandler("logs/scheduler.log", encoding="utf-8"),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
 log = logging.getLogger("sovereign")
 TZ  = pytz.timezone("Europe/Bratislava")
+RUN_HOUR = 6
+
+# When the last pipeline run finished — beside the database, on the
+# sovereign_data volume in Docker, so it outlives the container.
+LAST_RUN_FILE = os.path.join(DATA_DIR, "last_pipeline_run")
+
+
+def _setup_logging() -> None:
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.FileHandler(os.path.join(LOGS_DIR, "scheduler.log"), encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+
+
+def last_slot(now: datetime) -> datetime:
+    """The most recent scheduled run time (06:00 Bratislava) at or before
+    `now`. Localised per day, so it stays 06:00 across a DST change."""
+    day = now.astimezone(TZ).date()
+    slot = TZ.localize(datetime(day.year, day.month, day.day, RUN_HOUR))
+    if slot > now:
+        day -= timedelta(days=1)
+        slot = TZ.localize(datetime(day.year, day.month, day.day, RUN_HOUR))
+    return slot
+
+
+def read_last_run() -> datetime | None:
+    try:
+        with open(LAST_RUN_FILE, encoding="utf-8") as f:
+            when = datetime.fromisoformat(f.read().strip())
+    except (OSError, ValueError):
+        return None
+    return when if when.tzinfo else None
+
+
+def record_run(when: datetime) -> None:
+    os.makedirs(os.path.dirname(LAST_RUN_FILE), exist_ok=True)
+    with open(LAST_RUN_FILE, "w", encoding="utf-8") as f:
+        f.write(when.isoformat())
+
+
+def catch_up_due(now: datetime, last_run: datetime | None) -> bool:
+    """Whether a run is owed at startup: none has finished since the last
+    06:00. A run interrupted before it finished (the PC shut down mid-run)
+    left no record, so it is owed too."""
+    return last_run is None or last_run < last_slot(now)
 
 
 def run_pipeline():
@@ -172,20 +218,31 @@ def run_pipeline():
     except Exception as e:
         log.error(f"Stats: {e}")
 
+    try:
+        record_run(datetime.now(TZ))
+    except OSError as e:
+        log.error(f"Couldn't record the run: {e}")
+
 
 if __name__ == "__main__":
+    _setup_logging()
     log.info("⏰ Sovereign Scheduler — 06:00 CET daily")
-    log.info("   Running initial pipeline now...")
-    run_pipeline()
+    now, last = datetime.now(TZ), read_last_run()
+    if catch_up_due(now, last):
+        log.info("   No run since the last 06:00 — running the pipeline now...")
+        run_pipeline()
+    else:
+        log.info(f"   Last run finished {last.astimezone(TZ):%Y-%m-%d %H:%M} — "
+                 f"not re-running on startup.")
 
     scheduler = BlockingScheduler(timezone=TZ)
     scheduler.add_job(
         run_pipeline,
-        trigger=CronTrigger(hour=6, minute=0, timezone=TZ),
+        trigger=CronTrigger(hour=RUN_HOUR, minute=0, timezone=TZ),
         id="daily_pipeline",
         misfire_grace_time=3600,
     )
-    log.info("✅ Scheduler armed. Next run: tomorrow 06:00 CET.")
+    log.info("✅ Scheduler armed. Next run: 06:00 CET.")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):

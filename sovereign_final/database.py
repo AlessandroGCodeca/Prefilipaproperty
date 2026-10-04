@@ -23,8 +23,14 @@ def get_conn():
     # 5 s wait for the other's write lock is shorter than a scraper's batch
     # commit can take, and "database is locked" then kills a pipeline step.
     conn = sqlite3.connect(SQLITE_PATH, timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+    except BaseException:
+        # Switching to WAL needs a moment of exclusive access; when that
+        # fails the caller never gets the connection to close.
+        conn.close()
+        raise
     return conn
 
 
@@ -494,65 +500,69 @@ def _mark_legacy_lv_passes_unverified(conn) -> int:
 
 def init_db():
     conn = get_conn()
-    conn.executescript(SQLITE_SCHEMA)
-    _ensure_dev_project_column(conn)
-    _ensure_cashflow_columns(conn)
-    _ensure_enrichment_columns(conn)
-    _ensure_location_columns(conn)
-    _ensure_rent_comps_columns(conn)
-    _backfill_listing_coords(conn)
-    _mark_legacy_lv_passes_unverified(conn)
-    # rent_comps used to be seeded with hand-typed 'baseline_2026' rows
-    # (invented sample counts, never read). The table now holds only live
-    # comps built from scraped rentals (engine/rent_comps), so the seed rows
-    # go — anything in it is real.
-    conn.execute("DELETE FROM rent_comps WHERE source='baseline_2026'")
-    conn.commit()
-    conn.close()
+    try:
+        conn.executescript(SQLITE_SCHEMA)
+        _ensure_dev_project_column(conn)
+        _ensure_cashflow_columns(conn)
+        _ensure_enrichment_columns(conn)
+        _ensure_location_columns(conn)
+        _ensure_rent_comps_columns(conn)
+        _backfill_listing_coords(conn)
+        _mark_legacy_lv_passes_unverified(conn)
+        # rent_comps used to be seeded with hand-typed 'baseline_2026' rows
+        # (invented sample counts, never read). The table now holds only live
+        # comps built from scraped rentals (engine/rent_comps), so the seed rows
+        # go — anything in it is real.
+        conn.execute("DELETE FROM rent_comps WHERE source='baseline_2026'")
+        conn.commit()
+    finally:
+        conn.close()
     print("✅ Database ready.")
 
 
 # ── Query Helpers ─────────────────────────────────────────────────────────────
 def get_all_active():
     conn = get_conn()
-    rows = conn.execute("""
-        SELECT l.*,
-               c.classification        AS cf_class,
-               c.surplus_personal,     c.surplus_sro,
-               c.ratio_personal,       c.ratio_sro,
-               c.cash_on_cash,         c.net_rental_yield,
-               c.gross_yield,          c.optimal_structure,
-               c.noi_monthly,          c.cap_rate,
-               c.principal_paydown_monthly, c.total_return_annual,
-               c.total_roi,            c.total_cash_invested,
-               c.market_discount,      c.regional_median_m2,
-               c.estimated_rent_eur,   c.total_costs_personal,
-               c.total_costs_sro,      c.annual_sro_saving,
-               c.sro_break_even_months,
-               c.mortgage_monthly,     c.hoa_monthly,
-               c.property_tax_monthly, c.vacancy_cost,
-               c.maintenance_monthly,  c.management_monthly,
-               c.income_tax_personal,
-               c.health_levy_personal, c.income_tax_sro,
-               c.acquisition_costs,
-               c.mortgage_rate_used,   c.ltv_used, c.loan_term_years,
-               c.max_price_green,      c.max_price_yellow,
-               c.stress_surplus_sro,   c.stress_ratio_sro,
-               c.irr_sro,              c.irr_personal, c.rent_source,
-               lc.location_score,      lc.location_tier,
-               lc.nearest_transit_m,   lc.walkability_score,
-               lc.industrial_zone,     lc.construction_risk,
-               lc.noise_flag,          lc.amenity_count,
-               lc.flood_zone,          lc.construction_detail,
-               lc.noise_detail,        lc.flood_detail,
-               lc.geo_precision
-        FROM listings l
-        LEFT JOIN cashflow_scores c  ON l.id = c.listing_id
-        LEFT JOIN location_scores lc ON l.id = lc.listing_id
-        WHERE l.is_active = 1 AND l.lv_status != 'REJECTED'
-        ORDER BY c.market_discount DESC NULLS LAST
-    """).fetchall()
-    conn.close()
+    try:
+        rows = conn.execute("""
+            SELECT l.*,
+                   c.classification        AS cf_class,
+                   c.surplus_personal,     c.surplus_sro,
+                   c.ratio_personal,       c.ratio_sro,
+                   c.cash_on_cash,         c.net_rental_yield,
+                   c.gross_yield,          c.optimal_structure,
+                   c.noi_monthly,          c.cap_rate,
+                   c.principal_paydown_monthly, c.total_return_annual,
+                   c.total_roi,            c.total_cash_invested,
+                   c.market_discount,      c.regional_median_m2,
+                   c.estimated_rent_eur,   c.total_costs_personal,
+                   c.total_costs_sro,      c.annual_sro_saving,
+                   c.sro_break_even_months,
+                   c.mortgage_monthly,     c.hoa_monthly,
+                   c.property_tax_monthly, c.vacancy_cost,
+                   c.maintenance_monthly,  c.management_monthly,
+                   c.income_tax_personal,
+                   c.health_levy_personal, c.income_tax_sro,
+                   c.acquisition_costs,
+                   c.mortgage_rate_used,   c.ltv_used, c.loan_term_years,
+                   c.max_price_green,      c.max_price_yellow,
+                   c.stress_surplus_sro,   c.stress_ratio_sro,
+                   c.irr_sro,              c.irr_personal, c.rent_source,
+                   lc.location_score,      lc.location_tier,
+                   lc.nearest_transit_m,   lc.walkability_score,
+                   lc.industrial_zone,     lc.construction_risk,
+                   lc.noise_flag,          lc.amenity_count,
+                   lc.flood_zone,          lc.construction_detail,
+                   lc.noise_detail,        lc.flood_detail,
+                   lc.geo_precision
+            FROM listings l
+            LEFT JOIN cashflow_scores c  ON l.id = c.listing_id
+            LEFT JOIN location_scores lc ON l.id = lc.listing_id
+            WHERE l.is_active = 1 AND l.lv_status != 'REJECTED'
+            ORDER BY c.market_discount DESC NULLS LAST
+        """).fetchall()
+    finally:
+        conn.close()
     return [dict(r) for r in rows]
 
 
@@ -752,17 +762,19 @@ def upsert_rental(data: dict) -> None:
 
 def get_stats():
     conn = get_conn()
-    r = conn.execute("""
-        SELECT
-            COUNT(*)                                       AS total,
-            COALESCE(SUM(CASE WHEN classification='GREEN'    THEN 1 ELSE 0 END), 0) AS green,
-            COALESCE(SUM(CASE WHEN classification='YELLOW'   THEN 1 ELSE 0 END), 0) AS yellow,
-            COALESCE(SUM(CASE WHEN classification='WHITE'    THEN 1 ELSE 0 END), 0) AS white,
-            COALESCE(SUM(CASE WHEN lv_status='REJECTED'      THEN 1 ELSE 0 END), 0) AS rejected,
-            COALESCE(SUM(CASE WHEN classification='PENDING'  THEN 1 ELSE 0 END), 0) AS pending
-        FROM listings WHERE is_active=1
-    """).fetchone()
-    conn.close()
+    try:
+        r = conn.execute("""
+            SELECT
+                COUNT(*)                                       AS total,
+                COALESCE(SUM(CASE WHEN classification='GREEN'    THEN 1 ELSE 0 END), 0) AS green,
+                COALESCE(SUM(CASE WHEN classification='YELLOW'   THEN 1 ELSE 0 END), 0) AS yellow,
+                COALESCE(SUM(CASE WHEN classification='WHITE'    THEN 1 ELSE 0 END), 0) AS white,
+                COALESCE(SUM(CASE WHEN lv_status='REJECTED'      THEN 1 ELSE 0 END), 0) AS rejected,
+                COALESCE(SUM(CASE WHEN classification='PENDING'  THEN 1 ELSE 0 END), 0) AS pending
+            FROM listings WHERE is_active=1
+        """).fetchone()
+    finally:
+        conn.close()
     return dict(r) if r else {"total":0,"green":0,"yellow":0,"white":0,"rejected":0,"pending":0}
 
 
@@ -1009,6 +1021,30 @@ def _drop_cashflow_score(conn, listing_id: str) -> bool:
             (listing_id,),
         )
     return n > 0
+
+
+def requeue_scores_without_benchmark() -> int:
+    """Drop the scores worked out with no regional median for a district that
+    has one now, so the next scoring run classifies them against it.
+
+    A district engine.regional_prices didn't know scored WHITE ("no regional
+    price benchmark"), and get_unscored_cashflow() never looks at a scored row
+    again — so a town added to the price tables later would stay WHITE for
+    good. Returns the number of scores dropped."""
+    from engine.regional_prices import regional_median_price
+    conn = get_conn()
+    try:
+        rows = conn.execute("""
+            SELECT l.id, l.district FROM listings l
+            JOIN cashflow_scores c ON c.listing_id = l.id
+            WHERE c.regional_median_m2 IS NULL AND l.is_active = 1
+        """).fetchall()
+        n = sum(_drop_cashflow_score(conn, r["id"]) for r in rows
+                if regional_median_price(r["district"] or "") is not None)
+        conn.commit()
+    finally:
+        conn.close()
+    return n
 
 
 def fill_blank_district(conn, listing_id: str, district: str,
@@ -1303,86 +1339,90 @@ def upsert_cashflow(data: dict):
     """Store one listing's score. Columns added after the first schema
     (_CASHFLOW_NEW_COLUMNS) default to NULL when the caller leaves them out."""
     conn = get_conn()
-    _ensure_cashflow_columns(conn)
-    conn.execute("""
-        INSERT OR REPLACE INTO cashflow_scores
-        (listing_id, estimated_rent_eur, mortgage_monthly, hoa_monthly,
-         property_tax_monthly, vacancy_cost, maintenance_monthly, management_monthly,
-         income_tax_personal, health_levy_personal, total_costs_personal,
-         surplus_personal, ratio_personal,
-         income_tax_sro, health_levy_sro, total_costs_sro,
-         surplus_sro, ratio_sro,
-         noi_monthly, cap_rate,
-         cash_on_cash, net_rental_yield, gross_yield,
-         principal_paydown_monthly, total_return_annual, total_roi,
-         regional_median_m2, market_discount,
-         acquisition_costs, total_cash_invested,
-         optimal_structure, classification,
-         annual_sro_saving, sro_break_even_months,
-         scored_at, mortgage_rate_used, ltv_used, loan_term_years,
-         max_price_green, max_price_yellow,
-         stress_surplus_sro, stress_ratio_sro,
-         irr_sro, irr_personal, rent_source)
-        VALUES
-        (:listing_id,:estimated_rent_eur,:mortgage_monthly,:hoa_monthly,
-         :property_tax_monthly,:vacancy_cost,:maintenance_monthly,:management_monthly,
-         :income_tax_personal,:health_levy_personal,:total_costs_personal,
-         :surplus_personal,:ratio_personal,
-         :income_tax_sro,:health_levy_sro,:total_costs_sro,
-         :surplus_sro,:ratio_sro,
-         :noi_monthly,:cap_rate,
-         :cash_on_cash,:net_rental_yield,:gross_yield,
-         :principal_paydown_monthly,:total_return_annual,:total_roi,
-         :regional_median_m2,:market_discount,
-         :acquisition_costs,:total_cash_invested,
-         :optimal_structure,:classification,
-         :annual_sro_saving,:sro_break_even_months,
-         :scored_at,:mortgage_rate_used,:ltv_used,:loan_term_years,
-         :max_price_green,:max_price_yellow,
-         :stress_surplus_sro,:stress_ratio_sro,
-         :irr_sro,:irr_personal,:rent_source)
-    """, {**dict.fromkeys(_CASHFLOW_NEW_COLUMNS), **data})
-    conn.execute(
-        "UPDATE listings SET classification=? WHERE id=?",
-        (data["classification"], data["listing_id"])
-    )
-    conn.commit()
-    conn.close()
+    try:
+        _ensure_cashflow_columns(conn)
+        conn.execute("""
+            INSERT OR REPLACE INTO cashflow_scores
+            (listing_id, estimated_rent_eur, mortgage_monthly, hoa_monthly,
+             property_tax_monthly, vacancy_cost, maintenance_monthly, management_monthly,
+             income_tax_personal, health_levy_personal, total_costs_personal,
+             surplus_personal, ratio_personal,
+             income_tax_sro, health_levy_sro, total_costs_sro,
+             surplus_sro, ratio_sro,
+             noi_monthly, cap_rate,
+             cash_on_cash, net_rental_yield, gross_yield,
+             principal_paydown_monthly, total_return_annual, total_roi,
+             regional_median_m2, market_discount,
+             acquisition_costs, total_cash_invested,
+             optimal_structure, classification,
+             annual_sro_saving, sro_break_even_months,
+             scored_at, mortgage_rate_used, ltv_used, loan_term_years,
+             max_price_green, max_price_yellow,
+             stress_surplus_sro, stress_ratio_sro,
+             irr_sro, irr_personal, rent_source)
+            VALUES
+            (:listing_id,:estimated_rent_eur,:mortgage_monthly,:hoa_monthly,
+             :property_tax_monthly,:vacancy_cost,:maintenance_monthly,:management_monthly,
+             :income_tax_personal,:health_levy_personal,:total_costs_personal,
+             :surplus_personal,:ratio_personal,
+             :income_tax_sro,:health_levy_sro,:total_costs_sro,
+             :surplus_sro,:ratio_sro,
+             :noi_monthly,:cap_rate,
+             :cash_on_cash,:net_rental_yield,:gross_yield,
+             :principal_paydown_monthly,:total_return_annual,:total_roi,
+             :regional_median_m2,:market_discount,
+             :acquisition_costs,:total_cash_invested,
+             :optimal_structure,:classification,
+             :annual_sro_saving,:sro_break_even_months,
+             :scored_at,:mortgage_rate_used,:ltv_used,:loan_term_years,
+             :max_price_green,:max_price_yellow,
+             :stress_surplus_sro,:stress_ratio_sro,
+             :irr_sro,:irr_personal,:rent_source)
+        """, {**dict.fromkeys(_CASHFLOW_NEW_COLUMNS), **data})
+        conn.execute(
+            "UPDATE listings SET classification=? WHERE id=?",
+            (data["classification"], data["listing_id"])
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def upsert_location(data: dict):
     conn = get_conn()
-    _ensure_location_columns(conn)
-    conn.execute("""
-        INSERT OR REPLACE INTO location_scores
-        (listing_id, lat, lng, nearest_transit_m, amenity_count,
-         grocery_count, pharmacy_count, school_count,
-         construction_risk, noise_flag, flood_zone,
-         walkability_score, industrial_zone, industrial_zone_name,
-         location_score, location_tier, scored_at,
-         construction_detail, noise_detail, flood_detail,
-         geo_precision, risk_checked_at)
-        VALUES
-        (:listing_id,:lat,:lng,:nearest_transit_m,:amenity_count,
-         :grocery_count,:pharmacy_count,:school_count,
-         :construction_risk,:noise_flag,:flood_zone,
-         :walkability_score,:industrial_zone,:industrial_zone_name,
-         :location_score,:location_tier,:scored_at,
-         :construction_detail,:noise_detail,:flood_detail,
-         :geo_precision,:risk_checked_at)
-    """, {**dict.fromkeys(_LOCATION_NEW_COLUMNS), **data})
-    # Mirror coordinates onto the listing row — the dashboard (satellite view,
-    # MAPS buttons) reads l["lat"]/l["lng"] via get_all_active's l.*, and
-    # location_scores' lat/lng are not part of that select. A portal's own pin
-    # is never overwritten by a geocode.
-    if data.get("lat") is not None and data.get("lng") is not None:
-        _ensure_enrichment_columns(conn)
-        conn.execute(
-            "UPDATE listings SET lat=:lat, lng=:lng, coords_source='geocode' "
-            "WHERE id=:listing_id "
-            "  AND (coords_source IS NULL OR coords_source != 'listing')", data)
-    conn.commit()
-    conn.close()
+    try:
+        _ensure_location_columns(conn)
+        conn.execute("""
+            INSERT OR REPLACE INTO location_scores
+            (listing_id, lat, lng, nearest_transit_m, amenity_count,
+             grocery_count, pharmacy_count, school_count,
+             construction_risk, noise_flag, flood_zone,
+             walkability_score, industrial_zone, industrial_zone_name,
+             location_score, location_tier, scored_at,
+             construction_detail, noise_detail, flood_detail,
+             geo_precision, risk_checked_at)
+            VALUES
+            (:listing_id,:lat,:lng,:nearest_transit_m,:amenity_count,
+             :grocery_count,:pharmacy_count,:school_count,
+             :construction_risk,:noise_flag,:flood_zone,
+             :walkability_score,:industrial_zone,:industrial_zone_name,
+             :location_score,:location_tier,:scored_at,
+             :construction_detail,:noise_detail,:flood_detail,
+             :geo_precision,:risk_checked_at)
+        """, {**dict.fromkeys(_LOCATION_NEW_COLUMNS), **data})
+        # Mirror coordinates onto the listing row — the dashboard (satellite view,
+        # MAPS buttons) reads l["lat"]/l["lng"] via get_all_active's l.*, and
+        # location_scores' lat/lng are not part of that select. A portal's own pin
+        # is never overwritten by a geocode.
+        if data.get("lat") is not None and data.get("lng") is not None:
+            _ensure_enrichment_columns(conn)
+            conn.execute(
+                "UPDATE listings SET lat=:lat, lng=:lng, coords_source='geocode' "
+                "WHERE id=:listing_id "
+                "  AND (coords_source IS NULL OR coords_source != 'listing')", data)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def get_location_rows_missing_risk(limit: int = 100) -> list[dict]:
@@ -1430,19 +1470,21 @@ def set_lv_status(listing_id: str, status: str, reason: str = "", detail: str = 
     why), or REJECTED (the flat's LV carries a blocking encumbrance)."""
     import uuid
     conn = get_conn()
-    _ensure_enrichment_columns(conn)
-    conn.execute(
-        "UPDATE listings SET lv_status=?, lv_detail=?, lv_checked_at=? WHERE id=?",
-        (status, (detail or "")[:1000] or None,
-         datetime.now(timezone.utc).isoformat(), listing_id))
-    if status == "REJECTED":
-        conn.execute("""
-            INSERT INTO rejections_log (id, listing_id, reason, detail, module, flagged_at)
-            VALUES (?,?,?,?,?,?)
-        """, (str(uuid.uuid4()), listing_id, reason, detail, module,
-              datetime.now(timezone.utc).isoformat()))
-    conn.commit()
-    conn.close()
+    try:
+        _ensure_enrichment_columns(conn)
+        conn.execute(
+            "UPDATE listings SET lv_status=?, lv_detail=?, lv_checked_at=? WHERE id=?",
+            (status, (detail or "")[:1000] or None,
+             datetime.now(timezone.utc).isoformat(), listing_id))
+        if status == "REJECTED":
+            conn.execute("""
+                INSERT INTO rejections_log (id, listing_id, reason, detail, module, flagged_at)
+                VALUES (?,?,?,?,?,?)
+            """, (str(uuid.uuid4()), listing_id, reason, detail, module,
+                  datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def reset_demo_rejections() -> int:
@@ -1580,14 +1622,16 @@ def get_unscored_cashflow():
     # like has_parking / furnished flow through to the scorer when present,
     # without a column-list edit each time the schema grows.
     conn = get_conn()
-    rows = conn.execute("""
-        SELECT l.*
-        FROM listings l
-        LEFT JOIN cashflow_scores c ON l.id = c.listing_id
-        WHERE l.lv_status != 'REJECTED' AND c.listing_id IS NULL
-          AND l.price_eur > 0 AND l.size_m2 > 0 AND l.is_active=1
-    """).fetchall()
-    conn.close()
+    try:
+        rows = conn.execute("""
+            SELECT l.*
+            FROM listings l
+            LEFT JOIN cashflow_scores c ON l.id = c.listing_id
+            WHERE l.lv_status != 'REJECTED' AND c.listing_id IS NULL
+              AND l.price_eur > 0 AND l.size_m2 > 0 AND l.is_active=1
+        """).fetchall()
+    finally:
+        conn.close()
     return [dict(r) for r in rows]
 
 

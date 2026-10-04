@@ -144,6 +144,67 @@ class TestIsExcludedListing:
     def test_stem_at_the_start_of_a_word_still_excludes(self, text):
         assert is_excluded_listing(text)
 
+    @pytest.mark.parametrize("texts", [
+        ("3-izbový byt, Obchodná, Bratislava - Staré Mesto",),
+        ("2-izb. byt na Záhradníckej ulici, Ružinov",),
+        ("Byt Skladová, Trnava",),
+        ("3 izbový byt, Chalupkova, Bratislava",),
+        # The street before the flat: named as a street, or with its number.
+        ("Obchodná ulica, 3-izbový byt",),
+        ("OBCHODNÁ UL., 3i BYT",),
+        ("ul. Skladová, 2-izb.",),
+        ("Záhradnícka 45, Ružinov",),
+        ("Skladová 4/B, Trnava",),
+        ("", "https://www.nehnutelnosti.sk/detail/Ju123/3-izbovy-byt-zahradnicka-ruzinov"),
+    ])
+    def test_street_named_like_a_keyword_is_kept(self, texts):
+        assert not is_excluded_listing(*texts)
+
+    @pytest.mark.parametrize("texts", [
+        ("3-izbový byt s garážou",),
+        ("2-izbový byt so záhradou",),
+        ("Predaj 4-izbového bytu so záhradou a garážou, Senec",),
+        ("Garsónka s parkovacím státím",),
+        ("Mezonet s terasou a záhradou",),
+        ("2-izbový byt s pozemkom",),
+        ("Byt v historickej budove",),
+        ("", "https://www.topreality.sk/predaj-3-izbovy-byt-s-garazou-r1234567.html"),
+    ])
+    def test_flat_with_a_garage_or_garden_is_kept(self, texts):
+        assert not is_excluded_listing(*texts)
+
+    @pytest.mark.parametrize("title", [
+        "Rodinný dom so záhradou",
+        "Garáž pri byte",                 # the garage comes first: it IS the listing
+        "Rodinný dom s 2 bytmi",
+        "Pozemok pre 6 bytov",
+        "Bytový dom so záhradou",         # "bytový" is the adjective, not the flat
+        "Záhradná chatka",
+        "Skladová hala",
+        "Garáž 18 m2",                    # a size, not a house number
+        "Garáž, Obchodná ulica",          # the street is kept, the garage is not
+        "Záhradnícka 45 – garáž",
+    ])
+    def test_the_property_itself_is_still_excluded(self, title):
+        assert is_excluded_listing(title)
+
+    @pytest.mark.parametrize("title", [
+        "Prenájom 3-izbového bytu s garážou",
+        "Byt v dražbe",
+        "Apartmán v hoteli",
+        "Byt v administratívnej budove",
+        "Nebytový priestor, 2-izbový byt",
+    ])
+    def test_deal_and_unit_kind_exclude_even_after_the_flat(self, title):
+        assert is_excluded_listing(title)
+
+
+class TestRentalExclusion:
+    def test_flat_to_let_with_a_garage_is_a_rental_comp(self):
+        from scraper.rentals import _is_excluded
+        assert not _is_excluded("Prenájom 2-izb. bytu s garážou, Žilina")
+        assert _is_excluded("Prenájom garáže, Žilina")
+
 
 class TestDeactivateNonApartments:
     """The retroactive cleanup on both scrapers used to be SQL LIKE clauses,
@@ -165,6 +226,8 @@ class TestDeactivateNonApartments:
             ("office",  "Kancelárske priestory na predaj"),
             ("nonres",  "Nebytový priestor"),
             ("flat",    "3-izbový byt, Ružinov"),
+            ("garden",  "2-izbový byt so záhradou a garážou"),
+            ("street",  "3-izbový byt, Obchodná, Staré Mesto"),
             ("untitled", None),
         ]
         for source in ("nehnutelnosti", "topreality"):
@@ -200,8 +263,8 @@ class TestDeactivateNonApartments:
         conn.close()
         for rid in ("garage", "office", "nonres"):
             assert state[f"{source}-{rid}"] == (0, 0, "WHITE")
-        assert state[f"{source}-flat"] == (1, 150000, "GREEN")
-        assert state[f"{source}-untitled"] == (1, 150000, "GREEN")
+        for rid in ("flat", "garden", "street", "untitled"):
+            assert state[f"{source}-{rid}"] == (1, 150000, "GREEN")
         other = "topreality" if source == "nehnutelnosti" else "nehnutelnosti"
         assert all(state[f"{other}-{rid}"][0] == 1
                    for rid in ("garage", "office", "nonres", "flat"))

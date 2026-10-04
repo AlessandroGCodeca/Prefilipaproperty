@@ -220,20 +220,22 @@ def _backfill_blank_districts() -> int:
     strings; the location helper finds the real city/suburb name."""
     from database import get_conn, fill_blank_district
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT id, address_raw, description, title FROM listings "
-        "WHERE source='bazos' AND (district IS NULL OR district='')"
-    ).fetchall()
-    updated = 0
-    for row_id, addr, desc, title in rows:
-        for text in (addr, desc, title):
-            matched = _extract_location_from_text(text or "")
-            if matched:
-                if fill_blank_district(conn, row_id, matched):
-                    updated += 1
-                break
-    conn.commit()
-    conn.close()
+    try:
+        rows = conn.execute(
+            "SELECT id, address_raw, description, title FROM listings "
+            "WHERE source='bazos' AND (district IS NULL OR district='')"
+        ).fetchall()
+        updated = 0
+        for row_id, addr, desc, title in rows:
+            for text in (addr, desc, title):
+                matched = _extract_location_from_text(text or "")
+                if matched:
+                    if fill_blank_district(conn, row_id, matched):
+                        updated += 1
+                    break
+        conn.commit()
+    finally:
+        conn.close()
     if updated:
         print(f"  ↳ backfilled district on {updated} bazos rows from card text")
     return updated
@@ -244,13 +246,15 @@ def _zero_bogus_prices() -> int:
     rents, fees) on existing bazos rows so they re-classify as PENDING."""
     from database import get_conn
     conn = get_conn()
-    n = conn.execute(
-        "UPDATE listings SET price_eur=0, classification='PENDING' "
-        "WHERE source='bazos' AND price_eur > 0 AND price_eur < ?",
-        (_PRICE_MIN,),
-    ).rowcount
-    conn.commit()
-    conn.close()
+    try:
+        n = conn.execute(
+            "UPDATE listings SET price_eur=0, classification='PENDING' "
+            "WHERE source='bazos' AND price_eur > 0 AND price_eur < ?",
+            (_PRICE_MIN,),
+        ).rowcount
+        conn.commit()
+    finally:
+        conn.close()
     if n:
         print(f"  ↳ zeroed {n} bazos listings with bogus prices (< €{_PRICE_MIN:,})")
     return n

@@ -45,16 +45,18 @@ def _parse_args(argv) -> tuple[int, bool]:
 
 def fetch_pending(limit: int = 200) -> list[dict]:
     conn = get_conn()
-    rows = conn.execute("""
-        SELECT id, source, url, url_hash, title, price_eur, size_m2,
-               energy_class, address_raw, district, primary_image_url
-        FROM listings
-        WHERE source='nehnutelnosti' AND is_active=1
-          AND (price_eur=0 OR size_m2=0 OR district IS NULL OR district='')
-        ORDER BY scraped_at DESC
-        LIMIT ?
-    """, (limit,)).fetchall()
-    conn.close()
+    try:
+        rows = conn.execute("""
+            SELECT id, source, url, url_hash, title, price_eur, size_m2,
+                   energy_class, address_raw, district, primary_image_url
+            FROM listings
+            WHERE source='nehnutelnosti' AND is_active=1
+              AND (price_eur=0 OR size_m2=0 OR district IS NULL OR district='')
+            ORDER BY scraped_at DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+    finally:
+        conn.close()
     return [dict(r) for r in rows]
 
 
