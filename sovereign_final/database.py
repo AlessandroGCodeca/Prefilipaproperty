@@ -1427,15 +1427,22 @@ def upsert_location(data: dict):
 
 def get_location_rows_missing_risk(limit: int = 100) -> list[dict]:
     """Location rows written before real risk data existed (risk_checked_at
-    NULL) for listings still active and LV-clean."""
+    NULL) for active listings the location step scores — LV PASS and
+    UNVERIFIED, as in get_unscored_location. Carries the listing's own map pin
+    (listing_lat/listing_lng, coords_source) and the stored transit and
+    amenity facts, so the score can be recomputed with the new flags."""
     conn = get_conn()
     try:
         _ensure_location_columns(conn)
+        _ensure_enrichment_columns(conn)
         rows = conn.execute("""
-            SELECT lc.listing_id, lc.lat, lc.lng, l.address_raw, l.district
+            SELECT lc.listing_id, lc.lat, lc.lng,
+                   lc.nearest_transit_m, lc.amenity_count,
+                   l.address_raw, l.district, l.energy_class,
+                   l.lat AS listing_lat, l.lng AS listing_lng, l.coords_source
             FROM location_scores lc JOIN listings l ON l.id = lc.listing_id
             WHERE lc.risk_checked_at IS NULL AND l.is_active = 1
-              AND l.lv_status = 'PASS'
+              AND l.lv_status IN ('PASS', 'UNVERIFIED')
             LIMIT ?
         """, (limit,)).fetchall()
     finally:
@@ -1445,7 +1452,9 @@ def get_location_rows_missing_risk(limit: int = 100) -> list[dict]:
 
 def update_location_risk(listing_id: str, risk: dict) -> None:
     """Write construction / noise / flood answers (and the geocode precision
-    they were judged at) onto an existing location row."""
+    they were judged at) onto an existing location row. lat/lng, and the
+    location score and tier recomputed from the new flags, are written when
+    given and kept otherwise."""
     conn = get_conn()
     try:
         _ensure_location_columns(conn)
@@ -1455,9 +1464,15 @@ def update_location_risk(listing_id: str, risk: dict) -> None:
                 construction_detail=:construction_detail,
                 noise_flag=:noise_flag, noise_detail=:noise_detail,
                 flood_zone=:flood_zone, flood_detail=:flood_detail,
-                geo_precision=:geo_precision, risk_checked_at=:risk_checked_at
+                geo_precision=:geo_precision, risk_checked_at=:risk_checked_at,
+                lat=COALESCE(:lat, lat), lng=COALESCE(:lng, lng),
+                location_score=COALESCE(:location_score, location_score),
+                location_tier=COALESCE(:location_tier, location_tier),
+                walkability_score=COALESCE(:walkability_score, walkability_score)
             WHERE listing_id=:listing_id
-        """, {**risk, "listing_id": listing_id,
+        """, {"lat": None, "lng": None, "location_score": None,
+              "location_tier": None, "walkability_score": None,
+              **risk, "listing_id": listing_id,
               "risk_checked_at": datetime.now(timezone.utc).isoformat()})
         conn.commit()
     finally:

@@ -270,20 +270,32 @@ def run_location_scoring(progress_callback=None, limit: int | None = 200) -> int
 def run_risk_backfill(limit: int = 100, progress_callback=None) -> int:
     """Give rows scored before the real risk data existed their noise, flood
     and construction answers. Those rows hold a stored False for each (the old
-    stubs' answer), and no record of how precise their geocode was, so the
-    address is geocoded again to learn that before anything is judged."""
+    stubs' answer), and no record of how precise their geocode was. The
+    portal's own map pin is used when the listing has one, as in
+    run_location_scoring; otherwise the address is geocoded again to learn the
+    precision before anything is judged. The location score and tier were
+    computed from the stubs' answers, so they are recomputed from the new
+    flags with the stored transit and amenity facts."""
     rows = get_location_rows_missing_risk(limit)
     done = 0
     for i, row in enumerate(rows):
         if progress_callback:
             progress_callback(i + 1, len(rows), (row.get("address_raw") or "")[:50])
         addr = row.get("address_raw") or row.get("district") or ""
-        lat, lng, precision = geocode_precise(addr)
-        if lat is None:
-            lat, lng, precision = row.get("lat"), row.get("lng"), "area"
+        if row.get("coords_source") == "listing" and row.get("listing_lat") is not None:
+            lat, lng, precision = row["listing_lat"], row["listing_lng"], "street"
+        else:
+            lat, lng, precision = geocode_precise(addr)
+            if lat is None:
+                lat, lng, precision = row.get("lat"), row.get("lng"), "area"
         if lat is None:
             continue
         risk = risk_data.assess(lat, lng, precision)
+        transit = row.get("nearest_transit_m")
+        score, tier = compute_score(
+            9999.0 if transit is None else transit,
+            {"amenities": row.get("amenity_count") or 0},
+            bool(risk["construction"]), bool(risk["noise"]), row.get("energy_class"))
         update_location_risk(row["listing_id"], {
             "construction_risk":   _flag(risk["construction"]),
             "construction_detail": risk["construction_detail"],
@@ -292,6 +304,11 @@ def run_risk_backfill(limit: int = 100, progress_callback=None) -> int:
             "flood_zone":          _flag(risk["flood"]),
             "flood_detail":        risk["flood_detail"],
             "geo_precision":       precision,
+            "lat":                 lat,
+            "lng":                 lng,
+            "location_score":      score,
+            "location_tier":       tier,
+            "walkability_score":   score,
         })
         done += 1
         time.sleep(1.0)
