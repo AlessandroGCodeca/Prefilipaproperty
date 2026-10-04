@@ -320,13 +320,17 @@ def pick_sale_price(candidates, size_m2: float = 0.0, district: str = "") -> flo
     return max(values)
 
 
-def _forget_misread_prices(conn, ids) -> None:
-    """A zeroed price was never the listing's asking price, so it must not
-    stay in price_history to be read later as a cut once the real price
-    arrives."""
-    from database import _ensure_price_history, clear_price_history
+def _forget_misread_prices(conn, flagged) -> None:
+    """`flagged` is (listing_id, zeroed price) pairs. A zeroed price was never
+    the listing's asking price, so it leaves price_history, or it would be
+    read as a cut once the real price arrives. Prices seen before it stay, so
+    a genuine earlier cut is still one. The score worked out at the misread is
+    dropped too, so the real price is scored when it arrives."""
+    from database import _drop_cashflow_score, _ensure_price_history, forget_price
     _ensure_price_history(conn)
-    clear_price_history(conn, ids)
+    for listing_id, price in flagged:
+        forget_price(conn, listing_id, price)
+        _drop_cashflow_score(conn, listing_id)
 
 
 def zero_below_regional_floor(source: str) -> int:
@@ -341,16 +345,16 @@ def zero_below_regional_floor(source: str) -> int:
             "WHERE source=? AND price_eur > 0 AND size_m2 > 0",
             (source,),
         ).fetchall()
-        flagged: list[str] = []
+        flagged: list[tuple[str, float]] = []
         for row_id, district, price, size in rows:
             if not is_plausible_regional_price(price, size, district or ""):
-                flagged.append(row_id)
+                flagged.append((row_id, price))
         if flagged:
             placeholders = ",".join("?" * len(flagged))
             conn.execute(
                 f"UPDATE listings SET price_eur=0, classification='PENDING' "
                 f"WHERE id IN ({placeholders})",
-                flagged,
+                [row_id for row_id, _ in flagged],
             )
             _forget_misread_prices(conn, flagged)
             conn.commit()
@@ -382,16 +386,16 @@ def zero_above_regional_ceiling(source: str) -> int:
             "WHERE source=? AND price_eur > 0 AND size_m2 > 0",
             (source,),
         ).fetchall()
-        flagged: list[str] = []
+        flagged: list[tuple[str, float]] = []
         for row_id, district, price, size in rows:
             if is_above_regional_ceiling(price, size, district or ""):
-                flagged.append(row_id)
+                flagged.append((row_id, price))
         if flagged:
             placeholders = ",".join("?" * len(flagged))
             conn.execute(
                 f"UPDATE listings SET price_eur=0, classification='PENDING' "
                 f"WHERE id IN ({placeholders})",
-                flagged,
+                [row_id for row_id, _ in flagged],
             )
             _forget_misread_prices(conn, flagged)
             conn.commit()

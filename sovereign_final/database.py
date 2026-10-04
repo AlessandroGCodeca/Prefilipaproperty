@@ -373,7 +373,26 @@ def _ensure_cashflow_columns(conn):
             print(f"♻️  Cleared {n} cashflow scores classed by the old self-funding "
                   f"rule — run 💰 CASHFLOW SCORE to reclassify against the "
                   f"regional median.")
+    elif cols and any(c not in cols for c in _DEAL_EXTRA_COLUMNS):
+        # Scores from before max offer, the rate-shock stress test and IRR
+        # existed. get_unscored_cashflow() never looks at a scored row again,
+        # so without this they would show blanks for those figures for good.
+        # Dropped once: the columns exist from here on.
+        n = conn.execute("DELETE FROM cashflow_scores").rowcount
+        conn.execute(
+            "UPDATE listings SET classification='PENDING' "
+            "WHERE classification IN ('GREEN','YELLOW','WHITE')")
+        if n:
+            print(f"♻️  Cleared {n} cashflow scores from before max offer, stress "
+                  f"test and IRR — run 💰 CASHFLOW SCORE to fill them in.")
     conn.commit()
+
+
+# The deal extras (engine.financial.deal_extras). A score row without them
+# predates them; see _ensure_cashflow_columns.
+_DEAL_EXTRA_COLUMNS = ("max_price_green", "max_price_yellow",
+                       "stress_surplus_sro", "stress_ratio_sro",
+                       "irr_sro", "irr_personal")
 
 
 # Optional LLM-enrichment columns on `listings` (modules/llm_enrichment via the
@@ -894,10 +913,17 @@ def set_listing_price(listing_id: str, price_eur: float) -> bool:
     try:
         _ensure_enrichment_columns(conn)
         _ensure_price_history(conn)
-        # A repair corrects a misread, so the misread was never an asking
-        # price: the history restarts from the corrected value (or empties),
-        # instead of reporting the correction as a price cut.
-        clear_price_history(conn, [listing_id])
+        old = conn.execute(
+            "SELECT price_eur FROM listings WHERE id=?", (listing_id,)).fetchone()
+        old_price = (old[0] or 0) if old else 0
+        if old_price and old_price != (price_eur or 0):
+            # A repair corrects a misread, so the misread was never an asking
+            # price: it leaves the history, rather than the correction being
+            # reported as a price cut. Prices seen before the misread stay, so
+            # a genuine earlier cut is still one. The score worked out at the
+            # misread goes too, so the corrected price gets scored.
+            forget_price(conn, listing_id, old_price)
+            _drop_cashflow_score(conn, listing_id)
         if price_eur and price_eur > 0:
             n = conn.execute(
                 "UPDATE listings SET price_eur=? WHERE id=?",
@@ -1011,6 +1037,8 @@ def _drop_cashflow_score(conn, listing_id: str) -> bool:
     leave that wrong score in place for good. Classification goes back to
     PENDING only when it came from the score being dropped.
     """
+    if not _has_table(conn, "cashflow_scores"):
+        return False     # a DB (or test fixture) that never scored anything
     n = conn.execute(
         "DELETE FROM cashflow_scores WHERE listing_id=?", (listing_id,)
     ).rowcount
@@ -1021,6 +1049,22 @@ def _drop_cashflow_score(conn, listing_id: str) -> bool:
             (listing_id,),
         )
     return n > 0
+
+
+def _drop_location_score(conn, listing_id: str) -> bool:
+    """Discard one listing's location row so the next Location IQ run scores
+    it again (get_unscored_location only picks up rows with none)."""
+    if not _has_table(conn, "location_scores"):
+        return False
+    return conn.execute(
+        "DELETE FROM location_scores WHERE listing_id=?", (listing_id,)
+    ).rowcount > 0
+
+
+def _has_table(conn, name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone() is not None
 
 
 def requeue_scores_without_benchmark() -> int:
@@ -1117,16 +1161,13 @@ def _has_price_history(conn, listing_id: str) -> bool:
     ).fetchone() is not None
 
 
-def clear_price_history(conn, listing_ids) -> int:
-    """Forget the recorded prices of listings whose price turned out to be a
-    misread (a neighbouring listing's, or a deposit). Takes the caller's
-    connection; the caller commits."""
-    ids = [i for i in (listing_ids or []) if i]
-    if not ids:
-        return 0
-    ph = ",".join("?" * len(ids))
+def forget_price(conn, listing_id: str, price_eur: float) -> int:
+    """Remove a misread price (a neighbouring listing's, or a deposit) from a
+    listing's history, keeping the prices recorded around it. Takes the
+    caller's connection; the caller commits."""
     return conn.execute(
-        f"DELETE FROM price_history WHERE listing_id IN ({ph})", ids
+        "DELETE FROM price_history WHERE listing_id=? AND price_eur=?",
+        (listing_id, float(price_eur)),
     ).rowcount
 
 
@@ -1313,6 +1354,10 @@ def upsert_listing(data: dict):
             conn.execute(
                 "UPDATE listings SET lv_status='PENDING' "
                 "WHERE id=? AND lv_status='UNVERIFIED'", (data["id"],))
+            # Location IQ judged transit, amenities and risk at the old
+            # coordinates (a geocode, often just a district centroid, or the
+            # pin before it moved): score it again at the pin.
+            _drop_location_score(conn, data["id"])
         # A district arriving for a row that had none: its score is stale.
         if (existing and not (existing[1] or "").strip()
                 and (data.get("district") or "").strip()):
@@ -1328,7 +1373,9 @@ def upsert_listing(data: dict):
                 _record_price(conn, data["id"], old_price, existing[6])
             _record_price(conn, data["id"], new_price,
                           data.get("last_seen_at") or data.get("scraped_at"))
-            if existing and old_price > 0:
+            # Also when the old price was 0: a price a cleanup zeroed may
+            # still have the score worked out at the misread.
+            if existing:
                 _drop_cashflow_score(conn, data["id"])
         conn.commit()
     finally:
