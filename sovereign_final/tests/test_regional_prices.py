@@ -71,6 +71,28 @@ class TestFloorLookupChain:
         expected = REGIONAL_MEDIAN_PRICE_PER_M2["BA"] * REGIONAL_PRICE_FLOOR_RATIO
         assert floor == expected
 
+    @pytest.mark.parametrize("district,kraj", [
+        ("Šamorín",          "TT"), ("Samorin",          "TT"),
+        ("Banská Štiavnica", "BB"), ("Banska Stiavnica", "BB"),
+    ])
+    def test_small_town_without_its_own_median_uses_its_kraj(self, district, kraj):
+        assert kraj_for_district(district) == kraj
+        assert regional_price_floor(district) == \
+            REGIONAL_MEDIAN_PRICE_PER_M2[kraj] * REGIONAL_PRICE_FLOOR_RATIO
+
+    @pytest.mark.parametrize("district,okres_town", [
+        ("Ivanka pri Dunaji",             "senec"),
+        ("Ivanka pri Dunaji, Bratislava", "senec"),
+        ("Svätý Jur",                     "pezinok"),
+        ("Svaty Jur",                     "pezinok"),
+    ])
+    def test_bratislava_suburb_town_uses_its_okres_town(self, district, okres_town):
+        # The Bratislavský kraj figure is Bratislava's own market; against it
+        # an ordinary flat in these towns would read as a deep discount.
+        assert kraj_for_district(district) == "BA"
+        assert regional_price_floor(district) == \
+            CITY_MEDIAN_PRICE_PER_M2[okres_town] * REGIONAL_PRICE_FLOOR_RATIO
+
     def test_ascii_diacritic_fold(self):
         # The dict has both ASCII and Slovak-diacritic keys
         floor_diacritic = regional_price_floor("Petržalka, Bratislava")
@@ -174,3 +196,33 @@ class TestPickSalePrice:
     def test_empty(self):
         assert pick_sale_price([], 50.0, "Bratislava") == 0.0
         assert pick_sale_price(None, 50.0, "Bratislava") == 0.0
+
+
+# ── Scores worked out before a district had a median ─────────────────────────
+class TestRequeueWithoutBenchmark:
+    def test_town_given_a_median_later_is_rescored(self, full_db, monkeypatch):
+        import database as db
+        from engine import regional_prices as rp
+        from modules.cashflow_runner import run_scoring
+        from tests.conftest import make_listing
+
+        db.upsert_listing(make_listing("samorin", district="Šamorín"))
+        db.upsert_listing(make_listing("nowhere", district="Nowhereville"))
+        # Score both as if Šamorín were still missing from the tables.
+        real = rp.regional_median_price
+        monkeypatch.setattr(rp, "regional_median_price",
+                            lambda d: None if "amor" in (d or "") else real(d))
+        import engine.financial as fin
+        monkeypatch.setattr(fin, "regional_median_price", rp.regional_median_price)
+        assert run_scoring() == 2
+        monkeypatch.setattr(rp, "regional_median_price", real)
+        monkeypatch.setattr(fin, "regional_median_price", real)
+
+        assert db.requeue_scores_without_benchmark() == 1   # Nowhereville stays
+        assert run_scoring() == 1
+        c = full_db()
+        row = c.execute("SELECT regional_median_m2 FROM cashflow_scores "
+                        "WHERE listing_id='samorin'").fetchone()
+        c.close()
+        assert row[0] == REGIONAL_MEDIAN_PRICE_PER_M2["TT"]
+        assert db.requeue_scores_without_benchmark() == 0

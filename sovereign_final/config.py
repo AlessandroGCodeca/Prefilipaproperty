@@ -384,6 +384,12 @@ RENT_MAX_EUR             = 6_000
 SRO_SETUP_COST = 2_500  # Notary + registry + first year accounting
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-SQLITE_PATH    = "data/sovereign.db"
-CONTRACTS_DIR  = "contracts"
-LOGS_DIR       = "logs"
+# Anchored to this folder, not the working directory: started from anywhere
+# else (`python sovereign_final/scheduler.py`, a shortcut, a scheduled task),
+# a relative "data/sovereign.db" quietly created a second, empty database
+# there instead of opening the real one.
+BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR       = os.path.join(BASE_DIR, "data")
+SQLITE_PATH    = os.path.join(DATA_DIR, "sovereign.db")
+CONTRACTS_DIR  = os.path.join(BASE_DIR, "contracts")
+LOGS_DIR       = os.path.join(BASE_DIR, "logs")

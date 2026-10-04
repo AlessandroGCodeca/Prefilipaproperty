@@ -94,7 +94,8 @@ def rent_from_text(text: str) -> float:
 
 def _is_excluded(*texts: str) -> bool:
     """EXCLUDE_KEYWORDS (minus "prenajom") against each text — see
-    textparse.matches_keywords for the diacritic folding and word-start rule."""
+    textparse.matches_keywords for when a keyword counts ("Prenájom 2-izb.
+    bytu s garážou" is a flat to let, a "Prenájom garáže" is not)."""
     return matches_keywords(_RENTAL_EXCLUDE_RE, *texts)
 
 

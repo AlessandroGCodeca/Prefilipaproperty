@@ -7,7 +7,8 @@ quoting errors, or non-apartment listings that slipped past other filters.
 
 Lookup priority (most specific wins):
   1. Bratislava sub-district (Realitná únia, April 2026)
-  2. Slovak city (Realitná únia, April 2026)
+  2. Slovak city (Realitná únia, April 2026) — or, for a town in
+     OKRES_TOWN_FOR, the town its okres is named for
   3. Kraj fallback (NBS Q1 2026)
   4. Global blank-district floor
 
@@ -50,6 +51,17 @@ CITY_MEDIAN_PRICE_PER_M2 = {
     "pezinok":            2_764,
     "liptovský mikuláš":  2_483, "liptovsky mikulas":  2_483,
     "poprad":             2_361,
+}
+
+# Towns with no published median of their own, priced as the town their okres
+# is named for. Both sit in Bratislavský kraj, whose NBS figure is Bratislava's
+# own market (€3,845/m²): against it an ordinary flat in Ivanka pri Dunaji or
+# Svätý Jur would read as 25–30% below market — a GREEN that isn't one. Their
+# okres towns' Realitná únia medians are the nearest published figure.
+OKRES_TOWN_FOR = {
+    "ivanka pri dunaji": "senec",       # okres Senec
+    "svätý jur":         "pezinok",     # okres Pezinok
+    "svaty jur":         "pezinok",
 }
 
 # Kraj-level fallback (NBS Q1 2026). Used when district matches none of the
@@ -114,6 +126,8 @@ _DISTRICT_TO_KRAJ = {
     "rusovce": "BA", "jarovce": "BA", "čunovo": "BA", "cunovo": "BA",
     "senec": "BA", "pezinok": "BA", "malacky": "BA",
     "stupava": "BA", "modra": "BA",
+    "ivanka pri dunaji": "BA",
+    "svätý jur": "BA", "svaty jur": "BA",
 
     # Trnavský kraj
     "trnava": "TT",
@@ -121,6 +135,7 @@ _DISTRICT_TO_KRAJ = {
     "galanta": "TT", "hlohovec": "TT",
     "piešťany": "TT", "piestany": "TT",
     "senica": "TT", "skalica": "TT",
+    "šamorín": "TT", "samorin": "TT",   # okres Dunajská Streda
 
     # Trenčiansky kraj
     "trenčín": "TN", "trencin": "TN",
@@ -154,6 +169,7 @@ _DISTRICT_TO_KRAJ = {
 
     # Banskobystrický kraj
     "banská bystrica": "BB", "banska bystrica": "BB",
+    "banská štiavnica": "BB", "banska stiavnica": "BB",
     "brezno": "BB", "detva": "BB",
     "lučenec": "BB", "lucenec": "BB",
     "revúca": "BB", "revuca": "BB",
@@ -195,6 +211,7 @@ _BA_DISTRICT_KEYS_BY_LENGTH = sorted(
 _CITY_KEYS_BY_LENGTH = sorted(
     CITY_MEDIAN_PRICE_PER_M2.keys(), key=len, reverse=True
 )
+_OKRES_TOWN_KEYS_BY_LENGTH = sorted(OKRES_TOWN_FOR, key=len, reverse=True)
 
 
 def kraj_for_district(district: str) -> str | None:
@@ -213,7 +230,8 @@ def regional_median_price(district: str) -> float | None:
     """The per-m² sale-price median for the listing's region, or None when the
     district resolves to nothing.
 
-    Lookup chain: Bratislava sub-district → city → kraj. The Bratislava
+    Lookup chain: Bratislava sub-district → city (a town in OKRES_TOWN_FOR
+    first takes its okres town's) → kraj. The Bratislava
     sub-district match requires "bratislava" to also appear in the district
     string, because suburb names like "Staré Mesto" or "Nové Mesto" exist in
     other Slovak cities too (e.g. Košice).
@@ -226,6 +244,10 @@ def regional_median_price(district: str) -> float | None:
         for needle in _BA_DISTRICT_KEYS_BY_LENGTH:
             if needle in key:
                 return BA_DISTRICT_MEDIAN_PRICE_PER_M2[needle]
+
+    for needle in _OKRES_TOWN_KEYS_BY_LENGTH:
+        if needle in key:
+            return CITY_MEDIAN_PRICE_PER_M2[OKRES_TOWN_FOR[needle]]
 
     for needle in _CITY_KEYS_BY_LENGTH:
         if needle in key:
@@ -313,25 +335,27 @@ def zero_below_regional_floor(source: str) -> int:
     when we can't determine the kraj)."""
     from database import get_conn
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT id, district, price_eur, size_m2 FROM listings "
-        "WHERE source=? AND price_eur > 0 AND size_m2 > 0",
-        (source,),
-    ).fetchall()
-    flagged: list[str] = []
-    for row_id, district, price, size in rows:
-        if not is_plausible_regional_price(price, size, district or ""):
-            flagged.append(row_id)
-    if flagged:
-        placeholders = ",".join("?" * len(flagged))
-        conn.execute(
-            f"UPDATE listings SET price_eur=0, classification='PENDING' "
-            f"WHERE id IN ({placeholders})",
-            flagged,
-        )
-        _forget_misread_prices(conn, flagged)
-        conn.commit()
-    conn.close()
+    try:
+        rows = conn.execute(
+            "SELECT id, district, price_eur, size_m2 FROM listings "
+            "WHERE source=? AND price_eur > 0 AND size_m2 > 0",
+            (source,),
+        ).fetchall()
+        flagged: list[str] = []
+        for row_id, district, price, size in rows:
+            if not is_plausible_regional_price(price, size, district or ""):
+                flagged.append(row_id)
+        if flagged:
+            placeholders = ",".join("?" * len(flagged))
+            conn.execute(
+                f"UPDATE listings SET price_eur=0, classification='PENDING' "
+                f"WHERE id IN ({placeholders})",
+                flagged,
+            )
+            _forget_misread_prices(conn, flagged)
+            conn.commit()
+    finally:
+        conn.close()
     if flagged:
         print(
             f"  ↳ zeroed {len(flagged)} {source} listings priced below "
@@ -352,25 +376,27 @@ def zero_above_regional_ceiling(source: str) -> int:
     """
     from database import get_conn
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT id, district, price_eur, size_m2 FROM listings "
-        "WHERE source=? AND price_eur > 0 AND size_m2 > 0",
-        (source,),
-    ).fetchall()
-    flagged: list[str] = []
-    for row_id, district, price, size in rows:
-        if is_above_regional_ceiling(price, size, district or ""):
-            flagged.append(row_id)
-    if flagged:
-        placeholders = ",".join("?" * len(flagged))
-        conn.execute(
-            f"UPDATE listings SET price_eur=0, classification='PENDING' "
-            f"WHERE id IN ({placeholders})",
-            flagged,
-        )
-        _forget_misread_prices(conn, flagged)
-        conn.commit()
-    conn.close()
+    try:
+        rows = conn.execute(
+            "SELECT id, district, price_eur, size_m2 FROM listings "
+            "WHERE source=? AND price_eur > 0 AND size_m2 > 0",
+            (source,),
+        ).fetchall()
+        flagged: list[str] = []
+        for row_id, district, price, size in rows:
+            if is_above_regional_ceiling(price, size, district or ""):
+                flagged.append(row_id)
+        if flagged:
+            placeholders = ",".join("?" * len(flagged))
+            conn.execute(
+                f"UPDATE listings SET price_eur=0, classification='PENDING' "
+                f"WHERE id IN ({placeholders})",
+                flagged,
+            )
+            _forget_misread_prices(conn, flagged)
+            conn.commit()
+    finally:
+        conn.close()
     if flagged:
         print(
             f"  ↳ zeroed {len(flagged)} {source} listings priced above "

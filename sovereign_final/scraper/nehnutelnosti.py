@@ -1340,19 +1340,21 @@ def _deactivate_non_apartments() -> int:
     """
     from database import get_conn
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT id, title, url FROM listings "
-        "WHERE source='nehnutelnosti' AND is_active=1"
-    ).fetchall()
-    ids = [(rid,) for rid, title, url in rows if is_excluded_listing(title, url)]
-    conn.executemany(
-        "UPDATE listings SET is_active=0, price_eur=0, classification='WHITE' "
-        "WHERE id=?",
-        ids,
-    )
-    n = len(ids)
-    conn.commit()
-    conn.close()
+    try:
+        rows = conn.execute(
+            "SELECT id, title, url FROM listings "
+            "WHERE source='nehnutelnosti' AND is_active=1"
+        ).fetchall()
+        ids = [(rid,) for rid, title, url in rows if is_excluded_listing(title, url)]
+        conn.executemany(
+            "UPDATE listings SET is_active=0, price_eur=0, classification='WHITE' "
+            "WHERE id=?",
+            ids,
+        )
+        n = len(ids)
+        conn.commit()
+    finally:
+        conn.close()
     if n:
         print(f"  ↳ deactivated {n} non-apartment nehnutelnosti listings (title/url match)", flush=True)
     return n
@@ -1364,13 +1366,15 @@ def _zero_bogus_prices() -> int:
     as PENDING and stop polluting the GREEN list."""
     from database import get_conn
     conn = get_conn()
-    n = conn.execute(
-        "UPDATE listings SET price_eur=0, classification='PENDING' "
-        "WHERE source='nehnutelnosti' AND price_eur > 0 AND price_eur < ?",
-        (_PRICE_MIN,),
-    ).rowcount
-    conn.commit()
-    conn.close()
+    try:
+        n = conn.execute(
+            "UPDATE listings SET price_eur=0, classification='PENDING' "
+            "WHERE source='nehnutelnosti' AND price_eur > 0 AND price_eur < ?",
+            (_PRICE_MIN,),
+        ).rowcount
+        conn.commit()
+    finally:
+        conn.close()
     if n:
         print(f"  ↳ zeroed {n} nehnutelnosti listings with bogus prices (< €{_PRICE_MIN:,})")
     return n
@@ -1383,30 +1387,32 @@ def _dedupe_canonical_urls() -> int:
     """
     from database import get_conn
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT id, url, price_eur, size_m2 FROM listings WHERE source='nehnutelnosti'"
-    ).fetchall()
-    groups: dict[str, list[tuple]] = {}
-    for r in rows:
-        canon = _canonical_url(r[1] or "")
-        groups.setdefault(canon, []).append(r)
-    removed = 0
-    for canon, group in groups.items():
-        if len(group) <= 1:
-            continue
-        # Pick winner: most data first (price>0 + size>0 > price>0 > anything).
-        group.sort(key=lambda r: ((r[2] or 0) > 0, (r[3] or 0) > 0), reverse=True)
-        winner = group[0]
-        for loser in group[1:]:
-            conn.execute("DELETE FROM listings WHERE id=?", (loser[0],))
-            removed += 1
-        # Make sure the winner stores the canonical URL.
-        if winner[1] != canon:
-            conn.execute(
-                "UPDATE listings SET url=? WHERE id=?", (canon, winner[0])
-            )
-    conn.commit()
-    conn.close()
+    try:
+        rows = conn.execute(
+            "SELECT id, url, price_eur, size_m2 FROM listings WHERE source='nehnutelnosti'"
+        ).fetchall()
+        groups: dict[str, list[tuple]] = {}
+        for r in rows:
+            canon = _canonical_url(r[1] or "")
+            groups.setdefault(canon, []).append(r)
+        removed = 0
+        for canon, group in groups.items():
+            if len(group) <= 1:
+                continue
+            # Pick winner: most data first (price>0 + size>0 > price>0 > anything).
+            group.sort(key=lambda r: ((r[2] or 0) > 0, (r[3] or 0) > 0), reverse=True)
+            winner = group[0]
+            for loser in group[1:]:
+                conn.execute("DELETE FROM listings WHERE id=?", (loser[0],))
+                removed += 1
+            # Make sure the winner stores the canonical URL.
+            if winner[1] != canon:
+                conn.execute(
+                    "UPDATE listings SET url=? WHERE id=?", (canon, winner[0])
+                )
+        conn.commit()
+    finally:
+        conn.close()
     if removed:
         print(f"  ↳ removed {removed} nehnutelnosti duplicate-slug rows")
     return removed
@@ -1432,39 +1438,41 @@ def _backfill_blank_districts() -> int:
     """
     from database import get_conn, fill_blank_district
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT id, url, title, address_raw, description FROM listings "
-        "WHERE source='nehnutelnosti' AND (district IS NULL OR district='')"
-    ).fetchall()
-    updated = 0
-    for row_id, url, title, addr_raw, description in rows:
-        slug_data = _parse_slug(url or "")
-        district = slug_data.get("district", "")
-        address = slug_data.get("address", "")
-        if not district:
-            for text in (addr_raw, description, title):
-                matched = _extract_location_from_text(text or "")
-                if matched:
-                    district = matched
-                    address = matched
-                    break
-        if not district:
-            continue
-        new_addr = addr_raw or address or district
-        if not fill_blank_district(conn, row_id, district, new_addr):
-            continue
-        # Only overwrite title when the current one is a generic placeholder,
-        # and only a slug-derived title (not a bare city/suburb match) is
-        # worth using in its place.
-        cur_title = (title or "").strip().lower()
-        if slug_data.get("title") and cur_title in _GENERIC_TITLES:
-            conn.execute(
-                "UPDATE listings SET title=? WHERE id=?",
-                (slug_data["title"][:200], row_id),
-            )
-        updated += 1
-    conn.commit()
-    conn.close()
+    try:
+        rows = conn.execute(
+            "SELECT id, url, title, address_raw, description FROM listings "
+            "WHERE source='nehnutelnosti' AND (district IS NULL OR district='')"
+        ).fetchall()
+        updated = 0
+        for row_id, url, title, addr_raw, description in rows:
+            slug_data = _parse_slug(url or "")
+            district = slug_data.get("district", "")
+            address = slug_data.get("address", "")
+            if not district:
+                for text in (addr_raw, description, title):
+                    matched = _extract_location_from_text(text or "")
+                    if matched:
+                        district = matched
+                        address = matched
+                        break
+            if not district:
+                continue
+            new_addr = addr_raw or address or district
+            if not fill_blank_district(conn, row_id, district, new_addr):
+                continue
+            # Only overwrite title when the current one is a generic placeholder,
+            # and only a slug-derived title (not a bare city/suburb match) is
+            # worth using in its place.
+            cur_title = (title or "").strip().lower()
+            if slug_data.get("title") and cur_title in _GENERIC_TITLES:
+                conn.execute(
+                    "UPDATE listings SET title=? WHERE id=?",
+                    (slug_data["title"][:200], row_id),
+                )
+            updated += 1
+        conn.commit()
+    finally:
+        conn.close()
     if updated:
         print(f"  ↳ backfilled district on {updated} nehnutelnosti rows")
     return updated

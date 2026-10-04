@@ -15,7 +15,8 @@
 
 That's it.
 
-Storage is one SQLite file, `data/sovereign.db` — locally, and in Docker on
+Storage is one SQLite file, `data/sovereign.db` inside this folder (whatever
+directory a script is started from) — locally, and in Docker on
 the `sovereign_data` volume shared by the dashboard and the scheduler. (The
 old PostgreSQL mode never worked and is gone; a `DATABASE_URL` left in an old
 `.env` is ignored.) To carry a local database into Docker:
@@ -35,7 +36,7 @@ CI runs on every PR. To run locally from `sovereign_final/`:
 python3 -m pytest tests/
 ```
 
-Expected: ~960 passing (the dashboard smoke test in `tests/test_app_smoke.py` needs `streamlit` installed and is skipped without it).
+Expected: ~1,045 passing (the dashboard smoke test in `tests/test_app_smoke.py` needs `streamlit` installed and is skipped without it).
 
 ---
 
@@ -117,8 +118,11 @@ Housekeeping = deactivate stale listings (>21d unseen) + flag dev projects.
 A nehnutelnosti listing is deactivated sooner, the moment any read of its page
 finds a grid of similar listings where the listing was — that is what a
 removed listing's URL serves.
-Runs automatically every morning at 06:00 CET via scheduler container.
-Or click buttons in sidebar to run manually anytime.
+Runs automatically every morning at 06:00 CET via scheduler container. When
+the scheduler starts it runs the pipeline only if none has finished since the
+last 06:00 (first start, or the PC was off at 06:00) — restarting Docker or
+the PC does not re-scrape a day that is already done. Or click buttons in
+sidebar to run manually anytime.
 
 Changed the rent/tax assumptions in `config.py`? Click **♻️ RESCORE ALL** to
 clear existing scores and re-run scoring (the plain CASHFLOW SCORE button only
@@ -281,7 +285,7 @@ Slovak IP — skgeodesy.sk geo-blocks many foreign ones.
 ## Docker Commands (PowerShell)
 
 ```powershell
-docker compose up -d        # Start everything
+docker compose up -d --build   # Start everything (rebuilds after a code update)
 docker compose down         # Stop everything
 docker compose logs -f      # Live logs
 docker compose ps           # Container status
