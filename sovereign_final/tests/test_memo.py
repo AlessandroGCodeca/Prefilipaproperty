@@ -44,6 +44,50 @@ def test_without_a_unicode_font_diacritics_are_folded(monkeypatch):
     assert pdf.startswith(b"%PDF")
 
 
+def _memo_text(monkeypatch, row, **kw) -> str:
+    """Every string the memo prints (the PDF stream itself is compressed)."""
+    printed = []
+    real = memo._Memo.txt
+
+    def spy(self, s):
+        out = real(self, s)
+        printed.append(out)
+        return out
+    monkeypatch.setattr(memo._Memo, "txt", spy)
+    memo.build_memo_pdf(row, **kw)
+    return "\n".join(printed)
+
+
+def test_the_lv_section_says_why_and_which_lv(monkeypatch):
+    row = {**_full_row(), "lv_status": "UNVERIFIED", "lv_number": "4321",
+           "cadastral_area": "Žilina", "lv_checked_at": "2026-09-20T08:00:00+00:00",
+           "lv_detail": "Building plot found, but the flat's own LV was not read."}
+    text = _memo_text(monkeypatch, row)
+    assert "Flat's LV: 4321, k.ú. Žilina" in text
+    assert "Last check: Building plot found, but the flat's own LV was not read. (2026-09-20)" in text
+
+
+def test_an_unknown_flat_lv_is_said_so(monkeypatch):
+    text = _memo_text(monkeypatch, {**_full_row(), "lv_number": None})
+    assert "Flat's LV: not known" in text
+
+
+def test_days_listed_match_the_card(monkeypatch):
+    # The card counts from the oldest copy on any portal; so does the memo.
+    from datetime import datetime, timedelta, timezone
+    from database import days_on_market
+    now = datetime.now(timezone.utc)
+    mine = (now - timedelta(days=5)).isoformat()
+    older = (now - timedelta(days=20)).isoformat()
+    row = {**_full_row(), "scraped_at": mine}
+    copies = [{"source": "bazos", "price_eur": 98_000, "url": "https://a", "scraped_at": mine},
+              {"source": "topreality", "price_eur": 99_000, "url": "https://b", "scraped_at": older}]
+    card_dom = days_on_market(min(c["scraped_at"] for c in copies + [row]))
+    text = _memo_text(monkeypatch, row, portals=copies)
+    assert card_dom == 20
+    assert f"{card_dom} (first seen {older[:10]})" in text
+
+
 @pytest.mark.parametrize("v,signed,out", [
     (1234.4, False, "€1,234"), (-50, True, "−€50"), (12, True, "+€12"), (None, False, "—"),
 ])
