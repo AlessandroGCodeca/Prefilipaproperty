@@ -716,7 +716,7 @@ def get_tracked_listings() -> list[dict]:
         _ensure_enrichment_columns(conn)
         rows = conn.execute("""
             SELECT l.id, l.title, l.district, l.url, l.source, l.price_eur,
-                   l.size_m2, l.is_active, l.scraped_at,
+                   l.size_m2, l.is_active, l.scraped_at, l.lv_status,
                    c.classification AS cf_class, c.surplus_sro,
                    c.max_price_yellow, c.max_price_green,
                    d.stage, d.note, d.updated_at
