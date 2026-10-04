@@ -780,6 +780,7 @@ def render_card(l):
             f' <span class="badge {lv_badge_css}">{lv_label}</span>' +
             (f' <span class="badge {lv_css}">⚖️ LV {lv_risk}</span>' if lv_risk else "") +
             (f' <span class="badge bp">📡 {l["_portals"]} PORTALS</span>' if l.get("_portals", 1) > 1 else "") +
+            (' <span class="badge br">⛔ A COPY FAILED LV</span>' if l.get("dup_lv_failed") else "") +
             (' <span class="badge br">🌊 FLOOD Q100</span>' if l.get("flood_zone") else "") +
             (f' <span class="badge bs">{stage["stage"]}</span>' if stage else "")
         )

@@ -441,7 +441,10 @@ _ENRICHMENT_COLUMNS = {
     "has_loggia":         "INTEGER",
     # Cross-portal duplicates (mark_duplicates): every member of a group
     # carries the id of the group's primary listing; singletons stay NULL.
+    # dup_lv_failed marks a listing whose copy on another portal (or under
+    # another agency) was LV-rejected.
     "dup_group":          "TEXT",
+    "dup_lv_failed":      "INTEGER",
 }
 
 
@@ -610,27 +613,46 @@ def mark_duplicates() -> int:
     """Group copies of the same flat across portals (engine.duplicates) and
     store each member's primary id in listings.dup_group. Re-run from scratch
     every time, so a copy that went inactive or changed price leaves its
-    group. Returns the number of listings that are part of a group."""
+    group. Returns the number of listings that are part of a group.
+
+    LV-rejected copies take part in the matching but never in a group: the
+    dashboard hides them, so a group is only the copies it shows. What they
+    do leave is dup_lv_failed on every shown copy of the same flat — the
+    title deed that failed is that flat's, whichever portal carried it."""
     from engine.duplicates import group_duplicates
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
         rows = [dict(r) for r in conn.execute("""
             SELECT id, url, source, district, size_m2, price_eur, rooms, floor,
-                   scraped_at
+                   scraped_at, lv_status
             FROM listings
-            WHERE is_active = 1 AND lv_status != 'REJECTED'
+            WHERE is_active = 1
               AND price_eur > 0 AND size_m2 > 0
               AND (is_dev_project IS NULL OR is_dev_project = 0)
         """).fetchall()]
-        groups = group_duplicates(rows)
-        conn.execute("UPDATE listings SET dup_group = NULL WHERE dup_group IS NOT NULL")
-        for lid, primary in groups.items():
-            conn.execute("UPDATE listings SET dup_group=? WHERE id=?", (primary, lid))
+        rejected = {r["id"] for r in rows if r["lv_status"] == "REJECTED"}
+        members: dict[str, list[str]] = {}
+        for lid, primary in group_duplicates(rows).items():
+            members.setdefault(primary, []).append(lid)
+        conn.execute("UPDATE listings SET dup_group = NULL, dup_lv_failed = NULL "
+                     "WHERE dup_group IS NOT NULL OR dup_lv_failed IS NOT NULL")
+        grouped = 0
+        for primary, ids in members.items():
+            shown = [i for i in ids if i not in rejected]
+            # A rejected copy ranks last, so with any shown copy the primary
+            # is one of them.
+            if len(shown) >= 2:
+                conn.executemany("UPDATE listings SET dup_group=? WHERE id=?",
+                                 [(primary, i) for i in shown])
+                grouped += len(shown)
+            if len(shown) < len(ids):
+                conn.executemany("UPDATE listings SET dup_lv_failed=1 WHERE id=?",
+                                 [(i,) for i in shown])
         conn.commit()
     finally:
         conn.close()
-    return len(groups)
+    return grouped
 
 
 # ── Deal stages ──────────────────────────────────────────────────────────────

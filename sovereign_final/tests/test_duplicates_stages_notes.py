@@ -65,6 +65,16 @@ class TestGrouping:
                                    _row("b", district="Hornonitrianska Lehota")])
         assert set(groups) == {"a", "b"}
 
+    def test_the_verified_copy_is_shown_before_a_cheaper_one(self):
+        groups = group_duplicates([_row("a", price_eur=245_000, lv_status="PASS"),
+                                   _row("b", lv_status="UNVERIFIED")])
+        assert groups == {"a": "a", "b": "a"}
+
+    def test_a_rejected_copy_is_never_the_primary(self):
+        groups = group_duplicates([_row("a", price_eur=236_000, lv_status="REJECTED"),
+                                   _row("b", lv_status="PENDING")])
+        assert groups == {"a": "b", "b": "b"}
+
 
 class TestMarkDuplicates:
     def test_marks_and_clears(self, full_db):
@@ -86,6 +96,57 @@ class TestMarkDuplicates:
         c = full_db()
         assert c.execute("SELECT COUNT(*) FROM listings WHERE dup_group IS NOT NULL").fetchone()[0] == 0
         c.close()
+
+    @staticmethod
+    def _state(conn_fn):
+        c = conn_fn()
+        rows = {r["id"]: (r["dup_group"], r["dup_lv_failed"]) for r in
+                c.execute("SELECT id, dup_group, dup_lv_failed FROM listings")}
+        c.close()
+        return rows
+
+    @staticmethod
+    def _set_lv(conn_fn, lid, status):
+        c = conn_fn()
+        c.execute("UPDATE listings SET lv_status=? WHERE id=?", (status, lid))
+        c.commit()
+        c.close()
+
+    def test_a_rejected_copy_flags_the_shown_one(self, full_db):
+        # The same flat on two portals; one copy's title deed failed. The
+        # dashboard hides the rejected copy, so the other must say so.
+        db.upsert_listing(make_listing("n1", source="nehnutelnosti", price_eur=150_000, size_m2=60))
+        db.upsert_listing(make_listing("t1", source="topreality", price_eur=149_000, size_m2=60))
+        self._set_lv(full_db, "t1", "REJECTED")
+        assert db.mark_duplicates() == 0          # no group of shown copies
+        assert self._state(full_db) == {"n1": (None, 1), "t1": (None, None)}
+
+    def test_the_shown_group_keeps_its_copies_and_the_flag(self, full_db):
+        db.upsert_listing(make_listing("n1", source="nehnutelnosti", price_eur=150_000, size_m2=60))
+        db.upsert_listing(make_listing("t1", source="topreality", price_eur=151_000, size_m2=60))
+        db.upsert_listing(make_listing("b1", source="bazos", price_eur=148_000, size_m2=60))
+        self._set_lv(full_db, "b1", "REJECTED")
+        assert db.mark_duplicates() == 2
+        assert self._state(full_db) == {"n1": ("n1", 1), "t1": ("n1", 1), "b1": (None, None)}
+
+    def test_the_flag_goes_when_the_rejected_copy_does(self, full_db):
+        db.upsert_listing(make_listing("n1", source="nehnutelnosti", price_eur=150_000, size_m2=60))
+        db.upsert_listing(make_listing("t1", source="topreality", price_eur=149_000, size_m2=60))
+        self._set_lv(full_db, "t1", "REJECTED")
+        db.mark_duplicates()
+        c = full_db()
+        c.execute("UPDATE listings SET is_active=0 WHERE id='t1'")
+        c.commit()
+        c.close()
+        db.mark_duplicates()
+        assert self._state(full_db)["n1"] == (None, None)
+
+    def test_the_verified_copy_is_the_primary(self, full_db):
+        db.upsert_listing(make_listing("n1", source="nehnutelnosti", price_eur=150_000, size_m2=60))
+        db.upsert_listing(make_listing("t1", source="topreality", price_eur=153_000, size_m2=60))
+        self._set_lv(full_db, "t1", "PASS")
+        db.mark_duplicates()
+        assert self._state(full_db) == {"n1": ("t1", None), "t1": ("t1", None)}
 
 
 # ── Deal stages ───────────────────────────────────────────────────────────────
