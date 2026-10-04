@@ -13,7 +13,7 @@ import tempfile
 import pytest
 
 from config import GREEN_DISCOUNT, YELLOW_DISCOUNT, NEAR_FLOOR_DISCOUNT
-from engine.financial import analyse, classify
+from engine.financial import analyse, class_at_price, classify
 from engine.regional_prices import (
     regional_median_price, is_plausible_regional_price,
     REGIONAL_PRICE_FLOOR_RATIO, BA_DISTRICT_MEDIAN_PRICE_PER_M2,
@@ -43,6 +43,39 @@ class TestClassify:
         r = _at("Nitra", REGIONAL_PRICE_FLOOR_RATIO - 0.05)
         assert r.classification == "WHITE"
         assert "Below the sanity floor" in r.recommendation
+
+    def test_float_noise_at_a_threshold(self):
+        # 1 - 0.8 in floating point.
+        assert classify(0.19999999999999996) == "GREEN"
+        assert classify(0.09999999999999998) == "YELLOW"
+
+
+class TestExactThresholdPrices:
+    """A price exactly 10% / 20% under the median gets the class the stored
+    (and displayed) discount says. In floating point most of these used to
+    come out a class lower, beside a card reading "20% below"."""
+
+    @pytest.mark.parametrize("district", REGIONS)
+    @pytest.mark.parametrize("size", [40.0, 55.0, 62.5, 71.3])
+    def test_at_the_threshold(self, district, size):
+        assert _at(district, 1 - GREEN_DISCOUNT, size).classification == "GREEN"
+        assert _at(district, 1 - YELLOW_DISCOUNT, size).classification == "YELLOW"
+
+
+class TestClassAtPrice:
+    @pytest.mark.parametrize("fraction", [0.45, 0.55, 0.79, 0.8, 0.85, 0.9, 0.95, 1.2])
+    def test_agrees_with_analyse(self, fraction):
+        r = _at("Nitra", fraction)
+        assert class_at_price(r.price_eur, r.size_m2, "Nitra") == r.classification
+
+    def test_below_the_floor_is_white_not_a_bargain(self):
+        median = regional_median_price("Nitra")
+        assert class_at_price(median * 55 * 0.3, 55, "Nitra") == "WHITE"
+
+    def test_no_benchmark_size_or_price_is_white(self):
+        assert class_at_price(100_000, 50, "") == "WHITE"
+        assert class_at_price(100_000, 0, "Nitra") == "WHITE"
+        assert class_at_price(0, 50, "Nitra") == "WHITE"
 
 
 class TestCalibratedAgainstTheFloor:
