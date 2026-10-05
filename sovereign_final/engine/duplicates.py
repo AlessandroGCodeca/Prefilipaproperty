@@ -21,8 +21,10 @@ Two listings are the same flat when all of these hold:
 It is deliberately strict: two identical flats in one new building are the
 one realistic false match, and dev projects are hidden by default anyway.
 
-The group's primary listing is the cheapest copy (a buyer wants the lowest
-asking price on offer), then the one seen first.
+The group's primary listing — the one the dashboard shows — is the copy
+whose title deed was verified (LV PASS), then the cheapest (a buyer wants the
+lowest asking price on offer), then the one seen first. An LV-rejected copy
+is never the primary; see database.mark_duplicates for what it does instead.
 """
 
 from __future__ import annotations
@@ -86,13 +88,20 @@ def is_same_flat(a: dict, b: dict) -> bool:
             and _agree(a.get("floor"), b.get("floor")))
 
 
+def _primary_rank(row: dict) -> int:
+    """Verified LV first, then unchecked or unverified, LV-rejected last."""
+    status = row.get("lv_status")
+    return 0 if status == "PASS" else 2 if status == "REJECTED" else 1
+
+
 def group_duplicates(rows: list[dict]) -> dict[str, str]:
     """{listing id: primary id} for every listing that has at least one copy.
 
     rows need id, url, district, size_m2, price_eur and optionally rooms,
-    floor, scraped_at. Rows without a price or size can't be compared and are
-    left out. Grouping is transitive (union-find), so A~B and B~C put all
-    three together even when A and C are just outside tolerance of each other.
+    floor, scraped_at, lv_status. Rows without a price or size can't be
+    compared and are left out. Grouping is transitive (union-find), so A~B and
+    B~C put all three together even when A and C are just outside tolerance
+    of each other.
     """
     rows = [r for r in rows if (r.get("price_eur") or 0) > 0 and (r.get("size_m2") or 0) > 0]
     parent = {r["id"]: r["id"] for r in rows}
@@ -128,7 +137,8 @@ def group_duplicates(rows: list[dict]) -> dict[str, str]:
     for members in groups.values():
         if len(members) < 2:
             continue
-        primary = min(members, key=lambda r: (r["price_eur"], r.get("scraped_at") or "", r["id"]))
+        primary = min(members, key=lambda r: (_primary_rank(r), r["price_eur"],
+                                              r.get("scraped_at") or "", r["id"]))
         for m in members:
             out[m["id"]] = primary["id"]
     return out

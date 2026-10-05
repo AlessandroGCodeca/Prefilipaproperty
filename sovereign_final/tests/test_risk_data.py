@@ -160,6 +160,98 @@ class TestRiskBackfill:
         assert row["geo_precision"] == "address" and row["risk_checked_at"]
         assert db.get_location_rows_missing_risk() == []
 
+    @staticmethod
+    def _old_row(full_db, lv_status="PASS", pin=None, score=80, tier="PRIME"):
+        """A listing with a location row from the stub era: every risk flag a
+        stored 0, no risk_checked_at, a score that counted both 'clear's."""
+        import database as db
+        from tests.conftest import make_listing
+        db.upsert_listing(make_listing("a", address_raw="Miletičova 1, Bratislava"))
+        c = full_db()
+        c.execute("UPDATE listings SET lv_status=?", (lv_status,))
+        if pin:
+            c.execute("UPDATE listings SET lat=?, lng=?, coords_source='listing'", pin)
+        c.execute("INSERT INTO location_scores (listing_id, lat, lng, nearest_transit_m, "
+                  "amenity_count, construction_risk, noise_flag, flood_zone, "
+                  "location_score, location_tier, walkability_score) "
+                  "VALUES ('a', 48.15, 17.13, 300, 5, 0, 0, 0, ?, ?, ?)",
+                  (score, tier, score))
+        c.commit()
+        c.close()
+
+    @staticmethod
+    def _risk(construction=False, noise=False, flood=False):
+        return lambda la, ln, p: {
+            "construction": construction, "construction_detail": "",
+            "noise": noise, "noise_detail": "", "flood": flood, "flood_detail": ""}
+
+    def test_unverified_listings_are_backfilled(self, full_db, monkeypatch):
+        # The location step scores UNVERIFIED listings too, so their stub-era
+        # rows need real answers as much as PASS ones do.
+        import database as db
+        import modules.location_iq as liq
+        self._old_row(full_db, lv_status="UNVERIFIED")
+        assert [r["listing_id"] for r in db.get_location_rows_missing_risk()] == ["a"]
+        monkeypatch.setattr(liq, "geocode_precise", lambda a: (48.1501, 17.1301, "address"))
+        monkeypatch.setattr(liq.risk_data, "assess", self._risk())
+        monkeypatch.setattr(liq.time, "sleep", lambda s: None)
+        assert liq.run_risk_backfill() == 1
+        assert db.get_location_rows_missing_risk() == []
+
+    def test_rejected_listings_are_not_backfilled(self, full_db):
+        import database as db
+        self._old_row(full_db, lv_status="REJECTED")
+        assert db.get_location_rows_missing_risk() == []
+
+    def test_portal_pin_beats_a_geocode(self, full_db, monkeypatch):
+        import modules.location_iq as liq
+        self._old_row(full_db, pin=(48.1601, 17.1401))
+        monkeypatch.setattr(liq, "geocode_precise",
+                            lambda a: pytest.fail("geocoded despite the portal's pin"))
+        seen = []
+
+        def assess(la, ln, p):
+            seen.append((la, ln, p))
+            return self._risk()(la, ln, p)
+        monkeypatch.setattr(liq.risk_data, "assess", assess)
+        monkeypatch.setattr(liq.time, "sleep", lambda s: None)
+        assert liq.run_risk_backfill() == 1
+        assert seen == [(48.1601, 17.1401, "street")]
+        c = full_db()
+        row = dict(c.execute("SELECT lat, lng, geo_precision FROM location_scores").fetchone())
+        c.close()
+        assert row == {"lat": 48.1601, "lng": 17.1401, "geo_precision": "street"}
+
+    def test_score_and_tier_follow_the_new_flags(self, full_db, monkeypatch):
+        # Stub era: transit 300 m (+30), 5 amenities (+20), no construction
+        # (+20), no noise (+20) → 90 PRIME. A real noise source makes it POOR
+        # and takes the noise points away.
+        import modules.location_iq as liq
+        self._old_row(full_db, score=90, tier="PRIME")
+        monkeypatch.setattr(liq, "geocode_precise", lambda a: (48.1501, 17.1301, "address"))
+        monkeypatch.setattr(liq.risk_data, "assess", self._risk(noise=True))
+        monkeypatch.setattr(liq.time, "sleep", lambda s: None)
+        assert liq.run_risk_backfill() == 1
+        c = full_db()
+        row = dict(c.execute("SELECT location_score, location_tier, walkability_score, "
+                             "noise_flag FROM location_scores").fetchone())
+        c.close()
+        assert row == {"location_score": 70, "location_tier": "POOR",
+                       "walkability_score": 70, "noise_flag": 1}
+
+    def test_unknown_flags_keep_the_points(self, full_db, monkeypatch):
+        # Unknown (None) is not a finding, as in run_location_scoring.
+        import modules.location_iq as liq
+        self._old_row(full_db, score=90, tier="PRIME")
+        monkeypatch.setattr(liq, "geocode_precise", lambda a: (48.1501, 17.1301, "address"))
+        monkeypatch.setattr(liq.risk_data, "assess", self._risk(construction=None, noise=None))
+        monkeypatch.setattr(liq.time, "sleep", lambda s: None)
+        liq.run_risk_backfill()
+        c = full_db()
+        row = dict(c.execute("SELECT location_score, location_tier FROM location_scores").fetchone())
+        c.close()
+        assert row == {"location_score": 90, "location_tier": "PRIME"}
+
 
 class _Resp:
     def __init__(self, payload, status=200):

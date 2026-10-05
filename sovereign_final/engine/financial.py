@@ -429,8 +429,7 @@ def analyse(
 
     # ── Class: discount to the regional median €/m² ───────────────
     median = regional_median_price(district)
-    discount = (1 - (price_eur / size_m2) / median
-                if median and size_m2 > 0 and price_eur > 0 else None)
+    discount = discount_to_median(price_eur, size_m2, district)
     cls = classify(discount)
 
     # Recommendation
@@ -442,10 +441,10 @@ def analyse(
                  f"the regional median (€{price_eur/size_m2:,.0f} vs €{median:,.0f}/m²)")
         label = {"GREEN": "🟢 GREEN", "YELLOW": "🟡 YELLOW", "WHITE": "⚪ WHITE"}[cls]
         parts.append(f"{label} — {where}, gross yield {gross_yield*100:.1f}%.")
-        if discount > 1 - REGIONAL_PRICE_FLOOR_RATIO:
+        if below_sanity_floor(discount):
             parts.append("⚠️ Below the sanity floor — almost certainly not this "
                          "flat's own price.")
-        elif discount >= NEAR_FLOOR_DISCOUNT:
+        elif round(discount, 4) >= NEAR_FLOOR_DISCOUNT:
             parts.append("⚠️ Close to the sanity floor — confirm the price is this "
                          "flat's own, not a deposit, an 'od €X' price or another listing's.")
     parts.append(f"Self-funding at {ltv*100:.0f}% LTV: {ratio_s*100:.0f}% (s.r.o.).")
@@ -521,14 +520,43 @@ def classify(market_discount: Optional[float]) -> str:
     """GREEN / YELLOW / WHITE from the discount to the regional median €/m².
     No benchmark (blank or unknown district) is WHITE: nothing says it's cheap.
     Neither is a price below the sanity floor — the scrapers zero those as
-    deposits, "od €X" starting prices or another listing's price."""
-    if market_discount is None or market_discount > 1 - REGIONAL_PRICE_FLOOR_RATIO:
+    deposits, "od €X" starting prices or another listing's price.
+
+    The discount is judged at the 4 decimals it is stored and shown with. A
+    price exactly 20% under the median works out to 0.19999999999999996 in
+    floating point, which came out YELLOW beside a stored "20% below"."""
+    if market_discount is None or below_sanity_floor(market_discount):
         return "WHITE"
-    if market_discount >= GREEN_DISCOUNT:
+    d = round(market_discount, 4)
+    if d >= GREEN_DISCOUNT:
         return "GREEN"
-    if market_discount >= YELLOW_DISCOUNT:
+    if d >= YELLOW_DISCOUNT:
         return "YELLOW"
     return "WHITE"
+
+
+def below_sanity_floor(market_discount: Optional[float]) -> bool:
+    """A discount so deep the price is under the regional floor — a deposit,
+    an "od €X" price or another listing's, not a bargain. Judged at the 4
+    decimals classify() uses, so the warning and the class always agree."""
+    return (market_discount is not None
+            and round(market_discount, 4) > 1 - REGIONAL_PRICE_FLOOR_RATIO)
+
+
+def discount_to_median(price_eur: float, size_m2: float, district: str) -> Optional[float]:
+    """How far the asking €/m² sits below the regional median (0.2 = 20%
+    below; negative = above). None without a benchmark, a price or a size."""
+    median = regional_median_price(district or "")
+    if not median or not size_m2 or size_m2 <= 0 or not price_eur or price_eur <= 0:
+        return None
+    return 1 - (price_eur / size_m2) / median
+
+
+def class_at_price(price_eur: float, size_m2: float, district: str) -> str:
+    """The class a listing would get at `price_eur` — what analyse() would
+    say, without the cashflow work. For a price cut or a what-if offer: a
+    price below the sanity floor comes out WHITE, not as a bargain."""
+    return classify(discount_to_median(price_eur, size_m2, district))
 
 
 # ── Max offer price ───────────────────────────────────────────────────────────
@@ -819,17 +847,15 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
         max_pts += 10
 
     # ── Risk (LV / construction / noise / flood) ──
-    # Flags come from modules/risk_data; NULL (unknown) costs nothing.
-    risk_pts = 10
-    if row.get("construction_risk"):
-        risk_pts -= 4
-    if row.get("noise_flag"):
-        risk_pts -= 4
-    if row.get("flood_zone"):
-        risk_pts -= 4
-    if row.get("lv_status") not in ("PASS", "CLEAN", None):
-        risk_pts -= 2
-    points += max(0, risk_pts)
+    # Flags come from modules/risk_data; NULL (unknown) costs nothing. The
+    # site flags share 8 points and the LV has its own 2, so a flat with every
+    # site flag still loses points for an unverified title deed (one pool of
+    # 10 hit 0 at three flags, and the LV deduction then counted for nothing).
+    site_flags = sum(bool(row.get(k))
+                     for k in ("construction_risk", "noise_flag", "flood_zone"))
+    points += max(0, 8 - 4 * site_flags)
+    if row.get("lv_status") in ("PASS", "CLEAN", None):
+        points += 2
     max_pts += 10
 
     score = round(points / max_pts * 100) if max_pts else 0

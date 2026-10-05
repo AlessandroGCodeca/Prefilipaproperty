@@ -99,6 +99,122 @@ class TestRecording:
         assert _history(full_db, "a") == []
 
 
+class TestMisreadsAndRescoring:
+    """A repair or cleanup removes the misread, not what came before it, and
+    whatever was scored at a price that changed is scored again."""
+
+    def _seen(self, lid, price, day):
+        db.upsert_listing(make_listing(lid, price_eur=price,
+                                       last_seen_at=f"2026-09-{day:02d}T08:00:00+00:00"))
+
+    def test_a_repair_keeps_a_genuine_earlier_cut(self, full_db):
+        self._seen("a", 200_000, 1)
+        self._seen("a", 195_000, 5)          # a real cut
+        self._seen("a", 1_250_000, 9)        # a neighbour's price, misread
+        db.set_listing_price("a", 189_000)
+        assert [p for p, _ in _history(full_db, "a")] == [200_000, 195_000, 189_000]
+
+    def test_a_repair_rescores(self, full_db):
+        self._seen("a", 1_250_000, 1)
+        _score(full_db, "a", "WHITE")
+        db.set_listing_price("a", 189_000)
+        assert not _has_score(full_db, "a")
+
+    def test_clearing_a_price_rescores_and_keeps_earlier_prices(self, full_db):
+        self._seen("a", 200_000, 1)
+        self._seen("a", 1_250_000, 9)
+        _score(full_db, "a", "WHITE")
+        db.set_listing_price("a", 0)
+        assert [p for p, _ in _history(full_db, "a")] == [200_000]
+        assert not _has_score(full_db, "a")
+
+    def test_a_cleanup_keeps_earlier_prices_and_drops_the_score(self, full_db):
+        from engine.regional_prices import zero_above_regional_ceiling
+        self._seen("a", 100_000, 1)
+        self._seen("a", 1_250_000, 9)
+        _score(full_db, "a", "WHITE")
+        assert zero_above_regional_ceiling("bazos") == 1
+        assert [p for p, _ in _history(full_db, "a")] == [100_000]
+        assert not _has_score(full_db, "a")
+
+    def test_the_price_after_a_zeroed_one_is_rescored(self, full_db):
+        # A row a cleanup zeroed before cleanups dropped scores: the real
+        # price arriving must not leave the misread's score in place.
+        self._seen("a", 100_000, 1)
+        c = full_db()
+        c.execute("UPDATE listings SET price_eur=0 WHERE id='a'")
+        c.commit()
+        c.close()
+        _score(full_db, "a", "GREEN")
+        self._seen("a", 98_000, 9)
+        assert not _has_score(full_db, "a")
+
+
+class TestLatePin:
+    def _location_row(self, conn_fn, lid):
+        c = conn_fn()
+        c.execute("INSERT INTO location_scores (listing_id, lat, lng, location_score) "
+                  "VALUES (?, 48.14, 17.10, 70)", (lid,))
+        c.commit()
+        c.close()
+
+    def _has_location(self, conn_fn, lid):
+        c = conn_fn()
+        n = c.execute("SELECT COUNT(*) FROM location_scores WHERE listing_id=?",
+                      (lid,)).fetchone()[0]
+        c.close()
+        return n > 0
+
+    def test_a_pin_arriving_after_a_geocode_is_rescored(self, full_db):
+        db.upsert_listing(make_listing("a", lv_status="PASS"))
+        self._location_row(full_db, "a")
+        db.upsert_listing(make_listing("a", lat=48.1601, lng=17.1401))
+        assert not self._has_location(full_db, "a")
+        assert [r["id"] for r in db.get_unscored_location()] == ["a"]
+
+    def test_the_same_pin_again_keeps_the_score(self, full_db):
+        db.upsert_listing(make_listing("a", lat=48.1601, lng=17.1401))
+        self._location_row(full_db, "a")
+        db.upsert_listing(make_listing("a", lat=48.1601, lng=17.1401))
+        assert self._has_location(full_db, "a")
+
+    def test_a_moved_pin_is_rescored(self, full_db):
+        db.upsert_listing(make_listing("a", lat=48.1601, lng=17.1401))
+        self._location_row(full_db, "a")
+        db.upsert_listing(make_listing("a", lat=48.1701, lng=17.1401))
+        assert not self._has_location(full_db, "a")
+
+
+class TestScoresFromBeforeDealExtras:
+    def _old_db(self, tmp_path):
+        import sqlite3
+        c = sqlite3.connect(tmp_path / "old.db")
+        c.execute("CREATE TABLE listings (id TEXT PRIMARY KEY, classification TEXT)")
+        # Every P1 column up to market_discount, none of the deal extras.
+        cols = [n for n in db._CASHFLOW_NEW_COLUMNS if n not in db._DEAL_EXTRA_COLUMNS
+                and n != "rent_source"]
+        c.execute(f"CREATE TABLE cashflow_scores (listing_id TEXT PRIMARY KEY, "
+                  f"classification TEXT, {', '.join(cols)})")
+        c.execute("INSERT INTO listings VALUES ('a', 'YELLOW')")
+        c.execute("INSERT INTO cashflow_scores (listing_id, classification, "
+                  "market_discount) VALUES ('a', 'YELLOW', 0.15)")
+        c.commit()
+        return c
+
+    def test_are_rescored_once(self, tmp_path):
+        c = self._old_db(tmp_path)
+        db._ensure_cashflow_columns(c)
+        assert c.execute("SELECT COUNT(*) FROM cashflow_scores").fetchone()[0] == 0
+        assert c.execute("SELECT classification FROM listings").fetchone()[0] == "PENDING"
+        # Scored again with every column: never dropped a second time.
+        c.execute("INSERT INTO cashflow_scores (listing_id, classification, "
+                  "max_price_yellow) VALUES ('a', 'YELLOW', 150000)")
+        c.commit()
+        db._ensure_cashflow_columns(c)
+        assert c.execute("SELECT COUNT(*) FROM cashflow_scores").fetchone()[0] == 1
+        c.close()
+
+
 class TestSummary:
     def test_repeats_are_not_changes(self):
         rows = [("a", 100, "t1"), ("a", 100, "t2"), ("a", 90, "t3"), ("a", 90, "t4")]

@@ -14,6 +14,7 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 
+import pandas as pd
 import pytest
 
 pytest.importorskip("streamlit")
@@ -116,3 +117,134 @@ def test_text_from_portals_and_notes_is_escaped(populated_db):
     # …and it is still shown, as text.
     assert "&lt;script&gt;" in md
     assert "&lt;b onmouseover" in md
+
+
+# ── Review fixes ──────────────────────────────────────────────────────────────
+def _now_iso(days_ago=0):
+    return (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+
+
+def _add_scored(db, lid, district, price, size, **kw):
+    seen = dict(last_seen_at=_now_iso(), scraped_at=_now_iso(9))
+    db.upsert_listing(make_listing(lid, district=district, price_eur=float(price),
+                                   size_m2=float(size), **{**seen, **kw}))
+    db.set_lv_status(lid, "PASS", "", "clean")
+    from modules.cashflow_runner import run_scoring
+    run_scoring()
+
+
+def _frame(at, column):
+    """The st.dataframe that has `column`."""
+    return next(d.value for d in at.dataframe if column in d.value.columns)
+
+
+def test_demo_mode_writes_nothing(db):
+    # The demo rows (d1–d3) are not in the database; saving a stage, a note
+    # or an LV check for them left rows pointing at listings that don't exist.
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.button(key="stgb_d1").disabled
+    assert at.button(key="rv_d1").disabled
+    for label in ("MOVE DEAL", "SAVE ANNOTATION"):
+        assert all(b.disabled for b in at.button if b.label == label), label
+    assert db.get_deal_stages() == {}
+
+
+def test_triage_to_yellow_matches_the_card_and_no_benchmark_is_blank(populated_db):
+    _add_scored(populated_db, "nb", "", 90_000, 50, title="No district flat")
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    df = _frame(at, "Grade")
+    assert "To 🟡" in df.columns and "Ask vs 🟡" not in df.columns
+    nb = df[df["Title"] == "No district flat"].iloc[0]
+    assert pd.isna(nb["Below%"])                  # not "0% below" = at market
+    w1 = df[df["District"] == "Žilina"].iloc[0]
+    my = populated_db.get_all_active()
+    my = next(l for l in my if l["id"] == "w1")["max_price_yellow"]
+    assert w1["To 🟡"] == pytest.approx((my / 100_000 - 1) * 100)   # as on the card
+
+
+def test_price_cut_banner_names_the_class_at_the_new_price(db):
+    # Trnava, 50 m²: median ≈ €2,616/m², so max YELLOW is ≈ €117,500.
+    from engine.regional_prices import regional_median_price
+    median = regional_median_price("Trnava") * 50
+    for lid, before, after in (("cy", 0.95, 0.88),     # WHITE → YELLOW
+                               ("cf", 0.80, 0.49)):    # GREEN → below the floor
+        db.upsert_listing(make_listing(lid, district="Trnava", size_m2=50.0,
+                                       price_eur=round(median * before), title=f"Flat {lid}",
+                                       scraped_at=_now_iso(30), last_seen_at=_now_iso(30)))
+        db.upsert_listing(make_listing(lid, district="Trnava", size_m2=50.0,
+                                       price_eur=round(median * after), title=f"Flat {lid}",
+                                       scraped_at=_now_iso(30), last_seen_at=_now_iso(2)))
+        db.set_lv_status(lid, "PASS", "", "clean")
+    from modules.cashflow_runner import run_scoring
+    run_scoring()
+    md = markdown_of(run_app())
+    banner = {lid: next(line for line in md.split("</div>") if f"Flat {lid}" in line
+                        and "open ↗" in line) for lid in ("cy", "cf")}
+    assert "now YELLOW" in banner["cy"]
+    assert "below the sanity floor" in banner["cf"]
+    assert "within YELLOW" not in md
+
+
+def test_whatif_tooltip_says_below_the_median(populated_db):
+    at = run_app()
+    sb = at.selectbox(key="wi_pick")
+    sb.select(next(o for o in sb.options if "[g1]" in o)).run()
+    help_ = next(m.help for m in at.metric if m.label == "Class")
+    assert "below the regional median" in help_ and "+" not in help_.split("below")[0]
+
+
+def test_whatif_keeps_a_blank_district_blank(populated_db):
+    _add_scored(populated_db, "nd", "", 90_000, 50, title="No district flat")
+    at = run_app()
+    # A custom property still starts from the example district…
+    assert at.text_input(key="wi_dist_custom").value == "Bratislava II"
+    # …but a listing without one isn't benchmarked against it.
+    sb = at.selectbox(key="wi_pick")
+    sb.select(next(o for o in sb.options if "[nd]" in o)).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.text_input(key="wi_dist_nd").value == ""
+    assert next(m.value for m in at.metric if m.label == "Class") == "WHITE"
+
+
+def test_rejected_tab_shows_the_current_status_and_hides_overturned(populated_db):
+    db = populated_db
+    db.upsert_listing(make_listing("o1", district="Košice", title="Cleared since"))
+    db.set_lv_status("o1", "REJECTED", "exekúcia", "exekúcia on the LV")
+    db.set_lv_status("o1", "PASS", "", "lien cleared")
+    at = run_app()
+    rej = _frame(at, "Reason")
+    assert "Now" in rej.columns
+    assert "Cleared since" not in set(rej["Listing"])
+    assert set(rej["Now"]) == {"❌ LV REJECTED"}
+    at.toggle(key="rej_overturned").set_value(True).run()
+    rej = _frame(at, "Reason")
+    row = rej[rej["Listing"] == "Cleared since"].iloc[0]
+    assert row["Now"].startswith("✅ LV CLEAN")
+
+
+def test_a_recheck_that_comes_back_unverified_is_not_called_clean(populated_db, monkeypatch):
+    import modules.debt_bot as bot
+    monkeypatch.setattr(bot, "reverify",
+                        lambda lid, **k: {"status": "UNVERIFIED", "detail": "no title deed read"})
+    at = run_app()
+    at.button(key="rej_rv").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("unverified" in w.value for w in at.warning)
+    assert not any("Now clean" in s.value for s in at.success)
+
+
+def test_pipeline_warns_when_a_tracked_deal_failed_lv(populated_db):
+    populated_db.set_deal_stage("r1", "OFFER", "")
+    at = run_app()
+    assert any("failed the LV check" in e.value for e in at.error)
+    assert "LV REJECTED" in markdown_of(at)
+
+
+def test_a_rejected_portal_copy_is_flagged_on_the_card(db):
+    for lid, source in (("n1", "nehnutelnosti"), ("t1", "topreality")):
+        _add_scored(db, lid, "Trnava", 99_000, 54, source=source, title=f"Copy {lid}")
+    db.set_lv_status("t1", "REJECTED", "záložné právo", "lien")
+    db.mark_duplicates()
+    assert "A COPY FAILED LV" in markdown_of(run_app())

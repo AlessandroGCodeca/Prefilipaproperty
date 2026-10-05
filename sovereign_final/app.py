@@ -280,7 +280,8 @@ with st.sidebar:
     hide_dups  = st.toggle(
         "Hide portal copies", value=True,
         help="Show the same flat once even when it is listed on several portals "
-             "(the cheapest copy is kept; the others are linked from its card).",
+             "(the copy with a verified LV is kept, else the cheapest; the others "
+             "are linked from its card).",
     )
     show_sro   = st.toggle("Show s.r.o. figures", value=True)
     show_demo  = st.toggle("Demo data (no DB)",   value=False)
@@ -592,15 +593,25 @@ st.markdown(f"""
 
 
 # ── Price-cut alerts ──────────────────────────────────────────────────────────
-_drops = get_price_drops(days=14)
+_drops = [] if using_demo else get_price_drops(days=14)
 if _drops:
+    from engine.financial import below_sanity_floor, class_at_price, discount_to_median
     with st.expander(f"🔻 {len(_drops)} price cut(s) in the last 14 days", expanded=False):
         for d in _drops:
+            # The class the new price earns, worked out the way scoring does:
+            # "under max YELLOW" alone would call a price below the sanity
+            # floor (a misread, not a bargain) a deal.
             my = d.get("max_price_yellow")
-            reach = ""
-            if my:
-                reach = (" · now within YELLOW" if d["price_eur"] <= my
-                         else f" · {d['price_eur'] / my - 1:+.1%} above max YELLOW €{my:,.0f}")
+            size, district = d.get("size_m2") or 0, d.get("district") or ""
+            now_cls = class_at_price(d["price_eur"], size, district)
+            if now_cls in ("GREEN", "YELLOW"):
+                reach = f" · now {now_cls}"
+            elif below_sanity_floor(discount_to_median(d["price_eur"], size, district)):
+                reach = " · below the sanity floor — check the price"
+            elif my:
+                reach = f" · {d['price_eur'] / my - 1:+.1%} above max YELLOW €{my:,.0f}"
+            else:
+                reach = ""
             st.markdown(
                 f'<div class="brow"><span class="l">{esc((d.get("title") or d.get("district") or "—")[:60])}</span>'
                 f'<span class="v">€{d["price_eur"]:,.0f} ({d["last_change_pct"]:+.1%}, '
@@ -780,6 +791,7 @@ def render_card(l):
             f' <span class="badge {lv_badge_css}">{lv_label}</span>' +
             (f' <span class="badge {lv_css}">⚖️ LV {lv_risk}</span>' if lv_risk else "") +
             (f' <span class="badge bp">📡 {l["_portals"]} PORTALS</span>' if l.get("_portals", 1) > 1 else "") +
+            (' <span class="badge br">⛔ A COPY FAILED LV</span>' if l.get("dup_lv_failed") else "") +
             (' <span class="badge br">🌊 FLOOD Q100</span>' if l.get("flood_zone") else "") +
             (f' <span class="badge bs">{stage["stage"]}</span>' if stage else "")
         )
@@ -892,7 +904,10 @@ def render_card(l):
                                      key=f"stg_{lid}")
             stage_note = st.text_input("Stage note", value=(stage or {}).get("note") or "",
                                        key=f"stgn_{lid}", placeholder="e.g. viewing Sat 10:00")
-            if st.button("SAVE STAGE", key=f"stgb_{lid}", use_container_width=True):
+            # Demo rows aren't in the database: writing their ids would leave
+            # deal stages (and LV checks, notes) for listings that don't exist.
+            if st.button("SAVE STAGE", key=f"stgb_{lid}", use_container_width=True,
+                         disabled=using_demo):
                 from database import set_deal_stage
                 set_deal_stage(lid, new_stage, stage_note)
                 st.rerun()
@@ -919,7 +934,8 @@ def render_card(l):
         with a3:
             st.link_button("CHECK LV", _lv_link(l), use_container_width=True)
         with a4:
-            verify = st.button("RE-VERIFY LV", key=f"rv_{lid}", use_container_width=True)
+            verify = st.button("RE-VERIFY LV", key=f"rv_{lid}", use_container_width=True,
+                               disabled=using_demo)
         with a5:
             render_memo_button(l, key=f"memo_{lid}")
 
@@ -1034,6 +1050,7 @@ with t0:
             irr_v = l.get("irr_sro") if show_sro else l.get("irr_personal")
             ph = l.get("_ph") or {}
             vibe = l.get("_vibe")
+            disc = l.get("market_discount")
             triage_rows.append({
                 "": emoji_map.get(cls, ""),
                 "Grade":    grade,
@@ -1044,8 +1061,11 @@ with t0:
                 "Price":    price,
                 "Max 🟡":   my,
                 "Max 🟢":   l.get("max_price_green"),
-                "Ask vs 🟡": (price / my - 1) * 100 if my and price else None,
-                "Below%":   (l.get("market_discount") or 0) * 100,
+                # The card's "Max offer 🟡 … vs ask" figure: the move from the
+                # asking price to the max YELLOW price.
+                "To 🟡":    (my / price - 1) * 100 if my and price else None,
+                # Blank without a benchmark: 0% would read as "at market".
+                "Below%":   disc * 100 if disc is not None else None,
                 "Size":     l.get("size_m2")              or 0,
                 "Rent":     l.get("estimated_rent_eur")   or 0,
                 "Surplus":  surplus if surplus is not None else 0,
@@ -1083,14 +1103,14 @@ with t0:
                 "Price":   st.column_config.NumberColumn(format="€%d"),
                 "Max 🟡":  st.column_config.NumberColumn(format="€%d", help="Highest price that still scores YELLOW"),
                 "Max 🟢":  st.column_config.NumberColumn(format="€%d", help="Highest price that scores GREEN"),
-                "Ask vs 🟡": st.column_config.NumberColumn(format="%+.1f%%", help="Asking price vs max YELLOW price — the discount you need to negotiate (negative = already inside)"),
+                "To 🟡":   st.column_config.NumberColumn(format="%+.1f%%", help="Change from the asking price to the max YELLOW price, as on the card — the cut you need to negotiate (positive = already inside)"),
                 "Size":    st.column_config.NumberColumn(format="%d m²"),
                 "Rent":    st.column_config.NumberColumn(format="€%d"),
                 "Surplus": st.column_config.NumberColumn(format="€%+d"),
                 "+2pp":    st.column_config.NumberColumn(format="€%+d", help="s.r.o. surplus at the mortgage rate + 2 pp"),
                 "Below%":  st.column_config.NumberColumn(
                     format="%.0f%%", help="Asking €/m² below the regional median "
-                                          "(negative = above it)"),
+                                          "(negative = above it; blank = no benchmark)"),
                 "Gross%":  st.column_config.NumberColumn(format="%.2f%%"),
                 "Cap%":    st.column_config.NumberColumn(format="%.2f%%"),
                 "IRR%":    st.column_config.NumberColumn(format="%.1f%%", help="10-year IRR incl. appreciation, exit costs and tax on the gain"),
@@ -1207,8 +1227,14 @@ with t_whatif:
         wi_size = st.number_input("Size m²", 10.0, 500.0,
                                   min(max(float((pick or {}).get("size_m2") or 60.0), 10.0), 500.0),
                                   1.0, key=f"wi_size_{pk}")
-        wi_district = st.text_input("District", (pick or {}).get("district") or "Bratislava II",
-                                    key=f"wi_dist_{pk}")
+        # Only a custom property starts from an example district. A listing
+        # with none stays blank: borrowing Bratislava II's median and rent
+        # would show a class and a max offer the listing never had.
+        wi_district = st.text_input(
+            "District", (pick.get("district") or "") if pick else "Bratislava II",
+            key=f"wi_dist_{pk}")
+        if pick and not (pick.get("district") or "").strip():
+            st.caption("This listing has no district — enter one to benchmark it.")
         wi_rooms = st.number_input("Rooms (0 = unknown)", 0, 6,
                                    min(int((pick or {}).get("rooms") or 0), 6),
                                    key=f"wi_rooms_{pk}")
@@ -1254,9 +1280,12 @@ with t_whatif:
 
     st.markdown('<hr class="div">', unsafe_allow_html=True)
     k1, k2, k3, k4, k5, k6 = st.columns(6)
+    # market_discount is positive BELOW the median: "+25% vs the median" read
+    # as 25% above it.
     k1.metric("Class", r.classification,
-              help=(f"{r.market_discount:+.0%} vs the regional median €/m² · "
-                    f"s.r.o. self-funding {r.ratio_sro:.0%}")
+              help=(f"{abs(r.market_discount):.0%} "
+                    f"{'below' if r.market_discount >= 0 else 'above'} the regional median "
+                    f"€/m² · s.r.o. self-funding {r.ratio_sro:.0%}")
               if r.market_discount is not None else "No regional median for this district.")
     k2.metric("Best structure", "s.r.o." if r.optimal_structure == "SRO" else "Personal",
               delta=f"€{r.annual_sro_saving:+,.0f}/yr s.r.o. vs personal")
@@ -1325,6 +1354,15 @@ with t_pipe:
     if not tracked:
         st.info("No tracked deals yet.")
     else:
+        # A rejected listing leaves every deal list, but a tracked deal stays
+        # on this board — which then has to say its title deed failed.
+        lv_failed = [t for t in tracked
+                     if t.get("lv_status") == "REJECTED" and t["stage"] not in ("CLOSED", "PASSED")]
+        if lv_failed:
+            st.error(f"⛔ {len(lv_failed)} tracked deal(s) failed the LV check: "
+                     + ", ".join(f"{(t.get('title') or t.get('district') or '—')[:40]} [{t['stage']}]"
+                                 for t in lv_failed)
+                     + ". See the REJECTED tab for why.")
         counts = {stg: sum(1 for t in tracked if t["stage"] == stg) for stg in board_stages}
         st.markdown('<div class="muted">' + " · ".join(f"{k} {v}" for k, v in counts.items())
                     + '</div>', unsafe_allow_html=True)
@@ -1336,6 +1374,8 @@ with t_pipe:
                 st.markdown(f'<div class="muted">{stg} ({len(items)})</div>', unsafe_allow_html=True)
                 for t in items:
                     gone = "" if t.get("is_active") else " · OFF MARKET"
+                    if t.get("lv_status") == "REJECTED":
+                        gone += " · ⛔ LV REJECTED"
                     maxy = (f" · max🟡 €{t['max_price_yellow']:,.0f}"
                             if t.get("max_price_yellow") else "")
                     note = f'<div class="muted">{esc(t["note"])}</div>' if t.get("note") else ""
@@ -1363,9 +1403,11 @@ with t_pipe:
             pick_stage = st.selectbox("Stage", DEAL_STAGES, index=DEAL_STAGES.index(cur), key="pipe_stage")
         with p3:
             pick_note = st.text_input("Note", key="pipe_note")
-        if st.button("MOVE DEAL", use_container_width=True):
+        if st.button("MOVE DEAL", use_container_width=True, disabled=using_demo):
             set_deal_stage(pick_id, pick_stage, pick_note)
             st.rerun()
+        if using_demo:
+            st.caption("Demo listings — deals can't be moved.")
         hist = get_deal_stage_history(pick_id)
         if hist:
             st.markdown("".join(
@@ -1383,42 +1425,61 @@ with t_rej:
     if not rejected:
         st.info("Nothing rejected yet.")
     else:
+        # Each row is one rejection decision; "Now" is where the listing stands
+        # today. A re-check can have cleared it since — an overturned
+        # rejection is history, so it is hidden unless asked for.
+        show_overturned = st.toggle("Show rejections a later check overturned", value=False,
+                                    key="rej_overturned")
         rej_df = pd.DataFrame([{
             "Flagged":  str(r_.get("flagged_at") or "")[:10],
             "Listing":  (r_.get("title") or r_.get("address_raw") or "—")[:50],
             "District": r_.get("district") or "—",
             "Price":    r_.get("price_eur") or 0,
+            "Now":      _lv_state(r_)[0],
             "Reason":   r_.get("reason") or "—",
             "Detail":   (r_.get("detail") or "")[:160],
             "LV risk":  r_.get("lv_risk_level") or "—",
             "By":       r_.get("module") or "—",
             "Active":   "yes" if r_.get("is_active") else "no",
             "URL":      r_.get("url") or "",
+            "_still":   (r_.get("lv_status") or "") == "REJECTED",
         } for r_ in rejected])
         reasons = sorted(rej_df["Reason"].unique())
         pick_reasons = st.multiselect("Reason", reasons, default=reasons, key="rej_reasons")
-        view = rej_df[rej_df["Reason"].isin(pick_reasons)]
+        view = rej_df[rej_df["Reason"].isin(pick_reasons)
+                      & (rej_df["_still"] | show_overturned)].drop(columns="_still")
+        n_overturned = int((~rej_df["_still"]).sum())
         st.markdown(f'<div class="muted">{len(view)} rejection(s) · '
                     + " · ".join(f"{esc(k)}: {v}" for k, v in view["Reason"].value_counts().items())
+                    + (f" · {n_overturned} overturned since"
+                       f"{'' if show_overturned else ' (hidden)'}" if n_overturned else "")
                     + '</div>', unsafe_allow_html=True)
         st.dataframe(view, hide_index=True, use_container_width=True,
                      column_config={"Price": st.column_config.NumberColumn(format="€%d"),
                                     "URL": st.column_config.LinkColumn(display_text="open ↗")})
         rv_opts = {f"{r_.get('title') or r_.get('address_raw') or '?'} [{r_['id'][:6]}]": r_["id"]
-                   for r_ in rejected}
-        rv_pick = st.selectbox("Re-check a rejection (titles change — a lien can be cleared)",
-                               list(rv_opts.keys()), key="rej_pick")
-        if st.button("RE-VERIFY LV", key="rej_rv", use_container_width=True):
-            try:
-                from modules.debt_bot import reverify
-                res = reverify(rv_opts[rv_pick])
-                if res["status"] == "REJECT":
-                    st.error(f"Still rejected: {res.get('detail')}")
-                else:
-                    st.success("✅ Now clean — it will be scored on the next run.")
-                    st.rerun()
-            except Exception as e:
-                st.warning(f"Re-verify: {e}")
+                   for r_ in rejected
+                   if show_overturned or (r_.get("lv_status") or "") == "REJECTED"}
+        if rv_opts:
+            rv_pick = st.selectbox("Re-check a rejection (titles change — a lien can be cleared)",
+                                   list(rv_opts.keys()), key="rej_pick")
+            if st.button("RE-VERIFY LV", key="rej_rv", use_container_width=True):
+                try:
+                    from modules.debt_bot import reverify
+                    res = reverify(rv_opts[rv_pick])
+                    if res["status"] == "REJECT":
+                        st.error(f"Still rejected: {res.get('detail')}")
+                    elif res["status"] == "PASS":
+                        st.success("✅ Now clean — it will be scored on the next run.")
+                        st.rerun()
+                    elif res["status"] == "UNVERIFIED":
+                        # No title deed was read: no longer rejected, but not
+                        # clean either — it rejoins the lists as UNVERIFIED.
+                        st.warning(f"⚠ No longer rejected, but unverified: {res.get('detail')}")
+                    else:
+                        st.warning(f"Re-verify: {res.get('detail', res['status'])}")
+                except Exception as e:
+                    st.warning(f"Re-verify: {e}")
 
 
 # ── Rent comps ────────────────────────────────────────────────────────────────
@@ -1498,10 +1559,12 @@ with t2:
         st.markdown('<div class="muted">VIBE CHECK</div>', unsafe_allow_html=True)
         vibe = st.slider("Score (1–10)", 1, 10, 5)
         note = st.text_input("Note", placeholder="e.g. Great location, needs new windows...")
-        if st.button("SAVE ANNOTATION", use_container_width=True):
+        if st.button("SAVE ANNOTATION", use_container_width=True, disabled=using_demo):
             from database import add_annotation
             add_annotation(sel["id"], note, vibe)
             st.success(f"✅ Vibe {vibe}/10 saved.")
+        if using_demo:
+            st.caption("Demo listing — notes can't be saved.")
 
         # Saved notes for this listing, newest first.
         from database import get_annotations

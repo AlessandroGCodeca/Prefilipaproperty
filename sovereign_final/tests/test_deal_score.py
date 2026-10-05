@@ -3,6 +3,8 @@ blends financial + location + energy + risk so ranking isn't purely financial.
 The financial half is yield (cap rate) and discount to the regional median."""
 
 
+import pytest
+
 from engine.financial import compute_deal_score
 
 
@@ -124,3 +126,27 @@ def test_unverified_lv_ranks_below_a_verified_one():
     clean = compute_deal_score({**base, "lv_status": "PASS"})[0]
     unverified = compute_deal_score({**base, "lv_status": "UNVERIFIED"})[0]
     assert clean > unverified
+
+
+def test_site_flags_never_cancel_the_lv_penalty():
+    # Construction + noise + flood used to take the shared risk pool to 0,
+    # after which an unverified title deed cost nothing more.
+    flagged = {"cap_rate": 0.05, "market_discount": 0.2, "location_score": 70,
+               "construction_risk": 1, "noise_flag": 1, "flood_zone": 1}
+    clean = compute_deal_score({**flagged, "lv_status": "PASS"})[0]
+    unverified = compute_deal_score({**flagged, "lv_status": "UNVERIFIED"})[0]
+    assert clean > unverified
+
+
+@pytest.mark.parametrize("flags,lv,points", [
+    # (site flags, LV status) → risk points out of 10, as before the split for
+    # up to two flags.
+    (0, "PASS", 10), (1, "PASS", 6), (2, "PASS", 2),
+    (0, "UNVERIFIED", 8), (1, "UNVERIFIED", 4), (2, "UNVERIFIED", 0),
+])
+def test_risk_points_unchanged_up_to_two_flags(flags, lv, points):
+    keys = ["construction_risk", "noise_flag", "flood_zone"][:flags]
+    # Only the risk component counts: 10 points out of the market discount's
+    # 25 + risk's 10, with the discount at 0.
+    row = {"market_discount": 0.0, "lv_status": lv, **{k: 1 for k in keys}}
+    assert compute_deal_score(row)[0] == round(points / 35 * 100)

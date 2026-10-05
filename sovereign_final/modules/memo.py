@@ -168,7 +168,10 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
     pdf.h2("Price & market")
     disc = l.get("market_discount")
     median_m2 = l.get("regional_median_m2")
-    dom = days_on_market(l.get("scraped_at"))
+    # As on the card: a flat is as old as its oldest copy on any portal.
+    seen = [c.get("scraped_at") for c in (portals or []) + [l] if c.get("scraped_at")]
+    first_seen = min(seen) if seen else None
+    dom = days_on_market(first_seen)
     pdf.kv([
         ("Asking price", _eur(price)),
         ("Size", f"{size:.0f} m²" if size else "—"),
@@ -176,7 +179,7 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
         ("Regional median", f"{_eur(median_m2)}/m²" if median_m2 else "—"),
         ("Vs market", "—" if disc is None else
          (f"{disc * 100:.1f}% below" if disc >= 0 else f"{-disc * 100:.1f}% above")),
-        ("Days on market", "—" if dom is None else f"{dom} (first seen {str(l.get('scraped_at'))[:10]})"),
+        ("Days on market", "—" if dom is None else f"{dom} (first seen {str(first_seen)[:10]})"),
     ])
     ph = (price_history or {}).get(l.get("id"))
     if ph:
@@ -285,8 +288,17 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
         pdf.para("Flat: " + ", ".join(facts))
 
     pdf.h2("Title deed (LV)")
+    # The flat's own LV is the only one that can verify it (the building
+    # plot's LV is not); lv_detail is why the last check came out as it did.
+    lv_no = l.get("lv_number")
     pdf.para(f"Status: {l.get('lv_status') or 'PENDING'}"
              + (f" · risk {l['lv_risk_level']}" if l.get("lv_risk_level") else "")
+             + (f"\nFlat's LV: {lv_no}"
+                + (f", k.ú. {l['cadastral_area']}" if l.get("cadastral_area") else "")
+                if lv_no else "\nFlat's LV: not known — ask the seller or agent")
+             + (f"\nLast check: {l['lv_detail']}"
+                + (f" ({str(l['lv_checked_at'])[:10]})" if l.get("lv_checked_at") else "")
+                if l.get("lv_detail") else "")
              + (f"\n{l['lv_summary']}" if l.get("lv_summary") else "")
              + "\nRe-verify the LV 48 hours before signing.")
 
