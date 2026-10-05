@@ -595,8 +595,7 @@ st.markdown(f"""
 # ── Price-cut alerts ──────────────────────────────────────────────────────────
 _drops = [] if using_demo else get_price_drops(days=14)
 if _drops:
-    from engine.financial import class_at_price, discount_to_median
-    from engine.regional_prices import REGIONAL_PRICE_FLOOR_RATIO
+    from engine.financial import below_sanity_floor, class_at_price, discount_to_median
     with st.expander(f"🔻 {len(_drops)} price cut(s) in the last 14 days", expanded=False):
         for d in _drops:
             # The class the new price earns, worked out the way scoring does:
@@ -605,10 +604,9 @@ if _drops:
             my = d.get("max_price_yellow")
             size, district = d.get("size_m2") or 0, d.get("district") or ""
             now_cls = class_at_price(d["price_eur"], size, district)
-            disc = discount_to_median(d["price_eur"], size, district)
             if now_cls in ("GREEN", "YELLOW"):
                 reach = f" · now {now_cls}"
-            elif disc is not None and round(disc, 4) > 1 - REGIONAL_PRICE_FLOOR_RATIO:
+            elif below_sanity_floor(discount_to_median(d["price_eur"], size, district)):
                 reach = " · below the sanity floor — check the price"
             elif my:
                 reach = f" · {d['price_eur'] / my - 1:+.1%} above max YELLOW €{my:,.0f}"

@@ -441,10 +441,10 @@ def analyse(
                  f"the regional median (€{price_eur/size_m2:,.0f} vs €{median:,.0f}/m²)")
         label = {"GREEN": "🟢 GREEN", "YELLOW": "🟡 YELLOW", "WHITE": "⚪ WHITE"}[cls]
         parts.append(f"{label} — {where}, gross yield {gross_yield*100:.1f}%.")
-        if discount > 1 - REGIONAL_PRICE_FLOOR_RATIO:
+        if below_sanity_floor(discount):
             parts.append("⚠️ Below the sanity floor — almost certainly not this "
                          "flat's own price.")
-        elif discount >= NEAR_FLOOR_DISCOUNT:
+        elif round(discount, 4) >= NEAR_FLOOR_DISCOUNT:
             parts.append("⚠️ Close to the sanity floor — confirm the price is this "
                          "flat's own, not a deposit, an 'od €X' price or another listing's.")
     parts.append(f"Self-funding at {ltv*100:.0f}% LTV: {ratio_s*100:.0f}% (s.r.o.).")
@@ -525,16 +525,22 @@ def classify(market_discount: Optional[float]) -> str:
     The discount is judged at the 4 decimals it is stored and shown with. A
     price exactly 20% under the median works out to 0.19999999999999996 in
     floating point, which came out YELLOW beside a stored "20% below"."""
-    if market_discount is None:
+    if market_discount is None or below_sanity_floor(market_discount):
         return "WHITE"
     d = round(market_discount, 4)
-    if d > 1 - REGIONAL_PRICE_FLOOR_RATIO:
-        return "WHITE"
     if d >= GREEN_DISCOUNT:
         return "GREEN"
     if d >= YELLOW_DISCOUNT:
         return "YELLOW"
     return "WHITE"
+
+
+def below_sanity_floor(market_discount: Optional[float]) -> bool:
+    """A discount so deep the price is under the regional floor — a deposit,
+    an "od €X" price or another listing's, not a bargain. Judged at the 4
+    decimals classify() uses, so the warning and the class always agree."""
+    return (market_discount is not None
+            and round(market_discount, 4) > 1 - REGIONAL_PRICE_FLOOR_RATIO)
 
 
 def discount_to_median(price_eur: float, size_m2: float, district: str) -> Optional[float]:

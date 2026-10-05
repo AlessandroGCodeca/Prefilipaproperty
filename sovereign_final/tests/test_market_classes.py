@@ -61,6 +61,18 @@ class TestExactThresholdPrices:
         assert _at(district, 1 - GREEN_DISCOUNT, size).classification == "GREEN"
         assert _at(district, 1 - YELLOW_DISCOUNT, size).classification == "YELLOW"
 
+    @pytest.mark.parametrize("district", REGIONS)
+    @pytest.mark.parametrize("size", [40.0, 55.0, 62.5, 71.3])
+    def test_the_floor_warning_agrees_with_the_class(self, district, size):
+        # Exactly at the floor is a (suspicious) price, not a misread …
+        at_floor = _at(district, REGIONAL_PRICE_FLOOR_RATIO, size)
+        assert at_floor.classification == "GREEN"
+        assert "Below the sanity floor" not in at_floor.recommendation
+        # … and just under it is both WHITE and warned about.
+        under = _at(district, REGIONAL_PRICE_FLOOR_RATIO - 0.01, size)
+        assert under.classification == "WHITE"
+        assert "Below the sanity floor" in under.recommendation
+
 
 class TestClassAtPrice:
     @pytest.mark.parametrize("fraction", [0.45, 0.55, 0.79, 0.8, 0.85, 0.9, 0.95, 1.2])
