@@ -281,7 +281,8 @@ with st.sidebar:
         "Hide portal copies", value=True,
         help="Show the same flat once even when it is listed on several portals "
              "(the copy with a verified LV is kept, else the cheapest; the others "
-             "are linked from its card).",
+             "are linked from its card). It picks among the copies the other "
+             "filters let through, so a flat stays while any copy matches them.",
     )
     show_sro   = st.toggle("Show s.r.o. figures", value=True)
     show_demo  = st.toggle("Demo data (no DB)",   value=False)
@@ -397,6 +398,8 @@ if do_lv:
     def lv_cb(i, n, a=""): bar.progress(i/n); txt.text(f"LV {i}/{n}: {a}")
     from modules.debt_bot import run_debt_filter
     p, r, u = run_debt_filter(progress_callback=lv_cb)
+    from database import mark_duplicates
+    mark_duplicates()           # a rejected copy flags the flat's other copies
     bar.empty(); txt.empty()
     st.success(f"✅ LV done — Clean: {p}, Rejected: {r}, ⚠ Unverified: {u}")
     st.rerun()
@@ -562,8 +565,11 @@ data = [l for l in data
         and (not req_furnished or (l.get("furnished") or "") in ("furnished", "semi"))
         and (not req_elevator or (l.get("has_elevator") or 0))
         and (not drops_only or ((l["_ph"] or {}).get("change_pct") or 0) < 0)
-        and (not hide_dev or not (l.get("is_dev_project") or 0))
-        and (not hide_dups or not l.get("dup_group") or l["dup_group"] == l.get("id"))]
+        and (not hide_dev or not (l.get("is_dev_project") or 0))]
+# One copy per flat, chosen among the copies that passed the filters above.
+if hide_dups:
+    from engine.duplicates import one_per_flat
+    data = one_per_flat(data)
 
 
 # ── Stats bar ─────────────────────────────────────────────────────────────────
@@ -796,7 +802,10 @@ def render_card(l):
             (f' <span class="badge bs">{stage["stage"]}</span>' if stage else "")
         )
         st.markdown(badges, unsafe_allow_html=True)
-        for lv_note in (l.get("lv_detail"), l.get("lv_summary")):
+        # A check Claude decided writes "[Claude LEVEL] <summary>" as the
+        # detail, so the summary on its own would say the same thing twice.
+        lv_detail, lv_summary = l.get("lv_detail") or "", l.get("lv_summary") or ""
+        for lv_note in (lv_detail, "" if lv_summary in lv_detail else lv_summary):
             if lv_note:
                 st.markdown(
                     f'<div class="muted" style="margin-top:6px">⚖️ LV: {esc(lv_note)}</div>',
@@ -962,6 +971,8 @@ def render_card(l):
                            or ku_in != (l.get("cadastral_area") or ""))
                 r = reverify(lid, lv_number=lv_in if changed else None,
                              cadastral_area=ku_in if changed else "")
+                from database import mark_duplicates
+                mark_duplicates()   # the flat's other copies carry its LV result
                 if r["status"] == "REJECT":
                     st.error(f"❌ REJECTED: {r['detail']}")
                 elif r["status"] == "PASS":
@@ -1403,11 +1414,14 @@ with t_pipe:
             pick_stage = st.selectbox("Stage", DEAL_STAGES, index=DEAL_STAGES.index(cur), key="pipe_stage")
         with p3:
             pick_note = st.text_input("Note", key="pipe_note")
-        if st.button("MOVE DEAL", use_container_width=True, disabled=using_demo):
+        # In demo mode the picker still offers the real tracked deals, and
+        # those can move; a demo row isn't in the database.
+        demo_pick = using_demo and pick_id not in {t["id"] for t in tracked}
+        if st.button("MOVE DEAL", use_container_width=True, disabled=demo_pick):
             set_deal_stage(pick_id, pick_stage, pick_note)
             st.rerun()
-        if using_demo:
-            st.caption("Demo listings — deals can't be moved.")
+        if demo_pick:
+            st.caption("Demo listing — it can't be moved.")
         hist = get_deal_stage_history(pick_id)
         if hist:
             st.markdown("".join(
@@ -1422,6 +1436,10 @@ with t_rej:
     rejected = get_rejected()
     st.markdown('<div class="muted">LV REJECTIONS — LISTINGS THE TITLE-DEED FILTER STOPPED, '
                 'AND WHY. These never reach the deal lists.</div>', unsafe_allow_html=True)
+    # The outcome of the last RE-VERIFY below, carried across its rerun.
+    _rej_msg = st.session_state.pop("rej_rv_msg", None)
+    if _rej_msg:
+        getattr(st, _rej_msg[0])(_rej_msg[1])
     if not rejected:
         st.info("Nothing rejected yet.")
     else:
@@ -1466,20 +1484,27 @@ with t_rej:
             if st.button("RE-VERIFY LV", key="rej_rv", use_container_width=True):
                 try:
                     from modules.debt_bot import reverify
+                    from database import mark_duplicates
                     res = reverify(rv_opts[rv_pick])
+                    # A copy that is no longer rejected rejoins its group and
+                    # lifts "a copy failed LV" from the others (or the reverse).
+                    mark_duplicates()
                     if res["status"] == "REJECT":
-                        st.error(f"Still rejected: {res.get('detail')}")
+                        msg = ("error", f"Still rejected: {res.get('detail')}")
                     elif res["status"] == "PASS":
-                        st.success("✅ Now clean — it will be scored on the next run.")
-                        st.rerun()
+                        msg = ("success", "✅ Now clean — it will be scored on the next run.")
                     elif res["status"] == "UNVERIFIED":
                         # No title deed was read: no longer rejected, but not
                         # clean either — it rejoins the lists as UNVERIFIED.
-                        st.warning(f"⚠ No longer rejected, but unverified: {res.get('detail')}")
+                        msg = ("warning", f"⚠ No longer rejected, but unverified: {res.get('detail')}")
                     else:
-                        st.warning(f"Re-verify: {res.get('detail', res['status'])}")
+                        msg = ("warning", f"Re-verify: {res.get('detail', res['status'])}")
                 except Exception as e:
-                    st.warning(f"Re-verify: {e}")
+                    msg = ("warning", f"Re-verify: {e}")
+                # Redraw whatever the outcome: the table above, the stats and
+                # the deal lists were drawn before the check changed the row.
+                st.session_state["rej_rv_msg"] = msg
+                st.rerun()
 
 
 # ── Rent comps ────────────────────────────────────────────────────────────────

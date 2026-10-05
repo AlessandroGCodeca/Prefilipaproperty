@@ -299,7 +299,11 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
              + (f"\nLast check: {l['lv_detail']}"
                 + (f" ({str(l['lv_checked_at'])[:10]})" if l.get("lv_checked_at") else "")
                 if l.get("lv_detail") else "")
-             + (f"\n{l['lv_summary']}" if l.get("lv_summary") else "")
+             # A check Claude decided has "[Claude LEVEL] <summary>" as its
+             # detail; the summary again would repeat it.
+             + (f"\n{l['lv_summary']}"
+                if l.get("lv_summary") and l["lv_summary"] not in (l.get("lv_detail") or "")
+                else "")
              + "\nRe-verify the LV 48 hours before signing.")
 
     if stage or notes:

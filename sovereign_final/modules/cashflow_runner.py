@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from database import (
     get_unscored_cashflow, upsert_cashflow, init_db, requeue_scores_without_benchmark,
+    requeue_scores_with_stale_class,
 )
 from engine.financial import analyse, result_to_db_dict, deal_extras, base_rent_rate
 
@@ -16,6 +17,9 @@ def run_scoring(progress_callback=None) -> int:
     requeued = requeue_scores_without_benchmark()
     if requeued:
         print(f"♻️  {requeued} listings now have a regional median — re-scoring them.")
+    stale = requeue_scores_with_stale_class()
+    if stale:
+        print(f"♻️  {stale} scores no longer match the current class rules — re-scoring them.")
     listings = get_unscored_cashflow()
     if not listings:
         print("✅ No new listings to score.")
