@@ -248,3 +248,80 @@ def test_a_rejected_portal_copy_is_flagged_on_the_card(db):
     db.set_lv_status("t1", "REJECTED", "záložné právo", "lien")
     db.mark_duplicates()
     assert "A COPY FAILED LV" in markdown_of(run_app())
+
+
+# ── Review follow-ups ─────────────────────────────────────────────────────────
+def _copies_of_one_flat(db):
+    """Trnava, 54 m²: n1 (verified, €161k) is the primary; t1 (€157k) the copy."""
+    for lid, source, price in (("n1", "nehnutelnosti", 161_000), ("t1", "topreality", 157_000)):
+        _add_scored(db, lid, "Trnava", price, 54, source=source, title=f"Copy {lid}")
+    db.set_lv_status("t1", "UNVERIFIED", "", "no flat LV")
+    db.mark_duplicates()
+
+
+def test_hidden_copies_are_picked_after_the_filters(db):
+    # The primary alone fails the price cap; its copy passes it. Picking the
+    # primary first dropped the flat from the list altogether.
+    _copies_of_one_flat(db)
+    at = run_app()
+    assert set(_frame(at, "Grade")["Title"]) == {"Copy n1"}
+    next(s for s in at.slider if s.label == "Max Price €").set_value(160_000).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert set(_frame(at, "Grade")["Title"]) == {"Copy t1"}
+
+
+def test_a_recheck_redraws_the_page_whatever_it_finds(populated_db, monkeypatch):
+    # Only a PASS used to rerun: an UNVERIFIED result left the table above
+    # still listing the flat as rejected.
+    import modules.debt_bot as bot
+
+    def reverify(lid, **k):
+        populated_db.set_lv_status(lid, "UNVERIFIED", "", "no title deed read")
+        return {"status": "UNVERIFIED", "detail": "no title deed read"}
+    monkeypatch.setattr(bot, "reverify", reverify)
+    at = run_app()
+    at.button(key="rej_rv").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("unverified" in w.value for w in at.warning)
+    assert "❌ LV REJECTED" not in set(_frame(at, "Reason")["Now"])
+
+
+def test_a_recheck_updates_the_flats_other_copies(db, monkeypatch):
+    for lid, source in (("n1", "nehnutelnosti"), ("t1", "topreality")):
+        _add_scored(db, lid, "Trnava", 99_000, 54, source=source, title=f"Copy {lid}")
+    db.set_lv_status("t1", "REJECTED", "záložné právo", "lien")
+    db.mark_duplicates()
+    import modules.debt_bot as bot
+
+    def reverify(lid, **k):
+        db.set_lv_status(lid, "PASS", "", "lien cleared")
+        return {"status": "PASS", "detail": "lien cleared"}
+    monkeypatch.setattr(bot, "reverify", reverify)
+    at = run_app()
+    assert "A COPY FAILED LV" in markdown_of(at)
+    at.button(key="rej_rv").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("Now clean" in s.value for s in at.success)
+    assert "A COPY FAILED LV" not in markdown_of(at)
+
+
+def test_demo_mode_still_moves_a_real_tracked_deal(populated_db):
+    at = run_app()
+    next(t for t in at.toggle if t.label == "Demo data (no DB)").set_value(True).run()
+    move = next(b for b in at.button if b.label == "MOVE DEAL")
+    assert move.disabled                          # first pick is a demo row
+    pick = at.selectbox(key="pipe_pick")
+    pick.select(next(o for o in pick.options if "[g1]" in o)).run()
+    at.selectbox(key="pipe_stage").select("OFFER").run()
+    move = next(b for b in at.button if b.label == "MOVE DEAL")
+    assert not move.disabled
+    move.click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert populated_db.get_deal_stages()["g1"]["stage"] == "OFFER"
+    assert "d1" not in populated_db.get_deal_stages()
+
+
+def test_the_card_shows_claudes_lv_summary_once(populated_db):
+    populated_db.set_lv_analysis("g1", "LOW", "Only a bank mortgage on the flat.")
+    populated_db.set_lv_status("g1", "PASS", "", "[Claude LOW] Only a bank mortgage on the flat.")
+    assert markdown_of(run_app()).count("Only a bank mortgage on the flat.") == 1

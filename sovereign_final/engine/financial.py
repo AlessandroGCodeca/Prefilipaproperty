@@ -851,14 +851,16 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
     # site flags share 8 points and the LV has its own 2, so a flat with every
     # site flag still loses points for an unverified title deed (one pool of
     # 10 hit 0 at three flags, and the LV deduction then counted for nothing).
+    # Each flag costs 4, so three go 4 below zero: floored at 0, the third
+    # flag was free. The total is clamped at 0 instead.
     site_flags = sum(bool(row.get(k))
                      for k in ("construction_risk", "noise_flag", "flood_zone"))
-    points += max(0, 8 - 4 * site_flags)
+    points += 8 - 4 * site_flags
     if row.get("lv_status") in ("PASS", "CLEAN", None):
         points += 2
     max_pts += 10
 
-    score = round(points / max_pts * 100) if max_pts else 0
+    score = max(0, round(points / max_pts * 100)) if max_pts else 0
     grade = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D"
     return score, grade
 

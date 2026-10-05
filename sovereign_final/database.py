@@ -938,12 +938,22 @@ def set_listing_price(listing_id: str, price_eur: float) -> bool:
         old = conn.execute(
             "SELECT price_eur FROM listings WHERE id=?", (listing_id,)).fetchone()
         old_price = (old[0] or 0) if old else 0
+        misread_at = None
         if old_price and old_price != (price_eur or 0):
             # A repair corrects a misread, so the misread was never an asking
             # price: it leaves the history, rather than the correction being
             # reported as a price cut. Prices seen before the misread stay, so
             # a genuine earlier cut is still one. The score worked out at the
             # misread goes too, so the corrected price gets scored.
+            #
+            # The corrected price takes the misread's date: it is what was on
+            # offer then. Dated now, a repair to below the price seen before
+            # the misread showed up as a cut made today.
+            misread_at = conn.execute(
+                "SELECT MAX(observed_at) FROM price_history "
+                "WHERE listing_id=? AND price_eur=?",
+                (listing_id, float(old_price)),
+            ).fetchone()[0]
             forget_price(conn, listing_id, old_price)
             _drop_cashflow_score(conn, listing_id)
         if price_eur and price_eur > 0:
@@ -952,7 +962,7 @@ def set_listing_price(listing_id: str, price_eur: float) -> bool:
                 (float(price_eur), listing_id),
             ).rowcount
             if n:
-                _record_price(conn, listing_id, float(price_eur))
+                _record_price(conn, listing_id, float(price_eur), misread_at)
         else:
             n = conn.execute(
                 "UPDATE listings SET price_eur=0, classification='PENDING', "
@@ -1107,6 +1117,44 @@ def requeue_scores_without_benchmark() -> int:
         """).fetchall()
         n = sum(_drop_cashflow_score(conn, r["id"]) for r in rows
                 if regional_median_price(r["district"] or "") is not None)
+        conn.commit()
+    finally:
+        conn.close()
+    return n
+
+
+def requeue_scores_with_stale_class() -> int:
+    """Drop the scores whose class or max offers no longer match what the
+    engine gives for the listing's price, size and district today — a
+    regional median that moved, or a class rule that changed (classify()
+    judging at 4 decimals, so a flat exactly 20% under the median is GREEN
+    now, not YELLOW). get_unscored_cashflow() never looks at a scored row
+    again, so without this they would keep the old answer for good. Returns
+    the number of scores dropped."""
+    from engine.financial import class_at_price, max_offer_price
+    conn = get_conn()
+    try:
+        if not _has_table(conn, "cashflow_scores"):
+            return 0
+        _ensure_cashflow_columns(conn)
+        rows = conn.execute("""
+            SELECT l.id, l.price_eur, l.size_m2, l.district, c.classification,
+                   c.max_price_green, c.max_price_yellow
+            FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
+            -- Only what get_unscored_cashflow() would score again.
+            WHERE l.is_active = 1 AND l.price_eur > 0 AND l.size_m2 > 0
+              AND l.lv_status != 'REJECTED'
+        """).fetchall()
+        stale = [
+            r["id"] for r in rows
+            if (class_at_price(r["price_eur"], r["size_m2"], r["district"] or "")
+                    != r["classification"]
+                or max_offer_price(r["size_m2"], r["district"] or "", "GREEN")
+                    != r["max_price_green"]
+                or max_offer_price(r["size_m2"], r["district"] or "", "YELLOW")
+                    != r["max_price_yellow"])
+        ]
+        n = sum(_drop_cashflow_score(conn, lid) for lid in stale)
         conn.commit()
     finally:
         conn.close()

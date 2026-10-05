@@ -142,3 +142,25 @@ def group_duplicates(rows: list[dict]) -> dict[str, str]:
         for m in members:
             out[m["id"]] = primary["id"]
     return out
+
+
+def one_per_flat(rows: list[dict]) -> list[dict]:
+    """Keep one copy of each flat among dashboard rows that carry dup_group
+    (database.mark_duplicates): the group's primary when it is among `rows`,
+    else the copy group_duplicates would pick from the ones left. Rows with
+    no group pass through, and the order is kept.
+
+    Run it after the other filters: picking the primary first lost the whole
+    flat whenever the primary alone failed a filter (another portal, a price
+    over the cap) although a copy that passes was right there."""
+    best: dict[str, tuple] = {}
+    for r in rows:
+        g = r.get("dup_group")
+        if not g:
+            continue
+        key = (r.get("id") != g, _primary_rank(r), r.get("price_eur") or 0,
+               r.get("scraped_at") or "", r.get("id") or "")
+        if g not in best or key < best[g][0]:
+            best[g] = (key, r.get("id"))
+    kept = {v[1] for v in best.values()}
+    return [r for r in rows if not r.get("dup_group") or r.get("id") in kept]
