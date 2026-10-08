@@ -842,6 +842,7 @@ def render_card(l):
             (' <span class="badge bg">⚙️ INDUSTRIAL</span>' if ind else "") +
             f' <span class="badge {lv_badge_css}">{lv_label}</span>' +
             (f' <span class="badge {lv_css}">⚖️ LV {lv_risk}</span>' if lv_risk else "") +
+            (' <span class="badge by">⚑ LV SOFT FLAG</span>' if l.get("lv_soft_flags") else "") +
             (f' <span class="badge bp">📡 {l["_portals"]} PORTALS</span>' if l.get("_portals", 1) > 1 else "") +
             (' <span class="badge br">⛔ A COPY FAILED LV</span>' if l.get("dup_lv_failed") else "") +
             (' <span class="badge br">🌊 FLOOD Q100</span>' if l.get("flood_zone") else "") +
@@ -855,7 +856,12 @@ def render_card(l):
         # A check Claude decided writes "[Claude LEVEL] <summary>" as the
         # detail, so the summary on its own would say the same thing twice.
         lv_detail, lv_summary = l.get("lv_detail") or "", l.get("lv_summary") or ""
-        for lv_note in (lv_detail, "" if lv_summary in lv_detail else lv_summary):
+        soft_note = l.get("lv_soft_flags") or ""
+        if soft_note and soft_note in lv_detail:
+            soft_note = ""
+        for lv_note in (lv_detail, "" if lv_summary in lv_detail else lv_summary,
+                        f"⚑ soft flags (not rejected — check with your lawyer): {soft_note}"
+                        if soft_note else ""):
             if lv_note:
                 st.markdown(
                     f'<div class="muted" style="margin-top:6px">⚖️ LV: {esc(lv_note)}</div>',
@@ -1395,9 +1401,10 @@ with t_whatif:
     # market_discount is positive BELOW the median: "+25% vs the median" read
     # as 25% above it.
     from engine.regional_prices import benchmark_note
+    # The class is price vs market; the delta is what it earns a month under
+    # the better structure (red and pointing down when it costs money).
     k1.metric("Class", r.classification,
-              delta="cash-flow negative" if r.cashflow_negative else None,
-              delta_color="inverse",
+              delta=f"{max(r.surplus_personal, r.surplus_sro):+,.0f} €/mo cash flow",
               help=(f"{abs(r.market_discount):.0%} "
                     f"{'below' if r.market_discount >= 0 else 'above'} the regional median "
                     f"€/m² ({benchmark_note(wi_district, wi_rooms or None)}) · s.r.o. "

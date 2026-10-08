@@ -231,7 +231,8 @@ Existing scores from the old rule are cleared once on upgrade — run
 |-----------|---------|
 | ✅ CLEAN | The flat's **own** LV was read and nothing on it blocks |
 | ⚠ UNVERIFIED | No LV of this flat was read — the card says how far the check got |
-| ❌ REJECTED | The flat's own LV has a non-bank lien, exekúcia, konkurz, súdny spor, vecné bremeno or predkupné právo |
+| ❌ REJECTED | The flat's own LV has a non-bank lien, exekúcia, konkurz, súdny spor, a lifetime right to use or live in the flat, a private person's or company's predkupné právo, or a vecné bremeno of a kind the screen can't read |
+| ⚑ soft flag | Shown on a CLEAN (or rejected) flat, not a reason to reject: a utility / access vecné bremeno (lines, pipes, right of way) or a predkupné právo of the state or a municipality. `LV_SOFT_FLAGS_REJECT=1` rejects these too — a judgement call for you or your lawyer |
 
 How a check runs:
 
@@ -259,7 +260,23 @@ The screen (`modules/lv_screen.py`) reads each encumbrance separately: a lien
 passes only when its **own** creditor ("v prospech …") is a bank or ŠFRB, and
 an exekúcia / konkurz / súdny spor never passes — not even when the optional
 Claude read says otherwise. Matching is inflection-aware ("začatie exekúcie",
-"záložným právom").
+"záložným právom"). An easement is read within its own entry (up to the next
+entry number), so a neighbouring entry's wording can't soften it.
+
+The optional Claude read (`ANTHROPIC_MODEL_LV`, default `claude-opus-5-5`, high
+effort, server-side refusal fallback) is sent **part C whole** — parts A and B
+are shortened on a long LV, never part C. It used to see only the first 6,000
+characters, which on a long LV stopped before the encumbrances. Its "safe" can
+clear a lien the screen couldn't attribute; it cannot clear distress, nor any
+hit on an LV the cadastre report was cut short on. Description parsing and
+address normalisation use `ANTHROPIC_MODEL_BULK` (default `claude-haiku-5-5`,
+low effort).
+
+The screen's rules were written without live LV reports to check them
+against. `tests/fixtures/lv/` holds LV texts with their expected verdicts — so
+far only **synthetic** ones. Add real, anonymised LVs with
+`dev/capture_lv_fixture.py` (from a Slovak IP; see the README there) and each
+becomes a regression test.
 
 To check the filter against a flat whose výpis you hold:
 

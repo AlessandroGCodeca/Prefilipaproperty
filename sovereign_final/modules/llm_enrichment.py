@@ -10,7 +10,8 @@ the rest of the pipeline can use:
                             so blank-district listings stop defaulting to €6.50/m².
   3. analyze_lv()         — structured, schema-validated LV title-deed risk read,
                             a more reliable replacement for the substring match in
-                            modules/debt_bot.py.
+                            modules/debt_bot.py. It is sent part C (the
+                            encumbrances) whole — see lv_text_for_claude().
 
 Design rules:
   - The API key is read from config.ANTHROPIC_API_KEY, which loads it from the
@@ -20,6 +21,9 @@ Design rules:
     its existing behaviour. Enrichment is additive, never load-bearing.
   - Structured outputs (output_config.format) guarantee the model returns JSON
     matching our schema, so callers can trust the shape without defensive parsing.
+  - One model per task (config.ANTHROPIC_MODEL_BULK / ANTHROPIC_MODEL_LV): the
+    bulk extraction runs at low effort on the small model, the LV read at high
+    effort on the most capable one, with server-side refusal fallbacks.
 
 Run once per listing and cache the result — these fields don't change.
 """
@@ -29,12 +33,15 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+from config import (
+    ANTHROPIC_API_KEY, ANTHROPIC_MODEL_BULK, ANTHROPIC_MODEL_LV, LV_SOFT_FLAGS_REJECT,
+)
 
-# analyze_lv() sends Claude at most this many characters of an LV. The report
-# lists the encumbrances (ťarchy, part C) LAST, so on a longer LV Claude never
-# sees them — modules/debt_bot must not let such a read clear a screen REJECT.
-LV_ANALYSIS_MAX_CHARS = 6000
+# How much of an LV's parts A and B (the property and its owners) goes to
+# Claude ahead of part C. A whole building's LV can list hundreds of
+# co-owners; the encumbrances that decide anything are all in part C, which
+# is always sent whole.
+LV_HEAD_CHARS = 3000
 
 # Lazily-constructed singleton client. Kept module-private so the key object
 # never leaves this file.
@@ -68,20 +75,33 @@ def _get_client():
     return _client
 
 
-def _ask_json(system: str, user: str, schema: dict, max_tokens: int = 1024) -> dict | None:
+def _ask_json(system: str, user: str, schema: dict, *, model: str = ANTHROPIC_MODEL_BULK,
+              effort: str = "low", max_tokens: int = 4096,
+              fallbacks: bool = False) -> dict | None:
     """Single structured-output call. Returns the parsed dict, or None on any
-    failure (disabled, network error, refusal, malformed output)."""
+    failure (disabled, network error, refusal, malformed output).
+
+    max_tokens leaves room for the model's thinking ahead of the JSON.
+    fallbacks=True lets the API re-run a request the model declines on its
+    recommended fallback model (server-side, Claude API only); a decline that
+    still stands comes back as a refusal and returns None like any failure."""
     client = _get_client()
     if client is None:
         return None
     try:
-        resp = client.messages.create(
-            model=ANTHROPIC_MODEL,
+        kwargs = dict(
+            model=model,
             max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": user}],
-            output_config={"format": {"type": "json_schema", "schema": schema}},
+            output_config={"effort": effort,
+                           "format": {"type": "json_schema", "schema": schema}},
         )
+        if fallbacks:
+            resp = client.beta.messages.create(
+                **kwargs, betas=["server-side-fallback-2026-07-01"], fallbacks="default")
+        else:
+            resp = client.messages.create(**kwargs)
         if resp.stop_reason == "refusal":
             return None
         text = next((b.text for b in resp.content if b.type == "text"), None)
@@ -174,7 +194,7 @@ def normalize_address(address_raw: str) -> dict | None:
     if not address_raw:
         return None
     return _ask_json(_ADDRESS_SYSTEM, f"RAW ADDRESS:\n{address_raw[:500]}",
-                     _ADDRESS_SCHEMA, max_tokens=256)
+                     _ADDRESS_SCHEMA, max_tokens=2048)
 
 
 # ── 3. LV title-deed risk analysis ────────────────────────────────────────────
@@ -190,15 +210,53 @@ _LV_SCHEMA = {
     "required": ["risk_level", "is_safe_to_proceed", "flags", "summary"],
 }
 
+_SOFT_POLICY = (
+    "Treat them as HIGH risk and set is_safe_to_proceed=false: the owner rejects "
+    "every easement and pre-emption right."
+    if LV_SOFT_FLAGS_REJECT else
+    "List them in 'flags' and rate them no higher than MEDIUM; on their own they "
+    "do not make the purchase unsafe."
+)
 _LV_SYSTEM = (
     "You are a Slovak real-estate legal analyst reviewing List Vlastníctva (LV) "
-    "title-deed data. Identify encumbrances, liens, executions, lawsuits, or other "
-    "legal risks. A záložné právo (lien) registered in favour of a recognised bank is "
-    "normal for a mortgaged property and is LOW risk. A lien in favour of a private "
+    "title-deed data for someone buying the flat to let it. Identify encumbrances, "
+    "liens, executions, lawsuits, or other legal risks; part C (ŤARCHY) and the "
+    "notes after it are given in full, parts A and B may be shortened. A záložné "
+    "právo (lien) registered in favour of a recognised bank is normal for a "
+    "mortgaged property and is LOW risk. A lien in favour of a private "
     "person/company (fyzická/právnická osoba), an exekúcia, konkurz, or súdny spor is "
-    "HIGH risk. List each concrete issue in 'flags'. Set is_safe_to_proceed=false for "
-    "any HIGH-risk non-bank encumbrance. Keep 'summary' concise and factual."
+    "HIGH risk. So is a vecné bremeno giving someone a lifetime right to use or live "
+    "in the flat (doživotné právo užívania / bývania), and a predkupné právo held by "
+    "a private person or company. A technical vecné bremeno (utility lines, pipes, "
+    "access or right of way) and a predkupné právo of the state or a municipality "
+    f"are soft issues. {_SOFT_POLICY} List each concrete issue in 'flags'. Set "
+    "is_safe_to_proceed=false for any HIGH-risk encumbrance. Keep 'summary' concise "
+    "and factual."
 )
+
+
+def lv_text_for_claude(lv_text) -> tuple[str, bool]:
+    """(the LV text analyze_lv sends, whether it holds all of part C).
+
+    The report lists the encumbrances (ťarchy, part C) last, so the old
+    6,000-character cut left Claude reading owners and parcels on any long LV.
+    Now part C and everything after it go whole; parts A and B before it are
+    shortened to LV_HEAD_CHARS when the text is long. Without a recognisable
+    part C heading the whole text goes. The text holds all of part C unless the
+    cadastre report was itself cut at the scraper's cap — and only then may a
+    "safe" from Claude not overrule the screen (modules/debt_bot._decide_lv).
+    """
+    from kataster_scraper import LV_TEXT_MAX_CHARS
+    from modules.lv_screen import part_c_start
+    raw = str(lv_text or "")
+    # Judged before stripping: a report cut at the cap just after a space is
+    # still a cut report.
+    complete = len(raw) < LV_TEXT_MAX_CHARS
+    text = raw.strip()
+    start = part_c_start(text)
+    if start is not None and start > LV_HEAD_CHARS:
+        text = text[:LV_HEAD_CHARS] + "\n[… parts A and B shortened …]\n" + text[start:]
+    return text, complete
 
 
 def analyze_lv(lv_text: str) -> dict | None:
@@ -210,13 +268,16 @@ def analyze_lv(lv_text: str) -> dict | None:
     lv_text = (lv_text or "").strip()
     if not lv_text:
         return None
-    return _ask_json(_LV_SYSTEM, f"LV DATA:\n{lv_text[:LV_ANALYSIS_MAX_CHARS]}",
-                     _LV_SCHEMA)
+    excerpt, _ = lv_text_for_claude(lv_text)
+    return _ask_json(_LV_SYSTEM, f"LV DATA:\n{excerpt}", _LV_SCHEMA,
+                     model=ANTHROPIC_MODEL_LV, effort="high", max_tokens=16000,
+                     fallbacks=True)
 
 
 if __name__ == "__main__":
     # Smoke test — prints whether enrichment is wired up, without revealing the key.
-    print(f"llm_enrichment enabled: {is_enabled()}  model: {ANTHROPIC_MODEL}")
+    print(f"llm_enrichment enabled: {is_enabled()}  models: bulk {ANTHROPIC_MODEL_BULK}, "
+          f"LV {ANTHROPIC_MODEL_LV}")
     if is_enabled():
         demo = parse_description(
             "3-izbový byt po kompletnej rekonštrukcii, 2. poschodie, s balkónom a "

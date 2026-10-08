@@ -331,6 +331,8 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
              + (f"\n{l['lv_summary']}"
                 if l.get("lv_summary") and l["lv_summary"] not in (l.get("lv_detail") or "")
                 else "")
+             + (f"\nSoft flags (not rejected — check with your lawyer): {l['lv_soft_flags']}"
+                if l.get("lv_soft_flags") else "")
              + "\nRe-verify the LV 48 hours before signing.")
 
     if stage or notes:

@@ -250,9 +250,14 @@ SCRAPER_API_KEY   = os.getenv("SCRAPER_API_KEY", "")
 # the secret never lands in the repository. Leave blank to disable — every
 # enrichment helper degrades gracefully when no key is set.
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-# Sonnet is the cost-appropriate default for high-volume enrichment; override
-# via the ANTHROPIC_MODEL env var if you want a different tier.
-ANTHROPIC_MODEL   = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+# One model per kind of task. Parsing descriptions and normalising addresses
+# runs on every new listing and is plain extraction, so it uses the small,
+# fast model. The LV read can reject a flat or clear a lien, and runs only on
+# flats whose own LV number was entered, so it uses the most capable one.
+# Override either in .env. (The old single ANTHROPIC_MODEL setting is no
+# longer read: copied from .env.example it pinned every task to one model.)
+ANTHROPIC_MODEL_BULK = os.getenv("ANTHROPIC_MODEL_BULK") or "claude-haiku-5-5"
+ANTHROPIC_MODEL_LV   = os.getenv("ANTHROPIC_MODEL_LV") or "claude-opus-5-5"
 
 # ── Scraper ───────────────────────────────────────────────────────────────────
 SCRAPE_DELAY_SEC       = 2.5
@@ -284,6 +289,17 @@ LV_BANK_NAMES = [
     "vúb", "čsob", "unicredit", "oberbank", "mbank", "365.bank",
     "štátny fond rozvoja bývania", "šfrb",
 ]
+
+# Easements and pre-emption rights come in two tiers (modules/lv_screen):
+#   hard stop — a lifetime right to use or live in the flat, a pre-emption
+#               right of a person or company, an easement of unknown kind;
+#   soft flag — a utility or access easement (lines, pipes, right of way), a
+#               pre-emption right of the state or a municipality (its waiver
+#               is needed). Shown on the card, not rejected.
+# Set LV_SOFT_FLAGS_REJECT=1 in .env to reject the soft ones too, as every
+# vecné bremeno and predkupné právo used to be. A judgement call for you or
+# your lawyer.
+LV_SOFT_FLAGS_REJECT = os.getenv("LV_SOFT_FLAGS_REJECT", "0").strip().lower() in ("1", "true", "yes")
 
 # ── Rent Comps: €/m²/month by district (2026 baseline) ───────────────────────
 # Sources (updated April–May 2026):

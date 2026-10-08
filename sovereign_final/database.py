@@ -464,6 +464,9 @@ _ENRICHMENT_COLUMNS = {
     # another agency) was LV-rejected.
     "dup_group":          "TEXT",
     "dup_lv_failed":      "INTEGER",
+    # The soft flags (utility easement, a municipality's pre-emption right)
+    # on the flat's own LV at its last check — shown, not rejected.
+    "lv_soft_flags":      "TEXT",
 }
 
 
@@ -1653,18 +1656,23 @@ def update_location_risk(listing_id: str, risk: dict) -> None:
         conn.close()
 
 
-def set_lv_status(listing_id: str, status: str, reason: str = "", detail: str = "", module: str = "debt_bot"):
+def set_lv_status(listing_id: str, status: str, reason: str = "", detail: str = "",
+                  module: str = "debt_bot", soft_flags: str | None = None):
     """Record an LV check. status: PASS (the flat's own LV was read and is
     clean), UNVERIFIED (no title deed of this flat was read — lv_detail says
-    why), or REJECTED (the flat's LV carries a blocking encumbrance)."""
+    why), or REJECTED (the flat's LV carries a blocking encumbrance).
+    soft_flags: what the flat's own LV carries that is flagged, not blocking
+    (modules/lv_screen tiers); each check replaces the last one's."""
     import uuid
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
         conn.execute(
-            "UPDATE listings SET lv_status=?, lv_detail=?, lv_checked_at=? WHERE id=?",
+            "UPDATE listings SET lv_status=?, lv_detail=?, lv_checked_at=?, "
+            "lv_soft_flags=? WHERE id=?",
             (status, (detail or "")[:1000] or None,
-             datetime.now(timezone.utc).isoformat(), listing_id))
+             datetime.now(timezone.utc).isoformat(),
+             (soft_flags or "")[:1000] or None, listing_id))
         if status == "REJECTED":
             conn.execute("""
                 INSERT INTO rejections_log (id, listing_id, reason, detail, module, flagged_at)

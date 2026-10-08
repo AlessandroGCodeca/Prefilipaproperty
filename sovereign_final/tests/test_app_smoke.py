@@ -354,3 +354,14 @@ def test_the_lv_to_do_lists_unverified_deals(populated_db):
     assert any("1 listing(s) waiting · 0 edited" in c.value for c in at.caption)
     assert at.button(key="lv_todo_save").disabled
     assert at.button(key="lv_todo_verify").disabled
+
+
+def test_a_soft_flag_on_the_lv_is_shown_not_rejected(populated_db):
+    populated_db.set_lv_status("g1", "PASS", "", "LV 4321: Clean title",
+                               soft_flags="vecné bremeno — utility / access easement: <b>x</b>")
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    md = markdown_of(at)
+    assert "LV SOFT FLAG" in md
+    assert "soft flags (not rejected" in md
+    assert "<b>x</b>" not in md        # escaped like every LV note
