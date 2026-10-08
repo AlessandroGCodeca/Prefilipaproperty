@@ -28,6 +28,7 @@ What to look for:
     is every ťarcha you can see on the výpis listed?
 """
 
+import logging
 import argparse
 import os
 import sys
@@ -124,4 +125,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     sys.exit(main())

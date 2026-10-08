@@ -1,13 +1,16 @@
-streamlit>=1.55.0   # lazy st.expander (on_change="rerun"); "euro" number format
-requests>=2.31.0
-beautifulsoup4>=4.12.0
-python-dotenv>=1.0.0
-pandas>=2.0.0
-apscheduler>=3.10.0
-lxml>=5.0.0
-pytz>=2024.1
-openai>=1.30.0
-anthropic>=0.40.0
-fpdf2>=2.7.0
-playwright==1.56.0   # drives Chromium build 1194; 1.56.1 is a Node-only release, not on PyPI
-curl_cffi>=0.7.0
+# Exact versions: a Docker rebuild installs what the tests last passed with,
+# instead of whatever was newest that day (a floating `streamlit>=` could pull
+# a release that drops an argument the app uses). Dependabot
+# (.github/dependabot.yml) proposes upgrades as PRs, and CI tests each one.
+streamlit==1.65.0       # ≥1.55: lazy st.expander (on_change="rerun"); "euro" format
+pydeck==0.9.3          # the MAP tab imports it directly
+requests==2.34.2
+beautifulsoup4==4.15.0
+python-dotenv==1.2.4
+pandas==3.0.6
+apscheduler==3.11.3    # 4.x is a different API
+lxml==6.1.3
+pytz==2026.5
+anthropic==1.12.1
+fpdf2==2.8.9
+playwright==1.56.0     # Chromium build 1194; 1.56.1 is a Node-only release

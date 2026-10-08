@@ -10,8 +10,6 @@ were still open on main after PR #37:
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
 import database as db
 from engine.duplicates import one_per_flat
 from engine.financial import compute_deal_score, max_offer_price

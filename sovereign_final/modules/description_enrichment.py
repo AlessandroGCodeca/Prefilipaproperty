@@ -17,12 +17,15 @@ without a key. desc_parsed is only set on a successful parse, so transient
 failures are retried on the next run (bounded by `limit`).
 """
 
+import logging
 import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from database import get_unparsed_descriptions, update_description_features
 from modules.llm_enrichment import is_enabled, parse_description
+
+log = logging.getLogger(__name__)
 
 
 def _int_or_none(value, lo: int, hi: int):
@@ -73,15 +76,15 @@ def run_description_enrichment(limit: int = 200, progress_callback=None) -> int:
     Returns the number of descriptions successfully parsed and stored.
     """
     if not is_enabled():
-        print("ℹ️  Description enrichment skipped — no ANTHROPIC_API_KEY set.")
+        log.info("ℹ️  Description enrichment skipped — no ANTHROPIC_API_KEY set.")
         return 0
 
     pending = get_unparsed_descriptions(limit)
     if not pending:
-        print("✅ No descriptions to enrich.")
+        log.info("✅ No descriptions to enrich.")
         return 0
 
-    print(f"📝 Parsing {len(pending)} descriptions via Claude...")
+    log.info(f"📝 Parsing {len(pending)} descriptions via Claude...")
     parsed_n = 0
     for i, row in enumerate(pending, 1):
         if progress_callback:
@@ -95,16 +98,17 @@ def run_description_enrichment(limit: int = 200, progress_callback=None) -> int:
             update_description_features(row["id"], _to_features(result))
             parsed_n += 1
         except Exception as ex:
-            print(f"  ⚠️ store error for {row['id']}: {ex}")
+            log.warning(f"  ⚠️ store error for {row['id']}: {ex}")
 
         if i % 20 == 0 or i == len(pending):
-            print(f"  progress {i}/{len(pending)} (parsed: {parsed_n})", flush=True)
+            log.info(f"  progress {i}/{len(pending)} (parsed: {parsed_n})")
 
-    print(f"\n✅ Description enrichment done. {parsed_n} parsed.\n")
+    log.info(f"✅ Description enrichment done. {parsed_n} parsed.")
     return parsed_n
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     from database import init_db
     init_db()
     run_description_enrichment()

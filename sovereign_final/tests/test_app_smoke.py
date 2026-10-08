@@ -355,6 +355,16 @@ def _button(at, label):
     return next(b for b in at.button if b.label == label)
 
 
+def _finished(at):
+    """Let the background step a sidebar button started finish, then redraw
+    the page the way the sidebar's polling does (modules/jobs)."""
+    from modules import jobs
+    jobs.wait(60)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    return at
+
+
 def test_a_card_builds_its_body_only_when_opened(populated_db):
     # B1: a collapsed card ran its ~40 widgets on every click all the same.
     def stage_buttons(at):
@@ -446,17 +456,29 @@ def test_filters_that_hide_everything_say_so(populated_db):
     assert [i for i in infos if "hidden by them" in i]
 
 
-def test_a_steps_result_survives_the_rerun(populated_db):
+def test_a_steps_result_survives_the_rerun(populated_db, monkeypatch):
     # B4: st.success(...) then st.rerun() wiped the message straight away.
+    import threading
     populated_db.upsert_listing(make_listing("old", district="Trnava", scraped_at=_now_iso(40),
                                              last_seen_at=_now_iso(30)))
+    # Hold the step until the page has drawn it running, so the finish is
+    # always seen on the run _finished makes. Unheld, a quick step could
+    # finish on the click's own redraw, toast there, and leave the run this
+    # test checks without one.
+    go, real = threading.Event(), populated_db.deactivate_stale_listings
+    monkeypatch.setattr(populated_db, "deactivate_stale_listings",
+                        lambda **k: go.wait(30) and real(**k))
     at = run_app()
     _button(at, "🧹 CLEAN STALE (21d)").click().run()
-    assert not at.exception, [e.value for e in at.exception]
+    go.set()
+    _finished(at)
     assert any("Deactivated 1 stale listings" in s.value for s in at.success)
     assert any("Deactivated 1 stale listings" in t.value for t in at.toast)
-    at.run()                                      # shown once, not for good
-    assert not any("Deactivated" in s.value for s in at.success)
+    at.run()
+    # The toast is a one-off; the sidebar keeps the last step's result until
+    # the next step starts.
+    assert not any("Deactivated" in t.value for t in at.toast)
+    assert any("Deactivated 1 stale listings" in s.value for s in at.success)
 
 
 def test_parse_desc_says_why_nothing_was_parsed(populated_db, monkeypatch):
@@ -464,6 +486,7 @@ def test_parse_desc_says_why_nothing_was_parsed(populated_db, monkeypatch):
     monkeypatch.setattr(llm, "ANTHROPIC_API_KEY", "")
     at = run_app()
     _button(at, "📝 PARSE DESC").click().run()
+    _finished(at)
     assert any("set ANTHROPIC_API_KEY" in i.value for i in at.info)
 
 
@@ -475,8 +498,8 @@ def test_a_scrapers_count_is_shown_after_the_rerun(populated_db, monkeypatch):
         cmd, 0, '{"ok": true, "n": 7}\n', ""))
     at = run_app()
     _button(at, "BAZOS").click().run()
-    assert not at.exception, [e.value for e in at.exception]
-    assert any("Scraped 7 listings" in s.value for s in at.success)
+    _finished(at)
+    assert any("scraped 7 listings" in s.value for s in at.success)
 
 
 def test_a_scraper_that_runs_out_of_time_is_reported_not_a_crash(populated_db, monkeypatch):
@@ -494,8 +517,9 @@ def test_a_scraper_that_runs_out_of_time_is_reported_not_a_crash(populated_db, m
     monkeypatch.setattr(subprocess, "run", too_slow)
     at = run_app()
     _button(at, "NEHNUT").click().run()
-    assert not at.exception, [e.value for e in at.exception]
-    assert any("5-minute limit" in w.value and "NEHNUT again" in w.value for w in at.warning)
+    _finished(at)
+    # 30 minutes: the step runs in the background now, so it can take longer.
+    assert any("30-minute limit" in w.value and "NEHNUT again" in w.value for w in at.warning)
     assert scored                                 # the pages it finished are scored
 
 
@@ -629,3 +653,103 @@ def test_theme_file_is_dark_and_the_grid_wraps():
     assert "repeat(6,1fr)" not in src and "auto-fit" in src
     assert "#2a3450" not in src                   # 1.6:1 muted text
     assert not re.search(r"\.stButton>button\s*\{", src)   # missed buttons with a tooltip
+
+
+# ── Audit O1, O4, O7 ──────────────────────────────────────────────────────────
+@pytest.fixture(autouse=True)
+def _isolated_runs(monkeypatch, tmp_path):
+    """The scheduler's status file in tmp_path, and no background job left
+    running into the next test (jobs live in the module, not the page)."""
+    from modules import jobs, pipeline_state
+    monkeypatch.setattr(pipeline_state, "STATUS_FILE", str(tmp_path / "status.json"))
+    yield
+    jobs.wait(60)
+    monkeypatch.setattr(jobs, "_job", None)
+
+
+def _click(at, label):
+    next(b for b in at.button if b.label == label).click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    return at
+
+
+def _sidebar_text(at):
+    return "\n".join(e.value for e in at.sidebar if hasattr(e, "value") and isinstance(e.value, str))
+
+
+def test_password_gate(db, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "DASHBOARD_PASSWORD", "s3cret")
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    assert not at.tabs and not at.sidebar.button       # nothing behind the gate
+    # A form's value is sent with its submit button, in the same run.
+    at.text_input(key="login_pw").input("guess")
+    at.button[0].click().run()
+    assert any("Wrong password" in e.value for e in at.error)
+    assert not at.tabs
+    at.text_input(key="login_pw").input("s3cret")
+    at.button[0].click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert len(at.tabs) == 9
+
+
+def test_no_password_set_means_no_gate(db):
+    at = run_app()
+    assert len(at.tabs) == 9
+
+
+def test_sidebar_shows_the_last_scheduled_run(db):
+    from modules import pipeline_state
+    now = datetime.now(timezone.utc)
+    pipeline_state.write_status({
+        "state": "ok", "started_at": now.isoformat(), "finished_at": now.isoformat(),
+        "summary": "🟢4 🟡9", "steps": [{"step": "Bazos.sk", "ok": True}]})
+    at = run_app()
+    assert any("Last scheduled run" in c.value and "🟢4 🟡9" in c.value for c in at.caption)
+    assert not at.error
+
+
+def test_a_failed_scheduled_run_is_shown_on_the_page(db):
+    from modules import pipeline_state
+    now = datetime.now(timezone.utc)
+    pipeline_state.write_status({
+        "state": "failed", "started_at": now.isoformat(), "finished_at": now.isoformat(),
+        "error": "all 3 scrapers failed", "next_retry_at": None, "steps": []})
+    at = run_app()
+    assert any("FAILED: all 3 scrapers failed" in e.value for e in at.error)
+
+
+def test_a_button_runs_its_step_in_the_background(db, monkeypatch):
+    import threading
+    from modules import jobs
+    release = threading.Event()
+
+    def slow_stale(days=21):
+        release.wait(30)
+        return 3
+    monkeypatch.setattr(db, "deactivate_stale_listings", slow_stale)
+    at = _click(run_app(), "🧹 CLEAN STALE (21d)")
+    # The click returned at once; the step is still going and the pipeline
+    # buttons wait for it.
+    assert jobs.running()
+    assert next(b for b in at.button if b.label == "BAZOS").disabled
+    assert at.sidebar.get("progress")
+    release.set()
+    jobs.wait(30)
+    at.run()
+    # The result stays on screen (a rerun used to wipe it), and the buttons
+    # are back.
+    assert any("Deactivated 3 stale listings" in s.value for s in at.success)
+    assert not next(b for b in at.button if b.label == "BAZOS").disabled
+    at.run()
+    assert any("Deactivated 3 stale listings" in s.value for s in at.success)
+
+
+def test_a_button_waits_for_the_scheduler(db):
+    from modules import jobs
+    from modules.pipeline_state import PipelineLock
+    with PipelineLock("scheduler"):
+        at = _click(run_app(), "🧹 CLEAN STALE (21d)")
+    assert not jobs.running()
+    assert any("scheduler is running" in w.value for w in at.warning)

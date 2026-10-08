@@ -24,6 +24,7 @@ This opens each suspect listing's page and settles it:
 Default max_listings=100. --dry-run reports what it would change and writes
 nothing. nehnutelnosti only — that is where the page-scanning bug was.
 """
+import logging
 import sys
 import os
 
@@ -136,8 +137,8 @@ def main() -> int:
                 page.goto(SEARCH_PAGE.format(page=1),
                           wait_until="domcontentloaded", timeout=30000)
                 page.wait_for_timeout(2000)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Warm-up page failed ({e}) — trying the listings anyway.")
             proposals, failed = _read_proposals(page, suspects)
         finally:
             browser.close()
@@ -186,4 +187,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     raise SystemExit(main())

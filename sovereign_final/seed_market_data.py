@@ -8,6 +8,7 @@ Each asking price is set against the engine's own regional median
 market, a few YELLOW, fewer GREEN — and stays that way when the medians are
 updated. Fixed prices had drifted to 34 GREEN of 50 against today's medians.
 """
+import logging
 import sys, os, hashlib, random
 from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(__file__))
@@ -114,5 +115,6 @@ def seed():
     return inserted, scored
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     n, s = seed()
     print(f"Done. {n} listings, {s} scored.")

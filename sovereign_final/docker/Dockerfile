@@ -17,7 +17,7 @@ RUN python -m playwright install --with-deps chromium \
 
 COPY . .
 
-RUN mkdir -p data contracts logs
+RUN mkdir -p data logs backups
 
 EXPOSE 8501
 

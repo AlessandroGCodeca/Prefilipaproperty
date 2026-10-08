@@ -29,6 +29,9 @@ data/
 logs/
 *.log
 
+# Database backups (sovereign_final/modules/backup.py)
+backups/
+
 # OS
 .DS_Store
 Thumbs.db

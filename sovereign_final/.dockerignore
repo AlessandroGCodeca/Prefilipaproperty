@@ -1,10 +1,15 @@
-# Keep local state and caches out of the image and the build context.
+# Keep local state, secrets and caches out of the image and the build context.
 # data/ matters most: COPY . . would otherwise bake a local sovereign.db into
 # the image, and Docker seeds a new named volume from it. (To carry a local
 # database into Docker on purpose, see "docker compose cp" in the README.)
+# .env holds the API keys: compose hands it to the containers at start-up
+# (env_file), so it never needs to be — and must never be — in an image layer.
+.env
+.env.*
 .git
 data/
 logs/
+backups/
 contracts/
 __pycache__/
 *.pyc

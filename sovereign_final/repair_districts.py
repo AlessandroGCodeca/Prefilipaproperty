@@ -26,6 +26,7 @@ Bratislava's rate.
 
 --dry-run reports what it would change and writes nothing.
 """
+import logging
 import sys
 import os
 
@@ -162,4 +163,5 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     sys.exit(main())

@@ -1,35 +1,36 @@
 services:
 
-  model-runner:
-    image: ai/mistral:7b-instruct-q4_k_m
-    container_name: sovereign_dmr
-    restart: unless-stopped
-    ports:
-      - "12434:12434"
-    volumes:
-      - model_cache:/root/.docker/models
-
   # The dashboard and the scheduler share one SQLite database
   # (/app/data/sovereign.db) on the named volume `sovereign_data`. A named
   # volume lives on the Docker VM's own filesystem, where SQLite's file locking
   # works across both containers; a Windows/macOS bind mount does not
   # guarantee that.
+  #
+  # Settings and API keys come from .env through env_file, read when the
+  # container starts: edit .env, then `docker compose up -d` picks it up — no
+  # rebuild. .env is kept out of the image (.dockerignore), so the keys are
+  # never baked into a layer. Without a .env the containers start on defaults.
   dashboard:
     build:
       context: .
       dockerfile: docker/Dockerfile
     container_name: sovereign_dashboard
     restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    # This computer only. The dashboard has no login unless DASHBOARD_PASSWORD
+    # is set in .env, and its buttons spend paid API credits and show your
+    # deal notes and contract drafts. To open it from another device, set
+    # DASHBOARD_PASSWORD first, then change this to "8501:8501".
     ports:
-      - "8501:8501"
-    environment:
-      GOOGLE_PLACES_API_KEY: ${GOOGLE_PLACES_API_KEY:-}
-      DMR_ENDPOINT:          http://model-runner:12434/v1
-      LLM_MODEL:             mistral:7b-instruct-q4_k_m
+      - "127.0.0.1:8501:8501"
     volumes:
-      - ./contracts:/app/contracts
       - ./logs:/app/logs
+      - ./backups:/app/backups
       - sovereign_data:/app/data
+    # 0.0.0.0 inside the container is what lets the published port reach it;
+    # the host side of the mapping above decides who can connect.
     command: streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
 
   scheduler:
@@ -38,11 +39,14 @@ services:
       dockerfile: docker/Dockerfile
     container_name: sovereign_scheduler
     restart: unless-stopped
-    environment:
-      GOOGLE_PLACES_API_KEY: ${GOOGLE_PLACES_API_KEY:-}
-      DMR_ENDPOINT:          http://model-runner:12434/v1
+    env_file:
+      - path: .env
+        required: false
     volumes:
       - ./logs:/app/logs
+      # Nightly copies of the database, on this computer's disk — outside the
+      # sovereign_data volume, so `docker compose down -v` can't take them too.
+      - ./backups:/app/backups
       - sovereign_data:/app/data
     command: python scheduler.py
     # The image's HEALTHCHECK curls the Streamlit port; this container never
@@ -52,4 +56,3 @@ services:
 
 volumes:
   sovereign_data:
-  model_cache:

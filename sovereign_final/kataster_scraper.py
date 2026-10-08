@@ -52,13 +52,16 @@ Demo (real parcel, resolved live from central Bratislava coordinates):
 ════════════════════════════════════════════════════════════════════════════
 """
 
+import logging
 import json
 import math
 import random
 import re
 import sys, os
+import threading
 import time
 import unicodedata
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from html import unescape as _html_unescape
 
@@ -69,6 +72,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 import database
 from config import CADASTRAL_DELAY_SEC, CADASTRAL_BACKOFF_MAX
 from modules.lv_screen import screen_lv, fold
+
+log = logging.getLogger(__name__)
 
 PORTAL_ODATA = "https://kataster.skgeodesy.sk/PortalOData/"
 # Official LV (list vlastníctva) report generator — returns the full title
@@ -104,6 +109,23 @@ _PARCEL_QUERY = (
 _geoblock     = {"active": False}   # latches on after the first 403
 _last_request = {"t": 0.0}
 
+# A check someone is waiting on (RE-VERIFY on the dashboard) gets fewer,
+# shorter tries than a background LV run: at 4 × 30 s plus backoff, one
+# unreachable portal kept the page frozen for minutes. Per thread, so a
+# background job's run keeps its full patience.
+_limits = threading.local()
+
+
+@contextmanager
+def quick_requests(attempts: int = 2, timeout: float = 15, backoff_max: float = 5):
+    """Within this block, this thread's cadastre requests give up sooner."""
+    before = getattr(_limits, "v", None)
+    _limits.v = (attempts, timeout, backoff_max)
+    try:
+        yield
+    finally:
+        _limits.v = before
+
 
 class CadastreError(Exception):
     """A cadastre request failed in a way retries could not fix."""
@@ -120,14 +142,16 @@ def _throttle():
 def _cadastral_get(url: str, accept: str = "application/json") -> str:
     """GET with polite throttling, exponential backoff on 429/5xx/network
     errors, and a one-time switch to the zbgis proxy on 403 (geo-block)."""
+    attempts, timeout, backoff_max = (getattr(_limits, "v", None)
+                                      or (MAX_ATTEMPTS, HTTP_TIMEOUT, CADASTRAL_BACKOFF_MAX))
     backoff = 2.0
     last_error = "no request made"
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    for attempt in range(1, attempts + 1):
         _throttle()
         target = (GEOBLOCK_PROXY_PREFIX + url) if _geoblock["active"] else url
         try:
             resp = requests.get(target, headers={**_HEADERS, "Accept": accept},
-                                timeout=HTTP_TIMEOUT)
+                                timeout=timeout)
         except requests.RequestException as e:
             last_error = f"network error: {e}"
         else:
@@ -135,8 +159,8 @@ def _cadastral_get(url: str, accept: str = "application/json") -> str:
                 return resp.text
             if resp.status_code in (403, 451) and not _geoblock["active"]:
                 _geoblock["active"] = True
-                print(f"    cadastre: HTTP {resp.status_code} — likely geo-block, "
-                      f"retrying via zbgis proxy")
+                log.warning(f"    cadastre: HTTP {resp.status_code} — likely geo-block, "
+                            f"retrying via zbgis proxy")
                 continue
             if resp.status_code == 429 or resp.status_code >= 500:
                 last_error = f"HTTP {resp.status_code}"
@@ -144,14 +168,14 @@ def _cadastral_get(url: str, accept: str = "application/json") -> str:
                 raise CadastreError(
                     f"skgeodesy.sk returned HTTP {resp.status_code} for {url} — "
                     f"the portal may have changed. Body: {resp.text[:200]!r}")
-        if attempt < MAX_ATTEMPTS:
-            pause = min(backoff + random.uniform(0, 1), CADASTRAL_BACKOFF_MAX)
-            print(f"    cadastre: attempt {attempt}/{MAX_ATTEMPTS} failed "
-                  f"({last_error}); retrying in {pause:.1f}s")
+        if attempt < attempts:
+            pause = min(backoff + random.uniform(0, 1), backoff_max)
+            log.warning(f"    cadastre: attempt {attempt}/{attempts} failed "
+                        f"({last_error}); retrying in {pause:.1f}s")
             time.sleep(pause)
-            backoff = min(backoff * 2, CADASTRAL_BACKOFF_MAX)
+            backoff = min(backoff * 2, backoff_max)
     raise CadastreError(
-        f"skgeodesy.sk unreachable after {MAX_ATTEMPTS} attempts ({last_error}). "
+        f"skgeodesy.sk unreachable after {attempts} attempts ({last_error}). "
         f"The portal may be down, rate-limiting, or geo-blocking this IP. URL: {url}")
 
 
@@ -675,6 +699,7 @@ def _demo_by_coordinates():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = sys.argv[1:]
     if args and args[0] == "--lv" and len(args) >= 3:
         res = enrich_lv(args[1], args[2])

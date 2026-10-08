@@ -22,6 +22,7 @@ Default max_listings=200. Pass a larger number to do more. --dry-run reads
 every page and reports what it would change, writing nothing — each gone
 listing's URL is printed so the verdict can be checked in a browser first.
 """
+import logging
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -143,8 +144,8 @@ def main() -> None:
             page.goto("https://www.nehnutelnosti.sk/vysledky/byty/slovensko/predaj?page=1",
                       wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(2000)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Warm-up page failed ({e}) — trying the listings anyway.")
 
         for i, row in enumerate(pending, 1):
             try:
@@ -172,4 +173,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     main()

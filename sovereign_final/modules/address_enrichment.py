@@ -16,12 +16,15 @@ addr_normalized is only set once normalize_address returns (so a definitive
 to retry on the next run, bounded by `limit`.
 """
 
+import logging
 import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from database import get_unnormalized_addresses, update_address
 from modules.llm_enrichment import is_enabled, normalize_address
+
+log = logging.getLogger(__name__)
 
 
 def _compose_district(norm: dict) -> str:
@@ -47,15 +50,15 @@ def run_address_enrichment(limit: int = 200, progress_callback=None) -> int:
     Returns the number of listings for which a non-empty district was resolved.
     """
     if not is_enabled():
-        print("ℹ️  Address normalization skipped — no ANTHROPIC_API_KEY set.")
+        log.info("ℹ️  Address normalization skipped — no ANTHROPIC_API_KEY set.")
         return 0
 
     pending = get_unnormalized_addresses(limit)
     if not pending:
-        print("✅ No addresses to normalize.")
+        log.info("✅ No addresses to normalize.")
         return 0
 
-    print(f"🗺️  Normalizing {len(pending)} addresses via Claude...")
+    log.info(f"🗺️  Normalizing {len(pending)} addresses via Claude...")
     fixed = 0
     for i, row in enumerate(pending, 1):
         if progress_callback:
@@ -72,16 +75,17 @@ def run_address_enrichment(limit: int = 200, progress_callback=None) -> int:
             if district:
                 fixed += 1
         except Exception as ex:
-            print(f"  ⚠️ store error for {row['id']}: {ex}")
+            log.warning(f"  ⚠️ store error for {row['id']}: {ex}")
 
         if i % 20 == 0 or i == len(pending):
-            print(f"  progress {i}/{len(pending)} (resolved: {fixed})", flush=True)
+            log.info(f"  progress {i}/{len(pending)} (resolved: {fixed})")
 
-    print(f"\n✅ Address normalization done. {fixed} districts resolved.\n")
+    log.info(f"✅ Address normalization done. {fixed} districts resolved.")
     return fixed
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     from database import init_db
     init_db()
     run_address_enrichment()
