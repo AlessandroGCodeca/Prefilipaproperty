@@ -25,7 +25,8 @@ st.set_page_config(
     page_title="Sovereign RE",
     page_icon="🏛",
     layout="wide",
-    initial_sidebar_state="expanded",
+    # "auto": open on desktop, collapsed on a phone where it would cover the page.
+    initial_sidebar_state="auto",
 )
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
@@ -48,12 +49,12 @@ section[data-testid="stSidebar"] {
 }
 .sub {
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.55rem; color: #2a3450; letter-spacing: 3px;
+    font-size: 0.55rem; color: #7a89a8; letter-spacing: 3px;
     text-transform: uppercase; margin-top: 3px;
 }
 
 /* Stat grid */
-.sg { display:grid; grid-template-columns:repeat(6,1fr); gap:6px; margin-bottom:18px; }
+.sg { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:6px; margin-bottom:18px; }
 .sc {
     background:#0b0d14; border:1px solid #151924; border-radius:3px;
     padding:12px 14px; position:relative; overflow:hidden;
@@ -65,7 +66,7 @@ section[data-testid="stSidebar"] {
 .sn { font-family:'IBM Plex Mono',monospace; font-size:1.9rem; font-weight:700; color:#e4eaf5; line-height:1; }
 .sc.g .sn { color:#00e676; } .sc.y .sn { color:#ffd740; }
 .sc.r .sn { color:#ff5252; } .sc.b .sn { color:#448aff; }
-.sl { font-size:0.6rem; text-transform:uppercase; letter-spacing:1.5px; color:#2a3450; margin-top:5px; }
+.sl { font-size:0.6rem; text-transform:uppercase; letter-spacing:1.5px; color:#7a89a8; margin-top:5px; }
 
 /* Badges */
 .badge { display:inline-block; padding:2px 8px; border-radius:2px;
@@ -83,9 +84,9 @@ section[data-testid="stSidebar"] {
 .brow { display:flex; justify-content:space-between; padding:5px 0;
         border-bottom:1px solid #0e1018;
         font-family:'IBM Plex Mono',monospace; font-size:0.76rem; }
-.brow .l { color:#2a3450; } .brow .v { color:#bcc8e0; }
+.brow .l { color:#7a89a8; } .brow .v { color:#bcc8e0; }
 .brow.tot { border-top:1px solid #151924; border-bottom:none; }
-.brow.tot .l { color:#6b7a96; } .brow.tot .v { color:#e4eaf5; font-weight:700; }
+.brow.tot .l { color:#8a98b5; } .brow.tot .v { color:#e4eaf5; font-weight:700; }
 .brow.pos .v { color:#00e676; } .brow.neg .v { color:#ff5252; }
 
 /* Divider */
@@ -95,23 +96,32 @@ section[data-testid="stSidebar"] {
 .stTabs [data-baseweb="tab-list"] { background:transparent; border-bottom:1px solid #151924; gap:0; }
 .stTabs [data-baseweb="tab"] {
     background:transparent; border:none; border-bottom:2px solid transparent;
-    color:#2a3450; font-family:'IBM Plex Mono',monospace; font-size:0.7rem;
+    color:#7a89a8; font-family:'IBM Plex Mono',monospace; font-size:0.7rem;
     letter-spacing:1px; text-transform:uppercase; padding:8px 20px; border-radius:0;
 }
 .stTabs [aria-selected="true"] { background:transparent !important; color:#00e676 !important; border-bottom:2px solid #00e676 !important; }
 
-/* Buttons */
-.stButton>button {
-    background:#0b0d14; color:#6b7a96; border:1px solid #151924;
+/* Buttons — descendant selector: a button with help= sits inside a tooltip
+   wrapper, so .stButton>button missed it and it fell back to the light theme. */
+.stButton button, .stDownloadButton button, .stFormSubmitButton button {
+    background:#0b0d14; color:#8a98b5; border:1px solid #151924;
     border-radius:3px; font-family:'IBM Plex Mono',monospace;
     font-size:0.68rem; letter-spacing:1px; text-transform:uppercase;
     transition:all .15s;
 }
-.stButton>button:hover { border-color:#00e676; color:#00e676; background:rgba(0,230,118,.04); }
+.stButton button:hover, .stDownloadButton button:hover, .stFormSubmitButton button:hover {
+    border-color:#00e676; color:#00e676; background:rgba(0,230,118,.04);
+}
 
 div[data-testid="stExpander"] { background:#0b0d14; border:1px solid #151924 !important; border-radius:3px; }
+div[data-testid="stExpander"] summary { color:#bcc8e0; }
+div[data-testid="stExpander"] summary:hover { background:#11141d; color:#e4eaf5; }
 
-.muted { color:#2a3450; font-size:0.7rem; font-family:'IBM Plex Mono',monospace; }
+/* Metrics sit six to a row on the listing card; at the default 2.25rem
+   "€168,000" and "€920/mo" were cut to "€168,…". */
+div[data-testid="stMetricValue"] { font-size:1.45rem; }
+
+.muted { color:#7a89a8; font-size:0.7rem; font-family:'IBM Plex Mono',monospace; }
 .mono  { font-family:'IBM Plex Mono',monospace; }
 </style>
 """, unsafe_allow_html=True)
@@ -502,10 +512,12 @@ if do_test:
     from scraper._http import get as _http_get, SCRAPER_API_KEY as _sak
     _proxy_mode = bool(_sak)
     st.info(f"Proxy mode: {'✅ ScraperAPI' if _proxy_mode else '⚠️ Direct (no SCRAPER_API_KEY set)'}")
+    # The scrapers' own URLs, so this tests what a scrape would actually fetch.
+    from scraper import nehnutelnosti as _neh, bazos as _baz, topreality as _top
     for label, url in [
-        ("nehnutelnosti.sk", "https://www.nehnutelnosti.sk/slovensko/byty/predaj/?p[page]=1"),
-        ("bazos.sk",          "https://reality.bazos.sk/predaj/byt/"),
-        ("topreality.sk",     "https://www.topreality.sk/vyhladavanie/byty/predaj?page=1"),
+        ("nehnutelnosti.sk", _neh.SEARCH_PAGE.format(page=1)),
+        ("bazos.sk",          _baz.BASE + _baz.CATEGORY),
+        ("topreality.sk",     _top.SEARCH_URL_CANDIDATES[0].format(page=1)),
     ]:
         try:
             _r = _http_get(url, timeout=12)
@@ -627,10 +639,15 @@ if _drops:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def fe(v, prefix="€", suffix="", decimals=0):
+def fe(v, prefix="€", suffix="", decimals=0, signed=None):
+    """Money with the sign ahead of the symbol: -€41/mo, +€23/mo, €78,000.
+    signed (default: on for /mo) adds the + to non-negative amounts."""
     if v is None: return "—"
-    sign = "+" if (suffix == "/mo" and v >= 0) else ""
-    return f"{prefix}{sign}{v:,.{decimals}f}{suffix}"
+    if signed is None:
+        signed = suffix == "/mo"
+    v = round(v, decimals) + 0.0   # + 0.0 turns -0.0 into 0.0: no "-€0"
+    sign = "-" if v < 0 else ("+" if signed else "")
+    return f"{sign}{prefix}{abs(v):,.{decimals}f}{suffix}"
 
 def fp(v):
     return f"{(v or 0)*100:.1f}%" if v is not None else "—"
@@ -736,7 +753,7 @@ def render_card(l):
     cut = f"   ·   🔻{ph['change_pct']:+.0%}" if ph and (ph.get("change_pct") or 0) < 0 else ""
     stage_tag = f"   ·   [{stage['stage']}]" if stage else ""
     header = (f"{emoji}  {title[:60]}   ·   €{price:,.0f}   ·   {below}   ·   "
-              f"{fe(surplus,'€','',0)}/mo{cut}{stage_tag}")
+              f"{fe(surplus, suffix='/mo')}{cut}{stage_tag}")
 
     with st.expander(header):
         # Row 1: key metrics
@@ -750,7 +767,7 @@ def render_card(l):
                       else "Published baseline €/m² (config.RENT_PER_M2)")
             st.metric("Total Costs",f"€{total_c:,.0f}/mo" if total_c else "—")
         with c3:
-            surplus_str = f"€{surplus:+,.0f}/mo" if surplus is not None else "—"
+            surplus_str = fe(surplus, suffix="/mo")
             st.metric("Surplus/mo",   surplus_str)
             st.metric("Self-Fund",    fp(ratio))
         with c4:
@@ -770,7 +787,11 @@ def render_card(l):
                            "(≥20% below the regional median €/m²).")
         with c6:
             median_m2 = l.get("regional_median_m2")
-            st.metric("vs Market", below,
+            # Direction in the label, number in the value: "45% below market"
+            # doesn't fit a 6-column metric and was cut to "45% b…".
+            st.metric("vs Market" if disc is None else
+                      ("Below market" if disc >= 0 else "Above market"),
+                      "—" if disc is None else f"{abs(disc) * 100:.0f}%",
                       help=(f"Asking €/m² vs the regional median €{median_m2:,.0f}/m² "
                             f"(≈ €{median_m2 * size:,.0f} for {size:.0f} m²)")
                       if median_m2 and size else "No regional median for this district.")
@@ -845,7 +866,7 @@ def render_card(l):
                 html += f'<div class="brow"><span class="l">{lbl}</span><span class="v">€{val:,.0f}/mo</span></div>' if val is not None else ""
             html += f'<div class="brow tot"><span class="l">TOTAL COSTS</span><span class="v">€{total_c:,.0f}/mo</span></div>' if total_c else ""
             surplus_cls = "pos" if (surplus or 0) >= 0 else "neg"
-            html += f'<div class="brow tot {surplus_cls}"><span class="l">NET SURPLUS</span><span class="v">€{surplus:+,.0f}/mo</span></div>' if surplus is not None else ""
+            html += f'<div class="brow tot {surplus_cls}"><span class="l">NET SURPLUS</span><span class="v">{fe(surplus, suffix="/mo")}</span></div>' if surplus is not None else ""
             st.markdown(html, unsafe_allow_html=True)
 
             if saving and saving > 0:
@@ -863,10 +884,10 @@ def render_card(l):
                 html = '<div class="muted" style="margin-top:10px">FINANCING STRESS (s.r.o.)</div>'
                 if sts is not None:
                     html += (f'<div class="brow {"pos" if sts >= 0 else "neg"}"><span class="l">Rate +2 pp</span>'
-                             f'<span class="v">€{sts:+,.0f}/mo · self-funding '
+                             f'<span class="v">{fe(sts, suffix="/mo")} · self-funding '
                              f'{fp(l.get("stress_ratio_sro"))}</span></div>')
                 html += (f'<div class="brow {"pos" if inv.surplus_sro >= 0 else "neg"}"><span class="l">70% LTV (3rd+ flat)</span>'
-                         f'<span class="v">€{inv.surplus_sro:+,.0f}/mo · self-funding {fp(inv.ratio_sro)} · '
+                         f'<span class="v">{fe(inv.surplus_sro, suffix="/mo")} · self-funding {fp(inv.ratio_sro)} · '
                          f'cash in €{inv.total_cash_invested:,.0f}</span></div>')
                 st.markdown(html, unsafe_allow_html=True)
 
@@ -1111,14 +1132,15 @@ with t0:
             height=min(600, 40 + 35 * len(df)),
             column_config={
                 "Score":   st.column_config.NumberColumn(format="%d", help="0–100 composite deal score"),
-                "Price":   st.column_config.NumberColumn(format="€%d"),
-                "Max 🟡":  st.column_config.NumberColumn(format="€%d", help="Highest price that still scores YELLOW"),
-                "Max 🟢":  st.column_config.NumberColumn(format="€%d", help="Highest price that scores GREEN"),
+                "Stage":   st.column_config.TextColumn(width="medium"),
+                "Price":   st.column_config.NumberColumn(format="euro", step=1),
+                "Max 🟡":  st.column_config.NumberColumn(format="euro", step=1, help="Highest price that still scores YELLOW"),
+                "Max 🟢":  st.column_config.NumberColumn(format="euro", step=1, help="Highest price that scores GREEN"),
                 "To 🟡":   st.column_config.NumberColumn(format="%+.1f%%", help="Change from the asking price to the max YELLOW price, as on the card — the cut you need to negotiate (positive = already inside)"),
                 "Size":    st.column_config.NumberColumn(format="%d m²"),
-                "Rent":    st.column_config.NumberColumn(format="€%d"),
-                "Surplus": st.column_config.NumberColumn(format="€%+d"),
-                "+2pp":    st.column_config.NumberColumn(format="€%+d", help="s.r.o. surplus at the mortgage rate + 2 pp"),
+                "Rent":    st.column_config.NumberColumn(format="euro", step=1),
+                "Surplus": st.column_config.NumberColumn(format="euro", step=1),
+                "+2pp":    st.column_config.NumberColumn(format="euro", step=1, help="s.r.o. surplus at the mortgage rate + 2 pp"),
                 "Below%":  st.column_config.NumberColumn(
                     format="%.0f%%", help="Asking €/m² below the regional median "
                                           "(negative = above it; blank = no benchmark)"),
@@ -1186,7 +1208,7 @@ with t_map:
                 "title": (l.get("title") or l.get("district") or "—")[:60],
                 "price": f"€{(l.get('price_eur') or 0):,.0f}",
                 "cls": cls,
-                "surplus": "—" if surplus is None else f"€{surplus:+,.0f}/mo",
+                "surplus": fe(surplus, suffix="/mo"),
                 "maxy": f"€{l['max_price_yellow']:,.0f}" if l.get("max_price_yellow") else "—",
                 "where": "approximate (area centroid)" if approx else (l.get("geo_precision") or ""),
             })
@@ -1299,7 +1321,7 @@ with t_whatif:
                     f"€/m² · s.r.o. self-funding {r.ratio_sro:.0%}")
               if r.market_discount is not None else "No regional median for this district.")
     k2.metric("Best structure", "s.r.o." if r.optimal_structure == "SRO" else "Personal",
-              delta=f"€{r.annual_sro_saving:+,.0f}/yr s.r.o. vs personal")
+              delta=f"{fe(r.annual_sro_saving, suffix='/yr', signed=True)} s.r.o. vs personal")
     k3.metric("Cash in", f"€{r.total_cash_invested:,.0f}")
     k4.metric("Cap rate", f"{r.cap_rate:.2%}")
     k5.metric("Max offer 🟡", f"€{max_y:,.0f}" if max_y else "—",
@@ -1347,7 +1369,7 @@ with t_whatif:
                                "Surplus €/mo": x.surplus_sro,
                                "Self-funding %": x.ratio_sro * 100})
         st.dataframe(pd.DataFrame(shock_rows), hide_index=True, use_container_width=True,
-                     column_config={"Surplus €/mo": st.column_config.NumberColumn(format="€%+d"),
+                     column_config={"Surplus €/mo": st.column_config.NumberColumn(format="euro", step=1),
                                     "Self-funding %": st.column_config.NumberColumn(format="%.1f%%")})
         st.markdown('<div class="muted">EQUITY CASH FLOWS (s.r.o.)</div>', unsafe_allow_html=True)
         st.bar_chart(pd.DataFrame({"Year": list(range(len(irr_s.cash_flows))),
@@ -1473,7 +1495,7 @@ with t_rej:
                        f"{'' if show_overturned else ' (hidden)'}" if n_overturned else "")
                     + '</div>', unsafe_allow_html=True)
         st.dataframe(view, hide_index=True, use_container_width=True,
-                     column_config={"Price": st.column_config.NumberColumn(format="€%d"),
+                     column_config={"Price": st.column_config.NumberColumn(format="euro", step=1),
                                     "URL": st.column_config.LinkColumn(display_text="open ↗")})
         rv_opts = {f"{r_.get('title') or r_.get('address_raw') or '?'} [{r_['id'][:6]}]": r_["id"]
                    for r_ in rejected
@@ -1552,7 +1574,7 @@ with t2:
             if img and img.startswith("http"):
                 st.image(img, use_container_width=True)
             else:
-                st.markdown('<div style="background:#0b0d14;border:1px solid #151924;height:260px;display:flex;align-items:center;justify-content:center;color:#151924;font-family:IBM Plex Mono,monospace;font-size:0.7rem;letter-spacing:2px">NO IMAGE</div>', unsafe_allow_html=True)
+                st.markdown('<div style="background:#0b0d14;border:1px solid #151924;height:260px;display:flex;align-items:center;justify-content:center;color:#7a89a8;font-family:IBM Plex Mono,monospace;font-size:0.7rem;letter-spacing:2px">NO IMAGE</div>', unsafe_allow_html=True)
 
         with c2:
             st.markdown('<div class="muted">SATELLITE VIEW</div>', unsafe_allow_html=True)
@@ -1640,8 +1662,8 @@ with t3:
                 # can't contain a conditional, so build these strings first.
                 _surplus = sel3.get("surplus_sro")
                 _saving  = sel3.get("annual_sro_saving")
-                surplus_str = f"€{_surplus:,.0f}" if isinstance(_surplus, (int, float)) else "—"
-                saving_str  = f"€{_saving:,.0f}"  if isinstance(_saving,  (int, float)) else "—"
+                surplus_str = fe(_surplus) if isinstance(_surplus, (int, float)) else "—"
+                saving_str  = fe(_saving)  if isinstance(_saving,  (int, float)) else "—"
                 draft = f"""
 ╔══════════════════════════════════════════════════════════╗
 ║         KÚPNA ZMLUVA — DRAFT / NÁVRH ZMLUVY             ║

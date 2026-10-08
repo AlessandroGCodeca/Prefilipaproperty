@@ -325,3 +325,56 @@ def test_the_card_shows_claudes_lv_summary_once(populated_db):
     populated_db.set_lv_analysis("g1", "LOW", "Only a bank mortgage on the flat.")
     populated_db.set_lv_status("g1", "PASS", "", "[Claude LOW] Only a bank mortgage on the flat.")
     assert markdown_of(run_app()).count("Only a bank mortgage on the flat.") == 1
+
+
+# ── Audit B7–B11 ──────────────────────────────────────────────────────────────
+def _read(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def test_money_puts_the_sign_ahead_of_the_euro(populated_db):
+    # Prešov, €55k for 50 m² at default financing runs a monthly deficit.
+    at = run_app()
+    values = [m.value for m in at.metric] + [m.label for m in at.expander]
+    assert not [v for v in values if "€-" in v or "€+" in v]
+    assert any(re.match(r"^-€\d", v) for v in values), values
+
+
+def test_vs_market_fits_its_metric(populated_db):
+    at = run_app()
+    g1 = next(m for m in at.metric if m.label == "Below market")
+    assert re.fullmatch(r"\d+%", g1.value)
+
+
+def test_table_money_columns_use_the_euro_format():
+    # "€%d" has no thousands separator and prints negatives as €-41.
+    src = _read(APP)
+    assert 'format="€%' not in src
+    assert 'NumberColumn(format="euro", step=1' in src
+
+
+def test_test_sites_fetches_the_scrapers_own_urls(db, monkeypatch):
+    from scraper import _http, bazos, nehnutelnosti, topreality
+    fetched = []
+
+    class _Resp:
+        status_code, text = 200, "<html>"
+
+    monkeypatch.setattr(_http, "get", lambda url, **k: fetched.append(url) or _Resp())
+    at = run_app()
+    next(b for b in at.button if b.label == "🔗 TEST SITES").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert fetched == [nehnutelnosti.SEARCH_PAGE.format(page=1),
+                       bazos.BASE + bazos.CATEGORY,
+                       topreality.SEARCH_URL_CANDIDATES[0].format(page=1)]
+
+
+def test_theme_file_is_dark_and_the_grid_wraps():
+    root = os.path.dirname(APP)
+    cfg = _read(os.path.join(root, ".streamlit", "config.toml"))
+    assert 'base = "dark"' in cfg and 'primaryColor = "#00e676"' in cfg
+    src = _read(APP)
+    assert "repeat(6,1fr)" not in src and "auto-fit" in src
+    assert "#2a3450" not in src                   # 1.6:1 muted text
+    assert not re.search(r"\.stButton>button\s*\{", src)   # missed buttons with a tooltip
