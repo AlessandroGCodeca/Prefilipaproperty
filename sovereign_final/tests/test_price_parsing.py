@@ -2,13 +2,15 @@
 
 Each scraper has its own _price() (or similar) helper that should:
   - Pull out the apartment SALE price from rendered text
-  - Reject values outside the plausible range (€30k–€10M)
+  - Reject values outside the plausible range (config.SALE_PRICE_MIN_EUR –
+    €10M; the floor used to be a hard-coded €30k)
   - Take the LARGEST match when multiple € values are present
     (other matches are deposits, fees, monthly rents, per-m² rates)
 """
 
 import pytest
 
+from config import SALE_PRICE_MIN_EUR as FLOOR
 from scraper.bazos import _price as bazos_price, _is_plausible_price as bz_plausible
 from scraper.topreality import _price_from_text as tr_price, _is_plausible_price as tr_plausible
 
@@ -17,8 +19,8 @@ class TestPlausibility:
     @pytest.mark.parametrize("v,plausible", [
         (    100, False),   # too small — deposit / fee
         (  5_000, False),   # too small — monthly rent
-        ( 29_999, False),   # just below floor
-        ( 30_000, True),    # at floor
+        (FLOOR - 1, False), # just below floor
+        (FLOOR, True),      # at floor
         ( 50_000, True),
         (150_000, True),
         (500_000, True),
@@ -31,8 +33,8 @@ class TestPlausibility:
 
     @pytest.mark.parametrize("v,plausible", [
         (   500, False),
-        (29_999, False),
-        (30_000, True),
+        (FLOOR - 1, False),
+        (FLOOR, True),
         (500_000, True),
         (10_000_001, False),
     ])
@@ -52,6 +54,11 @@ class TestBazosPriceExtraction:
         # real price ("cena 145 000 €") — must return the larger.
         text = "Depozit 500 €. Cena bytu 145 000 €. Mesačný poplatok 80 €."
         assert bazos_price(text) == 145_000.0
+
+    def test_a_small_town_flat_under_the_old_30k_floor_is_kept(self):
+        # A genuine eastern small-town flat; the regional floor judges it later.
+        assert FLOOR < 25_000
+        assert bazos_price("Predám 1-izbový byt, cena 25 000 €") == 25_000.0
 
     def test_ignores_below_floor(self):
         # A listing whose only € value is too small must return 0

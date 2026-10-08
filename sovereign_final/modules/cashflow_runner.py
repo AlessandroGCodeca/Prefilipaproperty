@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from database import (
     get_unscored_cashflow, upsert_cashflow, init_db, requeue_scores_without_benchmark,
-    requeue_scores_with_stale_class,
+    requeue_scores_with_stale_class, requeue_scores_from_older_model,
 )
 from engine.financial import analyse, result_to_db_dict, deal_extras, base_rent_rate
 
@@ -20,6 +20,9 @@ def run_scoring(progress_callback=None) -> int:
     stale = requeue_scores_with_stale_class()
     if stale:
         print(f"♻️  {stale} scores no longer match the current class rules — re-scoring them.")
+    older = requeue_scores_from_older_model()
+    if older:
+        print(f"♻️  {older} scores came from an older model or tax table — re-scoring them.")
     listings = get_unscored_cashflow()
     if not listings:
         print("✅ No new listings to score.")

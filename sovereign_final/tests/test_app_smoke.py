@@ -96,7 +96,7 @@ def test_empty_database_renders_the_demo_view(db):
 def test_populated_database_renders_every_tab(populated_db):
     at = run_app()
     assert not at.exception, [e.value for e in at.exception]
-    assert len(at.tabs) == 9
+    assert len(at.tabs) == 10
 
 
 def test_stats_bar_shows_the_real_counts(populated_db):
@@ -325,3 +325,32 @@ def test_the_card_shows_claudes_lv_summary_once(populated_db):
     populated_db.set_lv_analysis("g1", "LOW", "Only a bank mortgage on the flat.")
     populated_db.set_lv_status("g1", "PASS", "", "[Claude LOW] Only a bank mortgage on the flat.")
     assert markdown_of(run_app()).count("Only a bank mortgage on the flat.") == 1
+
+
+# ── Audit A1 / A8 / A12 ───────────────────────────────────────────────────────
+def test_a_green_that_loses_money_is_flagged_and_can_be_hidden(populated_db):
+    # g1 and w1 are GREEN (far under their medians) but cost money every month.
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    md = markdown_of(at)
+    assert "CASH-FLOW NEGATIVE" in md
+    assert re.search(r"GREEN — ≥20% BELOW MARKET \((\d+)\) · ⛔ \1 CASH-FLOW NEGATIVE", md)
+    next(t for t in at.toggle if t.label.startswith("💶")).set_value(True).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "CASH-FLOW NEGATIVE" not in markdown_of(at)
+
+
+def test_days_count_from_the_first_scrape_and_say_so(populated_db):
+    at = run_app()
+    labels = {m.label for m in at.metric}
+    assert "Days tracked" in labels and "Days listed" not in labels
+
+
+def test_the_lv_to_do_lists_unverified_deals(populated_db):
+    # g1's title deed was never read: it belongs on the queue.
+    populated_db.set_lv_status("g1", "UNVERIFIED", "", "no map pin")
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("1 listing(s) waiting · 0 edited" in c.value for c in at.caption)
+    assert at.button(key="lv_todo_save").disabled
+    assert at.button(key="lv_todo_verify").disabled

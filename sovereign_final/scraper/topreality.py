@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import SCRAPE_DELAY_SEC, DETAIL_REFRESH_DAYS
+from config import SCRAPE_DELAY_SEC, DETAIL_REFRESH_DAYS, SALE_PRICE_MIN_EUR
 from database import (
     upsert_listing, init_db, get_fresh_detail_urls, mark_details_enriched,
     touch_listings,
@@ -52,7 +52,9 @@ ENERGY_VALID = {"A0", "A1", "A", "B", "C", "D", "E", "F", "G"}
 # ── Field extraction helpers (mostly cribbed from nehnutelnosti.py) ───────────
 # Plausible apartment sale price range. Numbers below the floor are almost
 # always deposits / monthly fees / per-m² rates, not the actual sale price.
-_PRICE_MIN = 30_000
+# The floor is a setting (config.SALE_PRICE_MIN_EUR); the per-region check
+# comes after.
+_PRICE_MIN = SALE_PRICE_MIN_EUR
 _PRICE_MAX = 10_000_000
 
 

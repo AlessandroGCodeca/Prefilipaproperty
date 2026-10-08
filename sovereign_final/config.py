@@ -4,6 +4,7 @@ All tunable constants. Review every January.
 """
 
 import os
+from datetime import date
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -23,6 +24,8 @@ LTV_RATIO              = 0.80    # 80% standard NBS cap for owner-occupied/1st-2
 # investor who already owns ≥2 properties.
 LTV_RATIO_INVESTOR     = 0.70
 INVESTOR_LTV_FROM      = "2026-10-01"   # date the 70% cap takes effect
+                                        # (entered May 2026 — verify against the
+                                        # NBS housing-loan measure in force)
 # How many residential properties you already own. At 2 or more, the next
 # purchase is your 3rd+, so scoring uses LTV_RATIO_INVESTOR instead of
 # LTV_RATIO (see engine.financial.default_ltv). Set in .env.
@@ -44,38 +47,89 @@ COST_INFLATION_RATE    = 0.025  # HOA / fond opráv growth p.a.
 # Selling costs as a fraction of the sale price: agent commission (~3%, paid by
 # the seller when you are the seller) plus legal/cadastre.
 EXIT_COST_RATE         = 0.035
-# §9 ods. 1 písm. b) ZDP: an individual's gain on a flat held ≥5 years is
-# exempt. Sold sooner, the gain is taxed at the personal income-tax rate. An
-# s.r.o. pays corporate + dividend tax on the gain whenever it sells.
-PERSONAL_CGT_EXEMPT_YEARS = 5
 
-# Income tax — Fyzická osoba (personal), passive rental under §6 ods. 3
-TAX_RATE_PERSONAL_LOW  = 0.19   # 19% up to threshold
-TAX_RATE_PERSONAL_HIGH = 0.25   # 25% above threshold
-TAX_THRESHOLD_PERSONAL = 41_445 # Annual € threshold 2026 (verify each January)
-# §9 ods. 1 písm. g): the first €500 of rental income is exempt; expenses are
-# reduced proportionally. Modelled here as a flat €500 deduction from the base.
-RENTAL_INCOME_EXEMPTION = 500
+# ── Tax rules by tax year ─────────────────────────────────────────────────────
+# Every tax figure the engine uses, one table per tax year, each with where it
+# came from and when it was last checked. engine.financial scores a listing
+# with tax_rules(TAX_YEAR) and stores the year it used, so a score worked out
+# under last year's table is redone once this year's is added (database.
+# requeue_scores_from_older_model). A year with no table of its own falls back
+# to the latest earlier one and the dashboard says so — that is the January
+# reminder to add the new year here.
+#
+# Have an účtovník confirm the personal model before relying on it: whether
+# your other income pushes the rental into the 25% band, whether mortgage
+# interest and depreciation are deductible for you, and any minimum tax the
+# s.r.o. owes for the year.
+TAX_YEAR_RULES = {
+    2026: {
+        # Fyzická osoba (personal), passive rental under §6 ods. 3 ZDP.
+        "personal_rate_low":   0.19,    # up to the threshold
+        "personal_rate_high":  0.25,    # above it
+        # 176.8 × the životné minimum. 41,445 is 176.8 × €234.42, the životné
+        # minimum of 2023 — carried over, not re-derived for 2026. Replace it
+        # with 176.8 × the životné minimum valid on 1 January of the year.
+        # Only these two bands are modelled; check whether more apply to your
+        # total income (the rental stacks on your salary).
+        "personal_threshold":  41_445,
+        # §9 ods. 1 písm. g): the first €500 of rental income is exempt;
+        # expenses are reduced proportionally. Modelled as a flat €500
+        # deduction from the base.
+        "rental_exemption":    500,
+        # Passive rental income under §6 ods. 3 is NOT subject to health or
+        # social contributions for an individual without a živnosť, so the
+        # personal levy is 0, not 16%. The old 16% figure structurally
+        # over-recommended the s.r.o. route.
+        "health_levy_personal": 0.00,
+        # §9 ods. 1 písm. b): an individual's gain on a flat held ≥5 years is
+        # exempt; sold sooner it is taxed at the personal rate. An s.r.o. pays
+        # corporate + dividend tax on the gain whenever it sells.
+        "personal_cgt_exempt_years": 5,
+        # s.r.o.: 21% standard corporate rate; the reduced rate applies while
+        # taxable revenue stays under the limit (a single rental's gross rent
+        # is far below it). Rates shifted under the consolidation package.
+        "sro_rate":            0.21,
+        "sro_rate_reduced":    0.10,
+        "sro_reduced_revenue_limit": 100_000,
+        # Withholding tax on dividends paid out to the owner — the second half
+        # of s.r.o. double taxation (corporate tax + dividend tax).
+        "dividend_tax":        0.10,
+        "source": ("Zákon 595/2003 (ZDP) after the consolidation package, as "
+                   "entered in May 2026 — not re-checked against the act since; "
+                   "threshold carried over from 2023"),
+        "checked": "2026-05",
+    },
+}
+# The tax year scoring uses. Defaults to the calendar year; set TAX_YEAR in .env
+# to model another year (e.g. next year's, once its table is added above).
+TAX_YEAR = int(os.getenv("TAX_YEAR", "0") or 0) or date.today().year
 
-# Income tax — s.r.o. (corporate)
-TAX_RATE_SRO           = 0.21   # 21% standard corporate rate
-# Reduced rate for small companies whose taxable revenue is under the limit.
-# A single rental's gross rent is far below the limit, so this rate normally
-# applies. (2026 figures — verify with an účtovník; rates shifted under the
-# consolidation package.)
-TAX_RATE_SRO_REDUCED       = 0.10
-SRO_REDUCED_REVENUE_LIMIT  = 100_000
-# Withholding tax on dividends when company profit is distributed to the owner.
-# This is what creates s.r.o. double taxation (corporate tax + dividend tax).
-DIVIDEND_TAX_RATE      = 0.10
 
-# Health insurance levy.
-# IMPORTANT: passive rental income under §6 ods. 3 of zákon 595/2003 is NOT
-# subject to health (zdravotné odvody) or social contributions for an
-# individual without a živnosť — so the personal levy is 0, not 16%. The old
-# 16% figure structurally over-recommended the s.r.o. route. (Confirm with an
-# účtovník for your specific situation.)
-HEALTH_LEVY_PERSONAL   = 0.00   # passive rental: exempt from zdravotné odvody
+def tax_rules(year: int | None = None) -> dict:
+    """The tax table for `year` (default TAX_YEAR): that year's own, or the
+    latest earlier one. Carries "year" (the table used), "requested" and
+    "stale" (True when the requested year has no table of its own)."""
+    requested = int(year or TAX_YEAR)
+    known = sorted(TAX_YEAR_RULES)
+    usable = [y for y in known if y <= requested] or known[:1]
+    used = usable[-1]
+    return {**TAX_YEAR_RULES[used], "year": used, "requested": requested,
+            "stale": used != requested}
+
+
+# The current year's figures under their old names, for code that reads one
+# directly. The engine itself goes through tax_rules().
+_RULES = tax_rules()
+PERSONAL_CGT_EXEMPT_YEARS = _RULES["personal_cgt_exempt_years"]
+TAX_RATE_PERSONAL_LOW  = _RULES["personal_rate_low"]
+TAX_RATE_PERSONAL_HIGH = _RULES["personal_rate_high"]
+TAX_THRESHOLD_PERSONAL = _RULES["personal_threshold"]
+RENTAL_INCOME_EXEMPTION = _RULES["rental_exemption"]
+TAX_RATE_SRO           = _RULES["sro_rate"]
+TAX_RATE_SRO_REDUCED       = _RULES["sro_rate_reduced"]
+SRO_REDUCED_REVENUE_LIMIT  = _RULES["sro_reduced_revenue_limit"]
+DIVIDEND_TAX_RATE      = _RULES["dividend_tax"]
+HEALTH_LEVY_PERSONAL   = _RULES["health_levy_personal"]
 HEALTH_LEVY_SRO        = 0.00   # company exempt
 
 # Property tax
@@ -380,8 +434,39 @@ RENT_COMP_MAX_AGE_DAYS   = 60
 RENT_MIN_EUR             = 150
 RENT_MAX_EUR             = 6_000
 
-# ── s.r.o. Setup Cost Estimate ────────────────────────────────────────────────
+# ── s.r.o. costs and financing ────────────────────────────────────────────────
 SRO_SETUP_COST = 2_500  # Notary + registry + first year accounting
+# What the company costs every year it exists, whatever the flat earns:
+# bookkeeping and the annual accounts/tax return, the registered office, the
+# business bank account. Charged to the s.r.o. scenario each month and
+# deductible from its taxable profit. An estimate — use your účtovník's quote
+# (a one-flat s.r.o. typically runs €50–100/month), and add any minimum tax
+# the company owes for the year.
+SRO_ANNUAL_RUNNING_COST = float(os.getenv("SRO_ANNUAL_RUNNING_COST", "1200") or 0)
+# A company borrows on commercial terms, not a hypotéka: banks usually price
+# an s.r.o.'s property loan above the retail mortgage rate and lend a lower
+# share of the price. The s.r.o. scenario uses the personal rate + this
+# premium, and at most this LTV. Estimates — replace both with a bank's quote.
+SRO_RATE_PREMIUM_PP = float(os.getenv("SRO_RATE_PREMIUM_PP", "0.01") or 0)
+SRO_LTV_RATIO       = float(os.getenv("SRO_LTV_RATIO", "0.70") or 0.70)
+
+# ── Cash-flow flag ────────────────────────────────────────────────────────────
+# The class (GREEN / YELLOW / WHITE) is price against the regional median, not
+# income: at the median the rent covers only 60–75% of all costs, so most
+# GREEN flats still cost money every month. A listing whose monthly surplus is
+# below this (€/mo, after the mortgage and tax) is flagged as cash-flow
+# negative next to its class, and the "cash-flow positive only" filter hides it.
+CASHFLOW_MIN_SURPLUS = float(os.getenv("CASHFLOW_MIN_SURPLUS", "0") or 0)
+
+# ── Scraper sale-price floor ──────────────────────────────────────────────────
+# A € figure on a listing page below this is a deposit, a fee or a monthly
+# rent, never the flat's price, and the scrapers ignore it. Only a backstop:
+# the real per-region check is the regional floor (engine/regional_prices,
+# REGIONAL_PRICE_FLOOR_RATIO × the region's median €/m²), which the cleanup
+# pass applies after every scrape. €30,000 used to be hard-coded here, which
+# dropped genuine small flats in eastern and southern towns before that check
+# ever saw them.
+SALE_PRICE_MIN_EUR = int(float(os.getenv("SALE_PRICE_MIN_EUR", "15000") or 15000))
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 # Anchored to this folder, not the working directory: started from anywhere

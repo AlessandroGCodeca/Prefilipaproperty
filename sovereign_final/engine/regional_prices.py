@@ -6,11 +6,16 @@ expected median — typically developer-project "od €X" starting prices,
 quoting errors, or non-apartment listings that slipped past other filters.
 
 Lookup priority (most specific wins):
-  1. Bratislava sub-district (Realitná únia, April 2026)
+  1. Bratislava city part (Realitná únia, April 2026); a city part with no
+     median of its own, or a bare "Bratislava I"–"Bratislava V", takes the
+     weighted median of its okres's city parts
   2. Slovak city (Realitná únia, April 2026) — or, for a town in
      OKRES_TOWN_FOR, the town its okres is named for
   3. Kraj fallback (NBS Q1 2026)
   4. Global blank-district floor
+
+The medians are for older 3-room flats. benchmark_median() adjusts one for
+the listing's room count before the engine compares a price with it.
 
 Sources:
   - Realitná únia SR — Realitný barometer, April 2026:
@@ -18,6 +23,8 @@ Sources:
   - NBS — Ceny nehnuteľností na bývanie podľa krajov, Q1 2026:
     https://nbs.sk/statistiky/vybrane-makroekonomicke-ukazovatele/
 """
+
+import re
 
 # Bratislava sub-district sale-price medians €/m² (Realitná únia, April 2026,
 # staršie 3-izbové byty — the most representative category for typical
@@ -34,6 +41,57 @@ BA_DISTRICT_MEDIAN_PRICE_PER_M2 = {
     "podunajské":    3_315, "podunajske":    3_315,
     "vrakuňa":       3_232, "vrakuna":       3_232,
 }
+
+# Bratislava's five okresy and their city parts, named as in the table above
+# ("podunajské" is Podunajské Biskupice, "devínska" Devínska Nová Ves,
+# "záhorská" Záhorská Bystrica). Portals often give only "Bratislava II";
+# resolving that to the city-wide median read a flat at the Vrakuňa median
+# 17% below market and one at the Staré Mesto median 17% above it.
+BA_OKRES_PARTS = {
+    "I":   ("staré mesto",),
+    "II":  ("ružinov", "vrakuňa", "podunajské"),
+    "III": ("nové mesto", "rača", "vajnory"),
+    "IV":  ("karlova ves", "dúbravka", "devínska", "lamač", "devín", "záhorská"),
+    "V":   ("petržalka", "jarovce", "rusovce", "čunovo"),
+}
+# Rounded populations (2021 census) — a proxy for each part's flat stock, used
+# only to weight an okres's median towards where its flats are.
+_BA_PART_WEIGHT = {
+    "staré mesto": 37_000, "ružinov": 83_000, "vrakuňa": 20_000,
+    "podunajské": 23_000, "nové mesto": 46_000, "rača": 24_000,
+    "karlova ves": 34_000, "dúbravka": 34_000, "devínska": 16_000,
+    "petržalka": 110_000,
+}
+# Diacritic-free spellings of the city parts with no median of their own.
+_BA_PART_ASCII = {"lamac": "lamač", "devin": "devín", "zahorska": "záhorská",
+                  "cunovo": "čunovo"}
+
+
+def _okres_median(okres: str) -> int:
+    parts = [p for p in BA_OKRES_PARTS[okres] if p in BA_DISTRICT_MEDIAN_PRICE_PER_M2]
+    total = sum(_BA_PART_WEIGHT[p] for p in parts)
+    return round(sum(BA_DISTRICT_MEDIAN_PRICE_PER_M2[p] * _BA_PART_WEIGHT[p]
+                     for p in parts) / total)
+
+
+BA_OKRES_MEDIAN_PRICE_PER_M2 = {o: _okres_median(o) for o in BA_OKRES_PARTS}
+
+
+def _title(name: str) -> str:
+    """'ivanka pri dunaji' → 'Ivanka pri Dunaji'."""
+    return " ".join(w if w in ("pri", "nad", "pod") else w.capitalize()
+                    for w in name.split())
+
+
+def _okres_label(okres: str) -> str:
+    parts = [p for p in BA_OKRES_PARTS[okres] if p in BA_DISTRICT_MEDIAN_PRICE_PER_M2]
+    if len(parts) == 1:
+        return f"Bratislava {okres} ({_title(parts[0])})"
+    return f"Bratislava {okres}, weighted over its city parts"
+_OKRES_OF_PART = {p: o for o, parts in BA_OKRES_PARTS.items() for p in parts}
+_OKRES_OF_PART.update({a: _OKRES_OF_PART[p] for a, p in _BA_PART_ASCII.items()})
+# "Bratislava II", "Bratislava - IV", "okres Bratislava V".
+_BA_OKRES_RE = re.compile(r"bratislava\s*[-–,]?\s*(iv|v|i{1,3})(?!\w)")
 
 # City-level sale-price medians €/m² (Realitná únia, April 2026, staršie
 # 3-izbové byty). Used when district matches a city but not a Bratislava
@@ -77,6 +135,15 @@ REGIONAL_MEDIAN_PRICE_PER_M2 = {
     "PO": 2_200,   # Prešovský kraj
     "KE": 2_682,   # Košický kraj
 }
+
+# The medians above are for older 3-room flats, but per m² a small flat asks
+# more and a large one less. Compared with the 3-room figure, a garsónka at its
+# true market price read as above market and a 4-room one as a bargain. The
+# benchmark a listing is judged against is its region's median times this, by
+# room count; a listing whose room count is unknown keeps the 3-room median.
+# Estimates of the usual spread in Slovak asking prices — replace them with
+# Realitná únia's per-category medians (1-, 2-, 3-izbové) when you have them.
+MEDIAN_ROOMS_MULTIPLIER = {1: 1.15, 2: 1.07, 3: 1.00, 4: 0.95}
 
 # Floor as a fraction of the lookup median. Listings priced below this are
 # almost always dev-project starting prices, quoted wrong, or non-residential.
@@ -136,6 +203,8 @@ _DISTRICT_TO_KRAJ = {
     "piešťany": "TT", "piestany": "TT",
     "senica": "TT", "skalica": "TT",
     "šamorín": "TT", "samorin": "TT",   # okres Dunajská Streda
+    "sereď": "TT", "sered": "TT",       # okres Galanta
+    "holíč": "TT", "holic": "TT",       # okres Skalica
 
     # Trenčiansky kraj
     "trenčín": "TN", "trencin": "TN",
@@ -146,6 +215,11 @@ _DISTRICT_TO_KRAJ = {
     "považská bystrica": "TN", "povazska bystrica": "TN",
     "púchov": "TN", "puchov": "TN",
     "prievidza": "TN",
+    "stará turá": "TN", "stara tura": "TN",
+    "dubnica nad váhom": "TN", "dubnica nad vahom": "TN",
+    "nová dubnica": "TN", "nova dubnica": "TN",
+    "handlová": "TN", "handlova": "TN",
+    "bojnice": "TN", "nováky": "TN", "novaky": "TN",
 
     # Nitriansky kraj
     "nitra": "NR", "komárno": "NR", "komarno": "NR",
@@ -154,6 +228,9 @@ _DISTRICT_TO_KRAJ = {
     "topoľčany": "NR", "topolcany": "NR",
     "zlaté moravce": "NR", "zlate moravce": "NR",
     "vráble": "NR", "vrable": "NR",
+    "štúrovo": "NR", "sturovo": "NR",
+    "kolárovo": "NR", "kolarovo": "NR",
+    "hurbanovo": "NR",
 
     # Žilinský kraj
     "žilina": "ZA", "zilina": "ZA",
@@ -166,6 +243,9 @@ _DISTRICT_TO_KRAJ = {
     "turčianske teplice": "ZA", "turcianske teplice": "ZA",
     "tvrdošín": "ZA", "tvrdosin": "ZA",
     "martin": "ZA", "dolný kubín": "ZA", "dolny kubin": "ZA",
+    "vrútky": "ZA", "vrutky": "ZA",
+    "trstená": "ZA", "trstena": "ZA",
+    "turzovka": "ZA",
 
     # Banskobystrický kraj
     "banská bystrica": "BB", "banska bystrica": "BB",
@@ -177,6 +257,8 @@ _DISTRICT_TO_KRAJ = {
     "veľký krtíš": "BB", "velky krtis": "BB",
     "zvolen": "BB",
     "žiar nad hronom": "BB", "ziar nad hronom": "BB",
+    "kremnica": "BB",
+    "fiľakovo": "BB", "filakovo": "BB",
 
     # Prešovský kraj
     "prešov": "PO", "presov": "PO",
@@ -189,6 +271,8 @@ _DISTRICT_TO_KRAJ = {
     "stropkov": "PO",
     "vranov nad topľou": "PO", "vranov nad toplou": "PO",
     "svidník": "PO", "svidnik": "PO",
+    "spišská belá": "PO", "spisska bela": "PO",
+    "vysoké tatry": "PO", "vysoke tatry": "PO",
 
     # Košický kraj
     "košice": "KE", "kosice": "KE",
@@ -197,6 +281,15 @@ _DISTRICT_TO_KRAJ = {
     "sobrance": "KE",
     "spišská nová ves": "KE", "spisska nova ves": "KE",
     "trebišov": "KE", "trebisov": "KE",
+    "krompachy": "KE",
+    "moldava nad bodvou": "KE",
+}
+
+# Kraj names, for labels and the kraj-level rent fallback (engine.financial).
+KRAJ_NAMES = {
+    "BA": "Bratislavský kraj", "TT": "Trnavský kraj", "TN": "Trenčiansky kraj",
+    "NR": "Nitriansky kraj", "ZA": "Žilinský kraj", "BB": "Banskobystrický kraj",
+    "PO": "Prešovský kraj", "KE": "Košický kraj",
 }
 
 # Substrings sorted longest-first so e.g. "banská bystrica" wins over "bystrica"
@@ -212,6 +305,9 @@ _CITY_KEYS_BY_LENGTH = sorted(
     CITY_MEDIAN_PRICE_PER_M2.keys(), key=len, reverse=True
 )
 _OKRES_TOWN_KEYS_BY_LENGTH = sorted(OKRES_TOWN_FOR, key=len, reverse=True)
+_BA_PART_NO_MEDIAN_BY_LENGTH = sorted(
+    (p for p in _OKRES_OF_PART if p not in BA_DISTRICT_MEDIAN_PRICE_PER_M2),
+    key=len, reverse=True)
 
 
 def kraj_for_district(district: str) -> str | None:
@@ -226,38 +322,100 @@ def kraj_for_district(district: str) -> str | None:
     return None
 
 
-def regional_median_price(district: str) -> float | None:
-    """The per-m² sale-price median for the listing's region, or None when the
-    district resolves to nothing.
+def median_source(district: str) -> tuple[float | None, str]:
+    """(per-m² sale-price median for the listing's region, what it is the
+    median of). (None, "") when the district resolves to nothing.
 
-    Lookup chain: Bratislava sub-district → city (a town in OKRES_TOWN_FOR
-    first takes its okres town's) → kraj. The Bratislava
-    sub-district match requires "bratislava" to also appear in the district
-    string, because suburb names like "Staré Mesto" or "Nové Mesto" exist in
-    other Slovak cities too (e.g. Košice).
+    Lookup chain: Bratislava city part → Bratislava okres → city (a town in
+    OKRES_TOWN_FOR first takes its okres town's) → kraj. The Bratislava
+    matches require "bratislava" to also appear in the district string,
+    because suburb names like "Staré Mesto" or "Nové Mesto" exist in other
+    Slovak cities too (e.g. Košice).
     """
     if not district:
-        return None
+        return None, ""
     key = district.lower()
 
     if "bratislava" in key:
         for needle in _BA_DISTRICT_KEYS_BY_LENGTH:
             if needle in key:
-                return BA_DISTRICT_MEDIAN_PRICE_PER_M2[needle]
+                return (BA_DISTRICT_MEDIAN_PRICE_PER_M2[needle],
+                        f"{_title(needle)}, Bratislava")
+        for needle in _BA_PART_NO_MEDIAN_BY_LENGTH:
+            if re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", key):
+                okres = _OKRES_OF_PART[needle]
+                return (BA_OKRES_MEDIAN_PRICE_PER_M2[okres],
+                        f"{_okres_label(okres)} "
+                        f"({_title(_BA_PART_ASCII.get(needle, needle))} has no "
+                        f"median of its own)")
+        m = _BA_OKRES_RE.search(key)
+        if m:
+            okres = m.group(1).upper()
+            label = _okres_label(okres)
+            if "weighted" in label:
+                label += " — city part not named"
+            return BA_OKRES_MEDIAN_PRICE_PER_M2[okres], label
 
     for needle in _OKRES_TOWN_KEYS_BY_LENGTH:
         if needle in key:
-            return CITY_MEDIAN_PRICE_PER_M2[OKRES_TOWN_FOR[needle]]
+            town = OKRES_TOWN_FOR[needle]
+            return (CITY_MEDIAN_PRICE_PER_M2[town],
+                    f"{_title(town)} (okres town — no median for {_title(needle)})")
 
     for needle in _CITY_KEYS_BY_LENGTH:
         if needle in key:
-            return CITY_MEDIAN_PRICE_PER_M2[needle]
+            where = ("Bratislava city-wide (no city part or okres named)"
+                     if needle == "bratislava" else _title(needle))
+            return CITY_MEDIAN_PRICE_PER_M2[needle], where
 
     kraj = kraj_for_district(district)
     if kraj:
-        return REGIONAL_MEDIAN_PRICE_PER_M2[kraj]
+        return (REGIONAL_MEDIAN_PRICE_PER_M2[kraj],
+                f"{KRAJ_NAMES[kraj]} (no median for the town itself)")
 
-    return None
+    return None, ""
+
+
+def regional_median_price(district: str) -> float | None:
+    """The per-m² sale-price median for the listing's region (see
+    median_source), or None when the district resolves to nothing. This is
+    the 3-room figure the scrapers' floor and ceiling use; the engine judges
+    a listing against benchmark_median()."""
+    return median_source(district)[0]
+
+
+def rooms_multiplier(rooms) -> float:
+    """MEDIAN_ROOMS_MULTIPLIER for a room count; 1.0 (the 3-room basis) when
+    it is unknown. 4 and more rooms share the 4-room figure."""
+    try:
+        r = int(rooms or 0)
+    except (TypeError, ValueError):
+        return 1.0
+    if r <= 0:
+        return 1.0
+    return MEDIAN_ROOMS_MULTIPLIER[min(r, 4)]
+
+
+def benchmark_median(district: str, rooms=None) -> float | None:
+    """The €/m² a listing's price is judged against: its region's median,
+    adjusted from the 3-room basis to its room count."""
+    median = regional_median_price(district)
+    if median is None:
+        return None
+    return round(median * rooms_multiplier(rooms), 2)
+
+
+def benchmark_note(district: str, rooms=None) -> str:
+    """One line on what the benchmark is, for the card and the memo."""
+    median, where = median_source(district)
+    if median is None:
+        return "No regional median for this district."
+    mult = rooms_multiplier(rooms)
+    note = f"median of {where}: €{median:,.0f}/m² for older 3-room flats"
+    if mult != 1.0:
+        note += (f", ×{mult:.2f} for a {int(rooms)}-room flat = "
+                 f"€{median * mult:,.0f}/m²")
+    return note
 
 
 def regional_price_floor(district: str) -> float:

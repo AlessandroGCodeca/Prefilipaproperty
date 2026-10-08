@@ -35,6 +35,7 @@ from config import DMR_ENDPOINT, LLM_MODEL, LV_RECHECK_DAYS
 from database import (
     get_pending_lv, get_lv_row, set_lv_status, set_lv_analysis,
     set_parcel_data, set_flat_lv, reset_demo_rejections, init_db,
+    queue_lv_check,
 )
 from kataster_scraper import enrich_parcel, enrich_lv, parcel_at, fold
 from modules.lv_screen import screen_lv, describe
@@ -371,6 +372,34 @@ def reverify(listing_id: str, lv_number: str | None = None,
     if not row:
         return {"status": "ERROR", "detail": "Not found"}
     return _check_and_store(row, module="debt_bot_reverify")
+
+
+def save_flat_lvs(entries, verify: bool = False, progress_callback=None) -> dict:
+    """Bulk entry from the LV to-do queue. `entries` is (listing_id, flat LV
+    number, katastrálne územie) for each row whose numbers were typed in or
+    changed. verify=True checks each one now (reverify); otherwise they are
+    stored and queued for the next LV debt-filter run, so a list can be typed
+    in without the cadastre being reachable.
+
+    Returns {"saved": n, "PASS": n, "REJECT": n, "UNVERIFIED": n, "ERROR": n}
+    (the verdict counts only when verify is set)."""
+    entries = list(entries)
+    out = {"saved": 0, "PASS": 0, "REJECT": 0, "UNVERIFIED": 0, "ERROR": 0}
+    for i, (listing_id, lv_no, area) in enumerate(entries):
+        if progress_callback:
+            progress_callback(i + 1, len(entries), str(lv_no or ""))
+        lv_no, area = (lv_no or "").strip(), (area or "").strip()
+        if verify:
+            try:
+                res = reverify(listing_id, lv_number=lv_no, cadastral_area=area)
+            except Exception as e:
+                res = {"status": "ERROR", "detail": str(e)}
+            out[res["status"] if res["status"] in out else "ERROR"] += 1
+        else:
+            set_flat_lv(listing_id, lv_no, area)
+            queue_lv_check(listing_id)
+        out["saved"] += 1
+    return out
 
 
 if __name__ == "__main__":
