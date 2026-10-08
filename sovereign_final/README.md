@@ -57,7 +57,7 @@ CI runs on every PR. To run locally from `sovereign_final/`:
 python3 -m pytest tests/
 ```
 
-Everything should pass (about 1,480 tests; the dashboard tests in
+Everything should pass (about 1,500 tests; the dashboard tests in
 `tests/test_app_smoke.py` need `streamlit` installed and are skipped without
 it). CI also runs `ruff check . --select=E9,F` and runs the suite on Windows.
 
@@ -105,6 +105,7 @@ sovereign_final/
 │   ├── location_iq.py        ← Location scorer (Google, or OpenStreetMap)
 │   ├── risk_data.py          ← Real noise / flood / construction data
 │   ├── memo.py               ← PDF investment memo
+│   ├── contract_draft.py     ← ONE-CLICK CLOSE contract draft + internal analysis
 │   ├── pipeline_state.py     ← Pipeline lock + last scheduled run's status
 │   ├── jobs.py               ← Runs the sidebar buttons in the background
 │   └── backup.py             ← Daily database copy + export of your data
@@ -118,14 +119,14 @@ sovereign_final/
 | Tab | What it does |
 |-----|-------------|
 | TRIAGE TABLE | Flat, sortable view of every scored listing — grade, price, **max offer** (🟡/🟢), ask vs max offer, below-market %, rent, surplus, **+2 pp stress**, gross yield, cap rate, **IRR**, **days listed**, **price change**, **portals**, deal stage, vibe, LV status |
-| ACTIVE SNAG LIST | 🟢🟡 deal cards: cost breakdown, financing stress (+2 pp, 70% LTV), location risk with sources, price history, other portals' copies, deal stage, vibe notes, **PDF memo**, LV status and flat-LV verify |
+| ACTIVE SNAG LIST | 🟢🟡 deal cards, 25 a page per class, each built when you open it: cost breakdown, financing stress (+2 pp, 70% LTV), location risk with sources, price history, other portals' copies, deal stage, vibe notes, **PDF memo**, LV status and flat-LV verify |
 | MAP | Every listing with coordinates, coloured by class (faded = area-level geocode) |
 | WHAT-IF / TAX | The tax toggle calculator: any listing (or a custom one) re-run with your own price, rate, LTV, term, rent, hold period, growth and exit costs — personal vs s.r.o. side by side, rate-shock table, IRR, max offer |
 | DEAL PIPELINE | Board of the deals you're working: WATCHING → VIEWING → OFFER → NEGOTIATING → DUE DILIGENCE → NOTARY → CLOSED / PASSED, with a timeline per deal |
 | SATELLITE VIEWER | Listing photo vs Google satellite + Street View + vibe score, and every note saved for the listing |
 | REJECTED | Every LV rejection with its reason, detail and LV risk read; re-verify from here |
 | RENT COMPS | Live €/m² per district from prenájom listings vs the baseline table |
-| ONE-CLICK CLOSE | Pre-filled Slovak notary contract draft with download |
+| ONE-CLICK CLOSE | Pre-filled Slovak notary contract draft with download; the deal's numbers are a separate download, not part of the draft |
 
 A 🔻 banner above the tabs lists price cuts from the last 14 days, and says
 whether the new price now sits inside the max YELLOW offer.

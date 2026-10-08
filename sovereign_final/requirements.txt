@@ -2,7 +2,7 @@
 # instead of whatever was newest that day (a floating `streamlit>=` could pull
 # a release that drops an argument the app uses). Dependabot
 # (.github/dependabot.yml) proposes upgrades as PRs, and CI tests each one.
-streamlit==1.65.0
+streamlit==1.65.0       # ≥1.55: lazy st.expander (on_change="rerun"); "euro" format
 pydeck==0.9.3          # the MAP tab imports it directly
 requests==2.34.2
 beautifulsoup4==4.15.0

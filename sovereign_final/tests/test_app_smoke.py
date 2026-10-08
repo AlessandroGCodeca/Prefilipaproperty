@@ -72,8 +72,13 @@ def populated_db(db):
     return db
 
 
-def run_app() -> AppTest:
-    return AppTest.from_file(APP, default_timeout=120).run()
+def run_app(open_cards=()) -> AppTest:
+    """Run the dashboard. A card builds its body only once it is opened, so
+    a test that reads one opens it first, as a click on its header would."""
+    at = AppTest.from_file(APP, default_timeout=120)
+    for lid in open_cards:
+        at.session_state[f"card_{lid}"] = True
+    return at.run()
 
 
 def markdown_of(at: AppTest) -> str:
@@ -99,19 +104,37 @@ def test_populated_database_renders_every_tab(populated_db):
     assert len(at.tabs) == 9
 
 
-def test_stats_bar_shows_the_real_counts(populated_db):
+def test_stats_bar_counts_the_listings_on_the_page(populated_db):
     # A real zero used to be replaced by the demo rows' count (`x or demo`).
-    real = populated_db.get_stats()
-    assert real["yellow"] == 0 and real["rejected"] == 1
-    shown = stats_bar(run_app())
+    at = run_app()
+    shown = stats_bar(at)
     assert shown["Yellow"] == 0
-    assert shown["Green"] == real["green"]
-    assert shown["Rejected"] == real["rejected"]
-    assert shown["Pending"] == real["pending"]
+    # The tiles are the lists below: Total is their sum, and the scored ones
+    # are the triage table's rows. p1 (no size) is under the Min Size filter.
+    assert shown["Total"] == shown["Green"] + shown["Yellow"] + shown["White"] + shown["Pending"]
+    assert shown["Green"] + shown["White"] == len(_frame(at, "Grade")) == 3
+    assert shown["Pending"] == 0
+    # r1 failed LV: counted as rejected, and only there.
+    assert shown["Rejected"] == 1
+
+
+def test_stats_bar_follows_the_sidebar_filters(populated_db):
+    # get_stats() ignored every filter: the tiles stayed put while the
+    # cards below dropped from 53 to 10.
+    at = run_app()
+    max_price = next(s for s in at.slider if s.label == "Max Price €")
+    max_price.set_value(60_000).run()
+    assert not at.exception, [e.value for e in at.exception]
+    shown = stats_bar(at)
+    assert shown["Total"] == shown["Green"] == shown["White"] == 0
+    assert shown["Rejected"] == 1                 # r1 asks €55,000
+    assert "Showing 0 of 4 listings · 4 hidden by the sidebar filters" in markdown_of(at)
+    next(s for s in at.slider if s.label == "Max Price €").set_value(50_000).run()
+    assert stats_bar(at)["Rejected"] == 0
 
 
 def test_text_from_portals_and_notes_is_escaped(populated_db):
-    md = markdown_of(run_app())
+    md = markdown_of(run_app(open_cards=("g1", "w2")))
     for raw in ("<img src=x", "<script>", "<b onmouseover"):
         assert raw not in md
     # …and it is still shown, as text.
@@ -141,7 +164,7 @@ def _frame(at, column):
 def test_demo_mode_writes_nothing(db):
     # The demo rows (d1–d3) are not in the database; saving a stage, a note
     # or an LV check for them left rows pointing at listings that don't exist.
-    at = run_app()
+    at = run_app(open_cards=("d1",))
     assert not at.exception, [e.value for e in at.exception]
     assert at.button(key="stgb_d1").disabled
     assert at.button(key="rv_d1").disabled
@@ -247,7 +270,7 @@ def test_a_rejected_portal_copy_is_flagged_on_the_card(db):
         _add_scored(db, lid, "Trnava", 99_000, 54, source=source, title=f"Copy {lid}")
     db.set_lv_status("t1", "REJECTED", "záložné právo", "lien")
     db.mark_duplicates()
-    assert "A COPY FAILED LV" in markdown_of(run_app())
+    assert "A COPY FAILED LV" in markdown_of(run_app(open_cards=("n1",)))
 
 
 # ── Review follow-ups ─────────────────────────────────────────────────────────
@@ -297,7 +320,7 @@ def test_a_recheck_updates_the_flats_other_copies(db, monkeypatch):
         db.set_lv_status(lid, "PASS", "", "lien cleared")
         return {"status": "PASS", "detail": "lien cleared"}
     monkeypatch.setattr(bot, "reverify", reverify)
-    at = run_app()
+    at = run_app(open_cards=("n1",))
     assert "A COPY FAILED LV" in markdown_of(at)
     at.button(key="rej_rv").click().run()
     assert not at.exception, [e.value for e in at.exception]
@@ -324,7 +347,188 @@ def test_demo_mode_still_moves_a_real_tracked_deal(populated_db):
 def test_the_card_shows_claudes_lv_summary_once(populated_db):
     populated_db.set_lv_analysis("g1", "LOW", "Only a bank mortgage on the flat.")
     populated_db.set_lv_status("g1", "PASS", "", "[Claude LOW] Only a bank mortgage on the flat.")
-    assert markdown_of(run_app()).count("Only a bank mortgage on the flat.") == 1
+    assert markdown_of(run_app(open_cards=("g1",))).count("Only a bank mortgage on the flat.") == 1
+
+
+# ── Audit B1–B6 ───────────────────────────────────────────────────────────────
+def _button(at, label):
+    return next(b for b in at.button if b.label == label)
+
+
+def _finished(at):
+    """Let the background step a sidebar button started finish, then redraw
+    the page the way the sidebar's polling does (modules/jobs)."""
+    from modules import jobs
+    jobs.wait(60)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    return at
+
+
+def test_a_card_builds_its_body_only_when_opened(populated_db):
+    # B1: a collapsed card ran its ~40 widgets on every click all the same.
+    def stage_buttons(at):
+        return [b.key for b in at.button if (b.key or "").startswith("stgb_")]
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    assert stage_buttons(at) == []
+    assert stage_buttons(run_app(open_cards=("g1",))) == ["stgb_g1"]
+
+
+def click_open(monkeypatch, at, label_part):
+    """Open a card the way a click in the browser does: the page reports an
+    open expander under its element id, which changes with its label, for as
+    long as that expander is on the page. (run_app(open_cards=…) sets the
+    state under the key instead, which outlives a label change.)"""
+    from streamlit.proto.WidgetStates_pb2 import WidgetState
+    from streamlit.testing.v1.element_tree import ElementTree
+    exp_id = next(e.proto.id for e in at.expander if label_part in e.label)
+    real = ElementTree.get_widget_states
+
+    def with_the_card_open(tree):
+        ws = real(tree)
+        if any(e.proto.id == exp_id for e in tree.get("expander")):
+            ws.widgets.append(WidgetState(id=exp_id, bool_value=True))
+        return ws
+    monkeypatch.setattr(ElementTree, "get_widget_states", with_the_card_open)
+    return at.run()
+
+
+def test_saving_a_stage_keeps_the_card_open(populated_db, monkeypatch):
+    # The stage is in the card's header, and an expander whose label changes
+    # comes back closed — saving a stage would fold the card away.
+    at = click_open(monkeypatch, run_app(), "[VIEWING]")
+    assert any(b.key == "stgb_g1" for b in at.button)
+    at.selectbox(key="stg_g1").select("OFFER").run()
+    at.text_input(key="stgn_g1").set_value("offer €95k").run()
+    at.button(key="stgb_g1").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert populated_db.get_deal_stages()["g1"]["stage"] == "OFFER"
+    assert populated_db.get_deal_stages()["g1"]["note"] == "offer €95k"
+    assert any("[OFFER]" in e.label for e in at.expander)
+    assert any(b.key == "stgb_g1" for b in at.button)    # still open
+
+
+def test_cards_come_a_page_at_a_time(db):
+    # B1: 30 WHITE listings — 25 cards on the first page, 5 on the second.
+    from engine.regional_prices import regional_median_price
+    from modules.cashflow_runner import run_scoring
+    at_market = round(regional_median_price("Žilina") * 55)
+    for i in range(30):
+        db.upsert_listing(make_listing(f"w{i:02d}", district="Žilina", size_m2=55.0,
+                                       price_eur=float(at_market), title=f"White {i:02d}",
+                                       scraped_at=_now_iso(9), last_seen_at=_now_iso()))
+    run_scoring()
+
+    def white_cards(at):
+        return [e.label for e in at.expander if e.label.startswith("⚪")]
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    assert len(white_cards(at)) == 25
+    at.selectbox(key="page_white_30").select_index(1).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert len(white_cards(at)) == 5
+
+
+def test_seeded_sample_rows_show_with_the_default_filters(db):
+    # B3: the seed's rows are source='sample', which the fixed Source filter
+    # could not select — the tabs said "No listings in DB yet".
+    import seed_market_data
+    seed_market_data.seed()
+    from collections import Counter
+    assert Counter(l["cf_class"] for l in db.get_all_active()) == {
+        "WHITE": 37, "YELLOW": 8, "GREEN": 5}   # was 34 GREEN of 50
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "sample" in next(m for m in at.multiselect if m.label == "Source").value
+    shown = stats_bar(at)
+    assert (shown["Green"], shown["Yellow"]) == (5, 8)
+    assert not [i for i in at.info if "No listings in DB yet" in i.value]
+
+
+def test_filters_that_hide_everything_say_so(populated_db):
+    # B3: an empty list blamed the database for what the filters hid.
+    at = run_app()
+    next(t for t in at.text_input if t.label == "District contains").set_value("Nowhere").run()
+    assert not at.exception, [e.value for e in at.exception]
+    infos = [i.value for i in at.info]
+    assert not [i for i in infos if "No listings in DB yet" in i]
+    assert [i for i in infos if "hidden by them" in i]
+
+
+def test_a_steps_result_survives_the_rerun(populated_db):
+    # B4: st.success(...) then st.rerun() wiped the message straight away.
+    populated_db.upsert_listing(make_listing("old", district="Trnava", scraped_at=_now_iso(40),
+                                             last_seen_at=_now_iso(30)))
+    at = run_app()
+    _button(at, "🧹 CLEAN STALE (21d)").click().run()
+    _finished(at)
+    assert any("Deactivated 1 stale listings" in s.value for s in at.success)
+    assert any("Deactivated 1 stale listings" in t.value for t in at.toast)
+    at.run()
+    # The toast is a one-off; the sidebar keeps the last step's result until
+    # the next step starts.
+    assert not any("Deactivated" in t.value for t in at.toast)
+    assert any("Deactivated 1 stale listings" in s.value for s in at.success)
+
+
+def test_parse_desc_says_why_nothing_was_parsed(populated_db, monkeypatch):
+    import modules.llm_enrichment as llm
+    monkeypatch.setattr(llm, "ANTHROPIC_API_KEY", "")
+    at = run_app()
+    _button(at, "📝 PARSE DESC").click().run()
+    _finished(at)
+    assert any("set ANTHROPIC_API_KEY" in i.value for i in at.info)
+
+
+def test_a_scrapers_count_is_shown_after_the_rerun(populated_db, monkeypatch):
+    import subprocess
+    import modules.llm_enrichment as llm
+    monkeypatch.setattr(llm, "ANTHROPIC_API_KEY", "")
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess(
+        cmd, 0, '{"ok": true, "n": 7}\n', ""))
+    at = run_app()
+    _button(at, "BAZOS").click().run()
+    _finished(at)
+    assert any("scraped 7 listings" in s.value for s in at.success)
+
+
+def test_a_scraper_that_runs_out_of_time_is_reported_not_a_crash(populated_db, monkeypatch):
+    # B5: TimeoutExpired went uncaught and the page showed a traceback.
+    import subprocess
+    import modules.llm_enrichment as llm
+    monkeypatch.setattr(llm, "ANTHROPIC_API_KEY", "")
+    scored = []
+    import modules.cashflow_runner as cf
+    real_scoring = cf.run_scoring
+    monkeypatch.setattr(cf, "run_scoring", lambda *a, **k: scored.append(1) or real_scoring(*a, **k))
+
+    def too_slow(cmd, **k):
+        raise subprocess.TimeoutExpired(cmd, k.get("timeout"))
+    monkeypatch.setattr(subprocess, "run", too_slow)
+    at = run_app()
+    _button(at, "NEHNUT").click().run()
+    _finished(at)
+    # 30 minutes: the step runs in the background now, so it can take longer.
+    assert any("30-minute limit" in w.value and "NEHNUT again" in w.value for w in at.warning)
+    assert scored                                 # the pages it finished are scored
+
+
+def test_contract_draft_reads_like_a_draft(populated_db):
+    # B6: "Katastrálne územie: None", €99,000.00, and the deal analysis in
+    # the text meant for the notár.
+    at = run_app()
+    sb = at.selectbox(key="close_sel")
+    sb.select(next(o for o in sb.options if "[g1]" in o)).run()
+    next(t for t in at.text_input if t.label == "Full Name / s.r.o. Name").set_value("Filip Test").run()
+    _button(at, "GENERATE CONTRACT DRAFT").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    draft = next(t.value for t in at.text_area if t.label == "CONTRACT DRAFT")
+    assert "None" not in draft
+    assert "FINANČNÁ ANALÝZA" not in draft
+    assert "99 000,00 €" in draft and "€99,000" not in draft
+    assert any("FINANČNÁ ANALÝZA" in c.value for c in at.code)
+    assert populated_db.get_contract_drafts("g1")[0]["draft_text"] == draft
 
 
 # ── Audit B12–B16 ─────────────────────────────────────────────────────────────
@@ -397,14 +601,14 @@ def _read(path):
 
 def test_money_puts_the_sign_ahead_of_the_euro(populated_db):
     # Prešov, €55k for 50 m² at default financing runs a monthly deficit.
-    at = run_app()
+    at = run_app(open_cards=("g1", "w1", "w2"))
     values = [m.value for m in at.metric] + [m.label for m in at.expander]
     assert not [v for v in values if "€-" in v or "€+" in v]
     assert any(re.match(r"^-€\d", v) for v in values), values
 
 
 def test_vs_market_fits_its_metric(populated_db):
-    at = run_app()
+    at = run_app(open_cards=("g1",))
     g1 = next(m for m in at.metric if m.label == "Below market")
     assert re.fullmatch(r"\d+%", g1.value)
 
@@ -540,18 +744,3 @@ def test_a_button_waits_for_the_scheduler(db):
         at = _click(run_app(), "🧹 CLEAN STALE (21d)")
     assert not jobs.running()
     assert any("scheduler is running" in w.value for w in at.warning)
-
-
-def test_a_slow_scraper_is_reported_not_a_crash(db, monkeypatch):
-    # Audit B5: subprocess.TimeoutExpired escaped as a traceback on the page.
-    import subprocess
-    from modules import jobs
-
-    def too_slow(*a, **k):
-        raise subprocess.TimeoutExpired(cmd="scraper", timeout=k.get("timeout"))
-    monkeypatch.setattr(subprocess, "run", too_slow)
-    at = _click(run_app(), "NEHNUT")
-    jobs.wait(30)
-    at.run()
-    assert not at.exception, [e.value for e in at.exception]
-    assert any("still running after 30 min" in e.value for e in at.error)

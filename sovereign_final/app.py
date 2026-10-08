@@ -129,6 +129,10 @@ div[data-testid="stExpander"] { background:#0b0d14; border:1px solid #151924 !im
 div[data-testid="stExpander"] summary { color:#bcc8e0; }
 div[data-testid="stExpander"] summary:hover { background:#11141d; color:#e4eaf5; }
 
+/* Text areas (the contract draft): monospace keeps the draft's ╔══╗ frame and
+   columns aligned. */
+.stTextArea textarea { font-family:var(--mono); font-size:0.75rem; }
+
 /* Metrics sit six to a row on the listing card; at the default 2.25rem
    "€168,000" and "€920/mo" were cut to "€168,…". */
 div[data-testid="stMetricValue"] { font-size:1.45rem; }
@@ -165,7 +169,7 @@ def _require_password() -> None:
 _require_password()
 
 # ── Init ──────────────────────────────────────────────────────────────────────
-from database import init_db, get_all_active, get_stats, backfill_dev_project_flags
+from database import init_db, get_all_active, backfill_dev_project_flags
 init_db()
 
 @st.cache_resource
@@ -255,9 +259,13 @@ def _job_panel():
         return
     _SHOW.get(job.level, st.info)(job.message)
     if st.session_state.get("_job_watch") == job.id:
-        # This page watched the job run: redraw all of it on the new data.
+        # This page watched the job run: redraw all of it on the new data,
+        # and toast the result for a page scrolled away from the sidebar.
         del st.session_state["_job_watch"]
+        st.session_state["_job_toast"] = job.message
         st.rerun()
+    if "_job_toast" in st.session_state:
+        st.toast(st.session_state.pop("_job_toast"), duration="long")
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -318,10 +326,16 @@ with st.sidebar:
         ["GREEN", "YELLOW", "WHITE", "PENDING", "REJECTED"],
         default=["GREEN", "YELLOW", "WHITE", "PENDING"],
     )
+    # The portals, plus any other source in the database — 'sample' for the
+    # rows seed_market_data.py writes. A fixed list hid those rows behind a
+    # filter that had no option to show them.
+    from database import get_active_sources
+    _portals = ["nehnutelnosti", "bazos", "topreality"]
+    _source_opts = _portals + [s for s in get_active_sources() if s not in _portals]
     sources    = st.multiselect(
         "Source",
-        ["nehnutelnosti", "bazos", "topreality"],
-        default=["nehnutelnosti", "bazos", "topreality"],
+        _source_opts,
+        default=_source_opts,
     )
     district_q = st.text_input(
         "District contains",
@@ -384,11 +398,14 @@ with st.sidebar:
 # Each button's step runs on a worker thread (modules/jobs) under the lock the
 # scheduler also takes. A step gets progress(i, n, note) and returns
 # (level, message) for the sidebar.
+# The step runs in the background, so it can take its time. Pages are stored
+# as they are scraped: a run stopped at the limit keeps the pages it finished.
 SCRAPER_TIMEOUT_S = 1800   # ten pages plus detail pages can pass 5 min cold
 
 
-def _run_scraper_subprocess(script_name: str) -> tuple[int, str]:
-    """Run a scraper as a fresh subprocess — bypasses Python module cache."""
+def _run_scraper_subprocess(script_name: str) -> tuple[int, str, bool]:
+    """Run a scraper as a fresh subprocess — bypasses Python module cache.
+    Returns (listings stored, error, stopped at SCRAPER_TIMEOUT_S)."""
     import subprocess, json as _json
     _dir = os.path.dirname(__file__)
     wrapper = f"""
@@ -408,26 +425,27 @@ except Exception as e:
             capture_output=True, text=True, timeout=SCRAPER_TIMEOUT_S
         )
     except subprocess.TimeoutExpired:
-        return 0, (f"still running after {SCRAPER_TIMEOUT_S // 60} min — stopped. "
-                   f"What it saved before that is kept.")
+        # run() has killed the scraper; uncaught, this was a raw traceback.
+        return 0, "", True
     for line in (proc.stdout + proc.stderr).strip().splitlines():
         try:
             data = _json.loads(line)
             if data.get("ok"):
-                return data["n"], ""
+                return data["n"], "", False
             else:
-                return 0, data.get("error", "Unknown error")
+                return 0, data.get("error", "Unknown error"), False
         except Exception:
             continue
     stderr = proc.stderr.strip()
-    return 0, stderr or "Scraper produced no output"
+    return 0, stderr or "Scraper produced no output", False
 
 
-def _scrape_step(module: str, name: str):
+def _scrape_step(module: str, name: str, button: str):
     def step(progress):
-        n, err = _run_scraper_subprocess(module)
+        n, err, timed_out = _run_scraper_subprocess(module)
         if err:
             return "error", f"❌ {name}: {err}"
+        # Stopped or not, what was stored gets the usual follow-up steps.
         from modules.address_enrichment import run_address_enrichment
         run_address_enrichment()
         from modules.description_enrichment import run_description_enrichment
@@ -436,6 +454,13 @@ def _scrape_step(module: str, name: str):
         scored = run_scoring()
         from database import mark_duplicates
         mark_duplicates()
+        if timed_out:
+            from config import DETAIL_REFRESH_DAYS
+            return "warning", (
+                f"⏱ {name} hit the {SCRAPER_TIMEOUT_S // 60}-minute limit and was stopped. "
+                f"The pages it finished are saved; scored {scored}. Click {button} again "
+                f"to carry on — detail pages read in the last {DETAIL_REFRESH_DAYS} days "
+                f"are not opened again, so each run gets further.")
         return "success", f"✅ {name}: scraped {n} listings, scored {scored}."
     return step
 
@@ -521,9 +546,9 @@ def _stale_step(progress):
 
 
 for _clicked, _label, _step in (
-    (do_nehnut,  "NEHNUT",                 _scrape_step("nehnutelnosti", "Nehnutelnosti")),
-    (do_bazos,   "BAZOS",                  _scrape_step("bazos", "Bazos")),
-    (do_topreal, "TOPREAL",                _scrape_step("topreality", "Topreality")),
+    (do_nehnut,  "NEHNUT",                 _scrape_step("nehnutelnosti", "Nehnutelnosti", "NEHNUT")),
+    (do_bazos,   "BAZOS",                  _scrape_step("bazos", "Bazos", "BAZOS")),
+    (do_topreal, "TOPREAL",                _scrape_step("topreality", "Topreality", "TOPREAL")),
     (do_lv,      "LV DEBT FILTER",         _lv_step),
     (do_cf,      "CASHFLOW SCORE",         _cf_step),
     (do_desc,    "PARSE DESC",             _desc_step),
@@ -541,6 +566,10 @@ for _clicked, _label, _step in (
         if _why:
             st.sidebar.warning(_why)
         else:
+            # Watched from the start: a quick step can finish before the
+            # page ever draws it running, and its result still gets the toast
+            # and the redraw.
+            st.session_state["_job_watch"] = jobs.current().id
             st.rerun()      # draw the sidebar with the job running
 
 if do_test:
@@ -563,13 +592,13 @@ if do_test:
             st.error(f"❌ **{label}** → {_e}")
 
 
+
 # ── Data ──────────────────────────────────────────────────────────────────────
 from database import (
     get_price_history, get_price_drops, get_deal_stages, latest_vibes,
     days_on_market, DEAL_STAGES,
 )
 
-stats    = get_stats()
 raw_data = get_all_active()
 
 using_demo = show_demo or not raw_data
@@ -579,6 +608,8 @@ if using_demo:
         st.info("ℹ️ No data in DB yet — showing demo listings. Run the pipeline to populate.")
 else:
     data = raw_data
+# LV-rejected listings never reach the lists; the Rejected tile counts them.
+rejected_rows = [] if using_demo else get_all_active(rejected=True)
 
 # Per-listing context that lives outside the main query: price history, deal
 # stage, latest vibe note, the other portals' copies of the same flat.
@@ -598,25 +629,74 @@ for l in data:
     # A flat is as old as its oldest copy on any portal.
     seen = [c.get("scraped_at") for c in l["_copies"] + [l] if c.get("scraped_at")]
     l["_dom"]     = days_on_market(min(seen)) if seen else None
+for l in rejected_rows:
+    l["_ph"]      = price_hist.get(l.get("id"))
 
 # Apply filters
 district_needle = (district_q or "").strip().lower()
-data = [l for l in data
-        if (l.get("price_eur") or 0) <= max_price
-        and (l.get("size_m2")  or 0) >= min_size
-        and (not classes or (l.get("classification") or "PENDING") in classes)
-        and (not sources or (l.get("source") or "") in sources)
-        and (not district_needle or district_needle in (l.get("district") or "").lower())
-        and (not cond_filter or (l.get("condition") or "").lower() in cond_filter)
-        and (not req_parking or (l.get("has_parking") or 0))
-        and (not req_furnished or (l.get("furnished") or "") in ("furnished", "semi"))
-        and (not req_elevator or (l.get("has_elevator") or 0))
-        and (not drops_only or ((l["_ph"] or {}).get("change_pct") or 0) < 0)
-        and (not hide_dev or not (l.get("is_dev_project") or 0))]
+
+
+def passes_filters(l, by_class=True):
+    """The sidebar filters. A rejected listing is checked without the
+    Classification one: being rejected is all its tile counts."""
+    return ((l.get("price_eur") or 0) <= max_price
+            and (l.get("size_m2")  or 0) >= min_size
+            and (not by_class or not classes or (l.get("classification") or "PENDING") in classes)
+            and (not sources or (l.get("source") or "") in sources)
+            and (not district_needle or district_needle in (l.get("district") or "").lower())
+            and (not cond_filter or (l.get("condition") or "").lower() in cond_filter)
+            and (not req_parking or (l.get("has_parking") or 0))
+            and (not req_furnished or (l.get("furnished") or "") in ("furnished", "semi"))
+            and (not req_elevator or (l.get("has_elevator") or 0))
+            and (not drops_only or ((l["_ph"] or {}).get("change_pct") or 0) < 0)
+            and (not hide_dev or not (l.get("is_dev_project") or 0)))
+
+
+n_loaded = len(data)
+data = [l for l in data if passes_filters(l)]
 # One copy per flat, chosen among the copies that passed the filters above.
 if hide_dups:
     from engine.duplicates import one_per_flat
     data = one_per_flat(data)
+# Listings in the database that the sidebar (filters, hidden portal copies)
+# keeps off the page — an empty list then means "widen the filters", not
+# "the database is empty".
+n_hidden = n_loaded - len(data)
+
+
+from config import NEAR_FLOOR_DISCOUNT
+
+
+def _value_rank(l):
+    """Sort key, best first (used with reverse=True): deepest discount to the
+    regional median, then the higher yield.
+
+    A discount at NEAR_FLOOR_DISCOUNT or deeper is more often a deposit or an
+    "od €X" price than a bargain — the card warns about it — so those rows go
+    after every other one, the least extreme first. Judged at the 4 decimals
+    the card's warning uses, so the order and the warning always agree."""
+    disc = l.get("market_discount") or 0
+    gross = l.get("gross_yield") or 0
+    if round(disc, 4) >= NEAR_FLOOR_DISCOUNT:
+        return (0, -disc, gross)
+    return (1, disc, gross)
+
+
+greens  = sorted([l for l in data if (l.get("cf_class") or l.get("classification")) == "GREEN"],
+                 key=_value_rank, reverse=True)
+yellows = sorted([l for l in data if (l.get("cf_class") or l.get("classification")) == "YELLOW"],
+                 key=_value_rank, reverse=True)
+whites  = [l for l in data if (l.get("cf_class") or l.get("classification")) == "WHITE"]
+# Listing ids are md5 hex digests, so a prefix test on "d" (meant for the demo
+# rows d1–d3) hid one real listing in sixteen. The demo rows are all scored
+# GREEN/YELLOW and never land here anyway.
+pending = [l for l in data if (l.get("cf_class") or l.get("classification") or "PENDING") == "PENDING"]
+
+
+def hidden_note(what="listings"):
+    """The empty-state line when the filters, not the database, emptied a list."""
+    return (f"No {what} match the sidebar filters — {n_hidden} listing(s) are hidden by "
+            f"them (Source, Max price, Classification, …). Widen the filters to see them.")
 
 
 # A failed scheduled run is easy to miss in the sidebar (collapsed on a
@@ -626,19 +706,18 @@ if _run_level == "error":
 
 
 # ── Stats bar ─────────────────────────────────────────────────────────────────
-# The counts describe the listings below. `x or demo_count` used to fill in a
-# real zero (no YELLOW deals yet) with the demo rows' count; the demo counts
-# belong only to the demo rows.
-if using_demo:
-    shown = {
-        "total":    len(DEMO),
-        "green":    sum(1 for d in DEMO if d["cf_class"] == "GREEN"),
-        "yellow":   sum(1 for d in DEMO if d["cf_class"] == "YELLOW"),
-        "white":    sum(1 for d in DEMO if d["cf_class"] == "WHITE"),
-        "rejected": 0, "pending": 0,
-    }
-else:
-    shown = stats
+# The tiles count the listings the page shows, so they move with the sidebar
+# filters: Total = Green + Yellow + White + Pending. Rejected listings are
+# never shown in the lists; their tile counts the ones the same filters
+# (bar Classification) let through, and they are not counted as Pending.
+shown = {
+    "total":    len(data),
+    "green":    len(greens),
+    "yellow":   len(yellows),
+    "white":    len(whites),
+    "rejected": sum(1 for l in rejected_rows if passes_filters(l, by_class=False)),
+    "pending":  len(pending),
+}
 st.markdown(f"""
 <div class="sg">
   <div class="sc b"><div class="sn">{shown['total']}</div><div class="sl">Total</div></div>
@@ -649,6 +728,10 @@ st.markdown(f"""
   <div class="sc a"><div class="sn">{shown['pending']}</div><div class="sl">Pending</div></div>
 </div>
 """, unsafe_allow_html=True)
+if n_hidden:
+    st.markdown(f'<div class="muted" style="margin:-10px 0 14px">Showing {len(data)} of '
+                f'{n_loaded} listings · {n_hidden} hidden by the sidebar filters</div>',
+                unsafe_allow_html=True)
 
 
 # ── Price-cut alerts ──────────────────────────────────────────────────────────
@@ -765,6 +848,15 @@ def _lv_link(l):
     return "https://kataster.skgeodesy.sk/EsriRegistrationWeb/"
 
 
+def _save_stage(lid):
+    """SAVE STAGE, run as a callback — before the page redraws, so the card
+    shows the new stage at once. The stage is in the card's header, and an
+    expander whose label changes comes back closed, so it is kept open."""
+    from database import set_deal_stage
+    set_deal_stage(lid, st.session_state[f"stg_{lid}"], st.session_state[f"stgn_{lid}"])
+    st.session_state[f"card_{lid}"] = True
+
+
 def render_card(l):
     cls      = (l.get("cf_class") or l.get("classification") or "PENDING").upper()
     css_cls  = {"GREEN":"g","YELLOW":"y","WHITE":"w","PENDING":"w"}.get(cls,"w")
@@ -796,7 +888,13 @@ def render_card(l):
     header = (f"{emoji}  {title[:60]}   ·   €{price:,.0f}   ·   {below}   ·   "
               f"{fe(surplus, suffix='/mo')}{cut}{stage_tag}")
 
-    with st.expander(header):
+    # Only an open card builds its body. Every click reruns the whole script,
+    # and a collapsed expander still ran its ~40 widgets, so the page slowed
+    # to half a minute a click at ~700 listings.
+    card = st.expander(header, key=f"card_{l.get('id')}", on_change="rerun")
+    if not card.open:
+        return
+    with card:
         # Row 1: key metrics
         c1,c2,c3,c4,c5,c6 = st.columns(6)
         with c1:
@@ -970,18 +1068,15 @@ def render_card(l):
         lid = l.get("id", "")
         with s1:
             cur = (stage or {}).get("stage", "NEW")
-            new_stage = st.selectbox("Deal stage", DEAL_STAGES,
-                                     index=DEAL_STAGES.index(cur) if cur in DEAL_STAGES else 0,
-                                     key=f"stg_{lid}")
-            stage_note = st.text_input("Stage note", value=(stage or {}).get("note") or "",
-                                       key=f"stgn_{lid}", placeholder="e.g. viewing Sat 10:00")
+            st.selectbox("Deal stage", DEAL_STAGES,
+                         index=DEAL_STAGES.index(cur) if cur in DEAL_STAGES else 0,
+                         key=f"stg_{lid}")
+            st.text_input("Stage note", value=(stage or {}).get("note") or "",
+                          key=f"stgn_{lid}", placeholder="e.g. viewing Sat 10:00")
             # Demo rows aren't in the database: writing their ids would leave
             # deal stages (and LV checks, notes) for listings that don't exist.
-            if st.button("SAVE STAGE", key=f"stgb_{lid}", width="stretch",
-                         disabled=using_demo):
-                from database import set_deal_stage
-                set_deal_stage(lid, new_stage, stage_note)
-                st.rerun()
+            st.button("SAVE STAGE", key=f"stgb_{lid}", width="stretch",
+                      disabled=using_demo, on_click=_save_stage, args=(lid,))
         with s2:
             v = l.get("_vibe")
             if v:
@@ -1072,6 +1167,25 @@ def render_memo_button(l, key):
             st.warning(f"Memo: {e}")
 
 
+CARDS_PER_PAGE = 25
+
+
+def render_cards(listings, section):
+    """One page of a section's cards, so a click never redraws hundreds of
+    them. The picker's key carries the count: when the filters change how
+    many there are, the section starts again at its first page."""
+    pages = -(-len(listings) // CARDS_PER_PAGE)
+    page = 0
+    if pages > 1:
+        n = len(listings)
+        page = st.selectbox(
+            "Cards", range(pages), key=f"page_{section}_{n}", width=260,
+            format_func=lambda p: f"{p * CARDS_PER_PAGE + 1}–"
+                                  f"{min((p + 1) * CARDS_PER_PAGE, n)} of {n}")
+    for l in listings[page * CARDS_PER_PAGE:(page + 1) * CARDS_PER_PAGE]:
+        render_card(l)
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TABS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1087,35 +1201,6 @@ def render_memo_button(l, key):
     "ONE-CLICK CLOSE",
 ])
 
-from config import NEAR_FLOOR_DISCOUNT
-
-
-def _value_rank(l):
-    """Sort key, best first (used with reverse=True): deepest discount to the
-    regional median, then the higher yield.
-
-    A discount at NEAR_FLOOR_DISCOUNT or deeper is more often a deposit or an
-    "od €X" price than a bargain — the card warns about it — so those rows go
-    after every other one, the least extreme first. Judged at the 4 decimals
-    the card's warning uses, so the order and the warning always agree."""
-    disc = l.get("market_discount") or 0
-    gross = l.get("gross_yield") or 0
-    if round(disc, 4) >= NEAR_FLOOR_DISCOUNT:
-        return (0, -disc, gross)
-    return (1, disc, gross)
-
-
-greens  = sorted([l for l in data if (l.get("cf_class") or l.get("classification")) == "GREEN"],
-                 key=_value_rank, reverse=True)
-yellows = sorted([l for l in data if (l.get("cf_class") or l.get("classification")) == "YELLOW"],
-                 key=_value_rank, reverse=True)
-whites  = [l for l in data if (l.get("cf_class") or l.get("classification")) == "WHITE"]
-# Listing ids are md5 hex digests, so a prefix test on "d" (meant for the demo
-# rows d1–d3) hid one real listing in sixteen. The demo rows are all scored
-# GREEN/YELLOW and never land here anyway.
-pending = [l for l in data if (l.get("cf_class") or l.get("classification") or "PENDING") == "PENDING"]
-
-
 # ── Tab 0: Triage Table ───────────────────────────────────────────────────────
 # Flat, sortable view of every scored listing so you can spot the best
 # surplus / yield in one scan instead of expanding each card individually.
@@ -1124,7 +1209,8 @@ with t0:
 
     scored = greens + yellows + whites
     if not scored:
-        st.info("No scored listings yet — run the pipeline (NEHNUT / BAZOS / TOPREAL → 💰 CASHFLOW SCORE) to populate this view.")
+        st.info(hidden_note("scored listings") if n_hidden else
+                "No scored listings yet — run the pipeline (NEHNUT / BAZOS / TOPREAL → 💰 CASHFLOW SCORE) to populate this view.")
     else:
         from engine.financial import compute_deal_score
         emoji_map = {"GREEN": "🟢", "YELLOW": "🟡", "WHITE": "⚪", "PENDING": "⏳"}
@@ -1216,36 +1302,40 @@ with t0:
 # ── Tab 1: Snag List ──────────────────────────────────────────────────────────
 with t1:
     if not greens and not yellows and not whites and not pending:
-        st.info("No listings in DB yet — click NEHNUT, BAZOS, or TOPREAL in the sidebar to scrape.")
+        st.info(hidden_note() if n_hidden else
+                "No listings in DB yet — click NEHNUT, BAZOS, or TOPREAL in the sidebar to scrape.")
     else:
         if not greens and not yellows and not whites and pending:
             st.info(f"⏳ {len(pending)} listing(s) scraped and pending scoring. Click 💰 CASHFLOW SCORE in the sidebar to classify them.")
         if greens:
             st.markdown(f'<div class="muted" style="margin:14px 0 8px">🟢 GREEN — ≥20% BELOW MARKET ({len(greens)})</div>', unsafe_allow_html=True)
-            for l in greens:
-                render_card(l)
+            render_cards(greens, "green")
         if yellows:
             st.markdown(f'<div class="muted" style="margin:18px 0 8px">🟡 YELLOW — 10–20% BELOW MARKET ({len(yellows)})</div>', unsafe_allow_html=True)
-            for l in yellows:
-                render_card(l)
+            render_cards(yellows, "yellow")
         if whites:
             st.markdown(f'<div class="muted" style="margin:18px 0 8px">⚪ WHITE — AT MARKET OR NO BENCHMARK ({len(whites)})</div>', unsafe_allow_html=True)
-            for l in whites:
-                render_card(l)
+            render_cards(whites, "white")
         if pending:
-            with st.expander(f"⏳ PENDING SCORING ({len(pending)} listings scraped, not yet classified)"):
+            pend = st.expander(f"⏳ PENDING SCORING ({len(pending)} listings scraped, not yet classified)",
+                               key="pending_list", on_change="rerun")
+            if pend.open:
+                rows = ""
                 for l in pending:
                     title = l.get("title") or l.get("address_raw") or l.get("district") or "—"
                     price = l.get("price_eur") or 0
                     size  = l.get("size_m2") or 0
                     src   = (l.get("source") or "").upper()
-                    st.markdown(f'<div class="brow"><span class="l">{esc(title[:60])}</span><span class="v">€{price:,.0f} · {size:.0f}m² · {esc(src)}</span></div>', unsafe_allow_html=True)
+                    rows += f'<div class="brow"><span class="l">{esc(title[:60])}</span><span class="v">€{price:,.0f} · {size:.0f}m² · {esc(src)}</span></div>'
+                pend.markdown(rows, unsafe_allow_html=True)
 
 
 # ── Map ───────────────────────────────────────────────────────────────────────
 with t_map:
     mapped = [l for l in data if l.get("lat") and l.get("lng")]
-    if not mapped:
+    if not data and n_hidden:
+        st.info(hidden_note())
+    elif not mapped:
         st.info("No coordinates yet — run 📍 LOCATION IQ (works without a Google key: "
                 "it falls back to OpenStreetMap).")
     else:
@@ -1617,7 +1707,7 @@ with t2:
     st.markdown("")
 
     if not data:
-        st.info("No listings loaded.")
+        st.info(hidden_note() if n_hidden else "No listings loaded.")
     else:
         opts = {f"{l.get('title') or '?'} — €{l.get('price_eur') or 0:,.0f} [{(l.get('id') or '')[:6]}]": l
                 for l in data}
@@ -1696,7 +1786,7 @@ with t3:
     st.markdown('<div class="muted" style="color:#ff5252;margin-bottom:16px">⚠️ DRAFT ONLY — no legal validity until executed before a licensed Slovak notár</div>', unsafe_allow_html=True)
 
     if not data:
-        st.info("No listings loaded.")
+        st.info(hidden_note() if n_hidden else "No listings loaded.")
     else:
         opts = {f"{l.get('title') or '?'} — €{l.get('price_eur') or 0:,.0f} [{(l.get('id') or '')[:6]}]": l
                 for l in data}
@@ -1710,7 +1800,7 @@ with t3:
             ownership  = st.radio("Structure", ["Personal", "s.r.o."], horizontal=True)
         with f2:
             st.markdown("**DEAL**")
-            agreed     = st.number_input("Agreed Price €", value=int(sel3.get("price_eur",0)), step=500)
+            agreed     = st.number_input("Agreed Price €", value=int(sel3.get("price_eur") or 0), step=500)
             notary     = st.text_input("Notár Name")
             escrow     = st.checkbox("Notárska úschova (escrow hold)", value=True)
             deposit    = st.number_input("Deposit € (earnest money)", 0, 50000, 2000, 500)
@@ -1719,110 +1809,40 @@ with t3:
             if not buyer_name.strip():
                 st.error("Enter buyer name first.")
             else:
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-                # Pre-format optional numeric fields — an f-string format spec
-                # can't contain a conditional, so build these strings first.
-                _surplus = sel3.get("surplus_sro")
-                _saving  = sel3.get("annual_sro_saving")
-                surplus_str = fe(_surplus) if isinstance(_surplus, (int, float)) else "—"
-                saving_str  = fe(_saving)  if isinstance(_saving,  (int, float)) else "—"
-                draft = f"""
-╔══════════════════════════════════════════════════════════╗
-║         KÚPNA ZMLUVA — DRAFT / NÁVRH ZMLUVY             ║
-╚══════════════════════════════════════════════════════════╝
-
-Vygenerované:  {now_str}
-Stav:          DRAFT — vyžaduje notariálne vyhotovenie
-Verzia:        Sovereign RE Dashboard v2026
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-§ 1. PREDMET ZMLUVY
-
-Nehnuteľnosť: {sel3.get('title','—')}
-Adresa:       {sel3.get('address_raw','—')}
-Okres:        {sel3.get('district','—')}
-Výmera:       {sel3.get('size_m2','?')} m²
-Energetická trieda: {sel3.get('energy_class','—')}
-
-Katastrálne územie: {sel3.get('cadastral_area','[Doplniť]')}
-Číslo parcely:      {sel3.get('cadastral_number','[Doplniť]')}
-List vlastníctva:   [Overiť na Katastri pred podpisom]
-LV Status:          {sel3.get('lv_status','PENDING')} (stav k dátumu generovania)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-§ 2. ZMLUVNÉ STRANY
-
-KUPUJÚCI (Buyer):
-  Meno / Spoločnosť: {buyer_name}
-  IČO:               {buyer_ico if buyer_ico else 'N/A — fyzická osoba'}
-  Forma vlastníctva: {ownership}
-
-PREDÁVAJÚCI (Seller):
-  [Doplniť notárom — overiť totožnosť a vlastníctvo]
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-§ 3. KÚPNA CENA
-
-Dohodnutá cena:    €{agreed:,.2f}
-Záloha (depozit):  €{deposit:,.2f}
-Zostatok:          €{agreed - deposit:,.2f}
-
-Platobný mechanizmus:
-  {'✅ Notárska úschova — odporúčané' if escrow else '⚠️ Priamy prevod — neodporúčané'}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-§ 4. PODMIENKY
-
-1. Zmluva nadobúda platnosť podpisom oboch strán pred notárom.
-2. Prevod vlastníctva nastáva zápisom do katastra nehnuteľností.
-3. Predávajúci zaručuje, že nehnuteľnosť je bez právnych vád.
-4. Kupujúci vyhlasuje, že je oboznámený so stavom nehnuteľnosti.
-5. {'Finančné plnenie cez Notársku úschovu dle § 56a Notárskeho poriadku.' if escrow else 'Finančné plnenie na účet predávajúceho po podpise zmluvy.'}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-§ 5. NOTÁR
-
-Notár:   {notary if notary else '[Prideliť notára]'}
-Dátum:   [Doplniť]
-Miesto:  [Doplniť]
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-FINANČNÁ ANALÝZA (pre interné účely):
-
-s.r.o. surplus/mo:  {surplus_str}
-Ročná úspora s.r.o.: {saving_str}
-Net Yield:           {(sel3.get('net_rental_yield',0) or 0)*100:.2f}%
-LV overenie:        {sel3.get('lv_status','PENDING')} — OVERIŤ 48H PRED PODPISOM
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-⚠️  PRÁVNE UPOZORNENIE
-
-Tento dokument je počítačom generovaný NÁVRH bez právnej záväznosti.
-Nemá žiadnu právnu platnosť bez vyhotovenia a overenia licencovaným
-slovenským notárom. Vždy overte LV bezprostredne pred podpisom.
-Finálny prevod vyžaduje zápis na Katastri nehnuteľností SR.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Generated by Sovereign RE Dashboard · Private Use Only
-                """.strip()
+                from modules.contract_draft import build_contract_draft, build_internal_analysis
+                now = datetime.now()
+                draft = build_contract_draft(
+                    sel3, buyer_name=buyer_name.strip(), buyer_ico=buyer_ico,
+                    ownership=ownership, agreed_price=agreed, deposit=deposit,
+                    notary=notary, escrow=escrow, generated_at=now)
+                # The deal's numbers used to sit inside the draft you send to
+                # the notár; they are a separate note now.
+                analysis = build_internal_analysis(sel3, agreed_price=agreed, generated_at=now)
 
                 st.text_area("CONTRACT DRAFT", draft, height=500)
-                fname = f"contract_{sel3['id'][:8]}_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
+                stamp = now.strftime('%Y%m%d_%H%M')
+                # on_click="ignore": a rerun would clear the draft and the
+                # other download with it.
                 st.download_button(
                     "⬇️ DOWNLOAD DRAFT",
                     draft,
-                    file_name=fname,
+                    file_name=f"contract_{sel3['id'][:8]}_{stamp}.txt",
                     mime="text/plain",
+                    on_click="ignore",
                     width="stretch",
                 )
                 st.markdown('<div class="muted">Next: Send to your notár. Use Notárska úschova for all funds. Re-verify LV 48h before signing.</div>', unsafe_allow_html=True)
+                st.markdown('<div class="muted" style="margin-top:14px">INTERNAL ANALYSIS — '
+                            'for you, not part of the draft</div>', unsafe_allow_html=True)
+                st.code(analysis, language=None)
+                st.download_button(
+                    "⬇️ DOWNLOAD ANALYSIS",
+                    analysis,
+                    file_name=f"analysis_{sel3['id'][:8]}_{stamp}.txt",
+                    mime="text/plain",
+                    on_click="ignore",
+                    width="stretch",
+                )
                 if using_demo:
                     st.caption("Demo listing — this draft is not saved.")
                 else:
