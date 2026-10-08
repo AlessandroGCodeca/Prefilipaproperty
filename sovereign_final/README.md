@@ -76,7 +76,8 @@ sovereign_final/
 │   ├── cashflow_runner.py    ← Financial scoring runner
 │   ├── location_iq.py        ← Location scorer (Google, or OpenStreetMap)
 │   ├── risk_data.py          ← Real noise / flood / construction data
-│   └── memo.py               ← PDF investment memo
+│   ├── memo.py               ← PDF investment memo
+│   └── contract_draft.py     ← ONE-CLICK CLOSE contract draft + internal analysis
 └── dev/                      ← One-off debug/exploration scripts (not runtime)
 ```
 
@@ -87,7 +88,7 @@ sovereign_final/
 | Tab | What it does |
 |-----|-------------|
 | TRIAGE TABLE | Flat, sortable view of every scored listing — grade, price, **max offer** (🟡/🟢), ask vs max offer, below-market %, rent, surplus, **+2 pp stress**, gross yield, cap rate, **IRR**, **days tracked** (since the first scrape — not the portal's posting date), **price change**, **portals**, deal stage, vibe, LV status, **⛔ cash-flow negative** |
-| ACTIVE SNAG LIST | 🟢🟡 deal cards: cost breakdown (the s.r.o.'s own loan and running cost), financing stress (+2 pp, 70% LTV), location risk with sources, price history, other portals' copies, deal stage, vibe notes, **PDF memo**, LV status and flat-LV verify; a ⛔ CASH-FLOW NEGATIVE badge and a ⚠ rent-fallback warning where they apply |
+| ACTIVE SNAG LIST | 🟢🟡 deal cards, 25 a page per class, each built when you open it: cost breakdown (the s.r.o.'s own loan and running cost), financing stress (+2 pp, 70% LTV), location risk with sources, price history, other portals' copies, deal stage, vibe notes, **PDF memo**, LV status and flat-LV verify; a ⛔ CASH-FLOW NEGATIVE badge and a ⚠ rent-fallback warning where they apply |
 | MAP | Every listing with coordinates, coloured by class (faded = area-level geocode) |
 | WHAT-IF / TAX | The tax toggle calculator: any listing (or a custom one) re-run with your own price, rate, LTV, term, rent, hold period, growth and exit costs, and the s.r.o.'s loan premium, LTV and running cost — personal vs s.r.o. side by side, rate-shock table, IRR, max offer |
 | DEAL PIPELINE | Board of the deals you're working: WATCHING → VIEWING → OFFER → NEGOTIATING → DUE DILIGENCE → NOTARY → CLOSED / PASSED, with a timeline per deal |
@@ -95,7 +96,7 @@ sovereign_final/
 | REJECTED | Every LV rejection with its reason, detail and LV risk read; re-verify from here |
 | LV TO-DO | Every GREEN / YELLOW deal whose title deed isn't verified, with what the plot check found; type the flats' own LV numbers in bulk, then save (checked on the next LV run) or save & verify now |
 | RENT COMPS | Live €/m² per district from prenájom listings vs the baseline table |
-| ONE-CLICK CLOSE | Pre-filled Slovak notary contract draft with download |
+| ONE-CLICK CLOSE | Pre-filled Slovak notary contract draft with download; the deal's numbers are a separate download, not part of the draft |
 
 A 🔻 banner above the tabs lists price cuts from the last 14 days, and says
 whether the new price now sits inside the max YELLOW offer.

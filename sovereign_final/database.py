@@ -565,10 +565,14 @@ def init_db():
 
 
 # ── Query Helpers ─────────────────────────────────────────────────────────────
-def get_all_active():
+def get_all_active(rejected: bool = False):
+    """Active listings with their cashflow and location scores, best discount
+    first. LV-rejected listings never reach the deal lists, so they are left
+    out — or, with rejected=True, they are all that comes back (the
+    dashboard's Rejected tile counts them against the same filters)."""
     conn = get_conn()
     try:
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT l.*,
                    c.classification        AS cf_class,
                    c.surplus_personal,     c.surplus_sro,
@@ -605,7 +609,7 @@ def get_all_active():
             FROM listings l
             LEFT JOIN cashflow_scores c  ON l.id = c.listing_id
             LEFT JOIN location_scores lc ON l.id = lc.listing_id
-            WHERE l.is_active = 1 AND l.lv_status != 'REJECTED'
+            WHERE l.is_active = 1 AND l.lv_status {'=' if rejected else '!='} 'REJECTED'
             ORDER BY c.market_discount DESC NULLS LAST
         """).fetchall()
     finally:
@@ -827,21 +831,40 @@ def upsert_rental(data: dict) -> None:
 
 
 def get_stats():
+    """Active listings by class. An LV-rejected listing is counted as
+    rejected only — it keeps the class it had (often PENDING), and counting
+    it there too made the classes add up to more than the total."""
     conn = get_conn()
     try:
         r = conn.execute("""
             SELECT
                 COUNT(*)                                       AS total,
-                COALESCE(SUM(CASE WHEN classification='GREEN'    THEN 1 ELSE 0 END), 0) AS green,
-                COALESCE(SUM(CASE WHEN classification='YELLOW'   THEN 1 ELSE 0 END), 0) AS yellow,
-                COALESCE(SUM(CASE WHEN classification='WHITE'    THEN 1 ELSE 0 END), 0) AS white,
-                COALESCE(SUM(CASE WHEN lv_status='REJECTED'      THEN 1 ELSE 0 END), 0) AS rejected,
-                COALESCE(SUM(CASE WHEN classification='PENDING'  THEN 1 ELSE 0 END), 0) AS pending
-            FROM listings WHERE is_active=1
+                COALESCE(SUM(CASE WHEN NOT rej AND classification='GREEN'   THEN 1 ELSE 0 END), 0) AS green,
+                COALESCE(SUM(CASE WHEN NOT rej AND classification='YELLOW'  THEN 1 ELSE 0 END), 0) AS yellow,
+                COALESCE(SUM(CASE WHEN NOT rej AND classification='WHITE'   THEN 1 ELSE 0 END), 0) AS white,
+                COALESCE(SUM(CASE WHEN rej                                  THEN 1 ELSE 0 END), 0) AS rejected,
+                COALESCE(SUM(CASE WHEN NOT rej AND classification='PENDING' THEN 1 ELSE 0 END), 0) AS pending
+            FROM (SELECT classification, COALESCE(lv_status, '') = 'REJECTED' AS rej
+                  FROM listings WHERE is_active=1)
         """).fetchone()
     finally:
         conn.close()
     return dict(r) if r else {"total":0,"green":0,"yellow":0,"white":0,"rejected":0,"pending":0}
+
+
+def get_active_sources() -> list[str]:
+    """Every source active listings came from — the portals, and 'sample' for
+    the rows seed_market_data.py writes. The dashboard's Source filter offers
+    these, so no source is hidden by a filter that cannot select it."""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT source FROM listings "
+            "WHERE is_active=1 AND COALESCE(source, '') != '' ORDER BY source"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [r[0] for r in rows]
 
 
 def deactivate_stale_listings(days: int = 21) -> int:

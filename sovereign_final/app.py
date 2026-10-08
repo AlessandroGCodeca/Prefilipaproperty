@@ -25,15 +25,20 @@ st.set_page_config(
     page_title="Sovereign RE",
     page_icon="🏛",
     layout="wide",
-    initial_sidebar_state="expanded",
+    # "auto": open on desktop, collapsed on a phone where it would cover the page.
+    initial_sidebar_state="auto",
 )
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
-
-html, body, [class*="css"] { font-family: 'IBM Plex Sans', sans-serif; }
+/* No web-font import: it asked fonts.googleapis.com on every page view and fell
+   back silently when offline. IBM Plex is used if installed locally. */
+:root {
+    --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Consolas, Menlo, monospace;
+    --sans: 'IBM Plex Sans', system-ui, 'Segoe UI', sans-serif;
+}
+html, body, [class*="css"] { font-family: var(--sans); }
 .stApp { background: #07090e; color: #bcc8e0; }
 
 section[data-testid="stSidebar"] {
@@ -42,18 +47,18 @@ section[data-testid="stSidebar"] {
 }
 
 .wordmark {
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: var(--mono);
     font-size: 1rem; font-weight: 700;
     color: #e4eaf5; letter-spacing: 4px; text-transform: uppercase;
 }
 .sub {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.55rem; color: #2a3450; letter-spacing: 3px;
+    font-family: var(--mono);
+    font-size: 0.55rem; color: #7a89a8; letter-spacing: 3px;
     text-transform: uppercase; margin-top: 3px;
 }
 
 /* Stat grid */
-.sg { display:grid; grid-template-columns:repeat(6,1fr); gap:6px; margin-bottom:18px; }
+.sg { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:6px; margin-bottom:18px; }
 .sc {
     background:#0b0d14; border:1px solid #151924; border-radius:3px;
     padding:12px 14px; position:relative; overflow:hidden;
@@ -62,14 +67,14 @@ section[data-testid="stSidebar"] {
 .sc.g::before { background:#00e676; } .sc.y::before { background:#ffd740; }
 .sc.w::before { background:#37474f; } .sc.r::before { background:#ff5252; }
 .sc.b::before { background:#448aff; } .sc.a::before { background:#ff9100; }
-.sn { font-family:'IBM Plex Mono',monospace; font-size:1.9rem; font-weight:700; color:#e4eaf5; line-height:1; }
+.sn { font-family:var(--mono); font-size:1.9rem; font-weight:700; color:#e4eaf5; line-height:1; }
 .sc.g .sn { color:#00e676; } .sc.y .sn { color:#ffd740; }
 .sc.r .sn { color:#ff5252; } .sc.b .sn { color:#448aff; }
-.sl { font-size:0.6rem; text-transform:uppercase; letter-spacing:1.5px; color:#2a3450; margin-top:5px; }
+.sl { font-size:0.6rem; text-transform:uppercase; letter-spacing:1.5px; color:#7a89a8; margin-top:5px; }
 
 /* Badges */
 .badge { display:inline-block; padding:2px 8px; border-radius:2px;
-         font-family:'IBM Plex Mono',monospace; font-size:0.62rem; font-weight:700;
+         font-family:var(--mono); font-size:0.62rem; font-weight:700;
          letter-spacing:1px; text-transform:uppercase; }
 .bg { background:rgba(0,230,118,.12); color:#00e676; }
 .by { background:rgba(255,215,64,.12); color:#ffd740; }
@@ -82,10 +87,10 @@ section[data-testid="stSidebar"] {
 /* Breakdown rows */
 .brow { display:flex; justify-content:space-between; padding:5px 0;
         border-bottom:1px solid #0e1018;
-        font-family:'IBM Plex Mono',monospace; font-size:0.76rem; }
-.brow .l { color:#2a3450; } .brow .v { color:#bcc8e0; }
+        font-family:var(--mono); font-size:0.76rem; }
+.brow .l { color:#7a89a8; } .brow .v { color:#bcc8e0; }
 .brow.tot { border-top:1px solid #151924; border-bottom:none; }
-.brow.tot .l { color:#6b7a96; } .brow.tot .v { color:#e4eaf5; font-weight:700; }
+.brow.tot .l { color:#8a98b5; } .brow.tot .v { color:#e4eaf5; font-weight:700; }
 .brow.pos .v { color:#00e676; } .brow.neg .v { color:#ff5252; }
 
 /* Divider */
@@ -95,29 +100,42 @@ section[data-testid="stSidebar"] {
 .stTabs [data-baseweb="tab-list"] { background:transparent; border-bottom:1px solid #151924; gap:0; }
 .stTabs [data-baseweb="tab"] {
     background:transparent; border:none; border-bottom:2px solid transparent;
-    color:#2a3450; font-family:'IBM Plex Mono',monospace; font-size:0.7rem;
+    color:#7a89a8; font-family:var(--mono); font-size:0.7rem;
     letter-spacing:1px; text-transform:uppercase; padding:8px 20px; border-radius:0;
 }
 .stTabs [aria-selected="true"] { background:transparent !important; color:#00e676 !important; border-bottom:2px solid #00e676 !important; }
 
-/* Buttons */
-.stButton>button {
-    background:#0b0d14; color:#6b7a96; border:1px solid #151924;
-    border-radius:3px; font-family:'IBM Plex Mono',monospace;
+/* Buttons — descendant selector: a button with help= sits inside a tooltip
+   wrapper, so .stButton>button missed it and it fell back to the light theme. */
+.stButton button, .stDownloadButton button, .stFormSubmitButton button {
+    background:#0b0d14; color:#8a98b5; border:1px solid #151924;
+    border-radius:3px; font-family:var(--mono);
     font-size:0.68rem; letter-spacing:1px; text-transform:uppercase;
     transition:all .15s;
 }
-.stButton>button:hover { border-color:#00e676; color:#00e676; background:rgba(0,230,118,.04); }
+.stButton button:hover, .stDownloadButton button:hover, .stFormSubmitButton button:hover {
+    border-color:#00e676; color:#00e676; background:rgba(0,230,118,.04);
+}
 
 div[data-testid="stExpander"] { background:#0b0d14; border:1px solid #151924 !important; border-radius:3px; }
+div[data-testid="stExpander"] summary { color:#bcc8e0; }
+div[data-testid="stExpander"] summary:hover { background:#11141d; color:#e4eaf5; }
 
-.muted { color:#2a3450; font-size:0.7rem; font-family:'IBM Plex Mono',monospace; }
-.mono  { font-family:'IBM Plex Mono',monospace; }
+/* Text areas (the contract draft): monospace keeps the draft's ╔══╗ frame and
+   columns aligned. */
+.stTextArea textarea { font-family:var(--mono); font-size:0.75rem; }
+
+/* Metrics sit six to a row on the listing card; at the default 2.25rem
+   "€168,000" and "€920/mo" were cut to "€168,…". */
+div[data-testid="stMetricValue"] { font-size:1.45rem; }
+
+.muted { color:#7a89a8; font-size:0.7rem; font-family:var(--mono); }
+.mono  { font-family:var(--mono); }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Init ──────────────────────────────────────────────────────────────────────
-from database import init_db, get_all_active, get_stats, backfill_dev_project_flags
+from database import init_db, get_all_active, backfill_dev_project_flags
 init_db()
 
 @st.cache_resource
@@ -237,10 +255,16 @@ with st.sidebar:
         ["GREEN", "YELLOW", "WHITE", "PENDING", "REJECTED"],
         default=["GREEN", "YELLOW", "WHITE", "PENDING"],
     )
+    # The portals, plus any other source in the database — 'sample' for the
+    # rows seed_market_data.py writes. A fixed list hid those rows behind a
+    # filter that had no option to show them.
+    from database import get_active_sources
+    _portals = ["nehnutelnosti", "bazos", "topreality"]
+    _source_opts = _portals + [s for s in get_active_sources() if s not in _portals]
     sources    = st.multiselect(
         "Source",
-        ["nehnutelnosti", "bazos", "topreality"],
-        default=["nehnutelnosti", "bazos", "topreality"],
+        _source_opts,
+        default=_source_opts,
     )
     district_q = st.text_input(
         "District contains",
@@ -314,17 +338,21 @@ with st.sidebar:
 
 
 # ── Pipeline actions ──────────────────────────────────────────────────────────
-def run_step(label, fn, *args, **kwargs):
-    with st.spinner(f"{label}..."):
-        try:
-            result = fn(*args, **kwargs)
-            st.success(f"✅ Done: {result}")
-            st.rerun()
-        except Exception as e:
-            st.error(f"❌ {e}")
+def flash(kind: str, text: str):
+    """Show a step's result (st.success / st.info / st.warning) after the
+    st.rerun() that redraws the page with its effect. Drawn right before the
+    rerun, the message was wiped by it, so most buttons reported nothing."""
+    st.session_state.setdefault("flash", []).append((kind, text))
 
-def _run_scraper_subprocess(script_name: str) -> tuple[int, str]:
-    """Run a scraper as a fresh subprocess — bypasses Python module cache."""
+
+# A dashboard click waits for the scraper. Pages are stored as they are
+# scraped, so a run stopped at the limit keeps the pages it finished.
+SCRAPER_TIMEOUT_S = 300
+
+
+def _run_scraper_subprocess(script_name: str) -> tuple[int, str, bool]:
+    """Run a scraper as a fresh subprocess — bypasses Python module cache.
+    Returns (listings stored, error, stopped at SCRAPER_TIMEOUT_S)."""
     import subprocess, json as _json
     _dir = os.path.dirname(__file__)
     wrapper = f"""
@@ -338,29 +366,38 @@ try:
 except Exception as e:
     print(json.dumps({{"ok": False, "error": str(e)}}))
 """
-    proc = subprocess.run(
-        [sys.executable, "-c", wrapper],
-        capture_output=True, text=True, timeout=300
-    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", wrapper],
+            capture_output=True, text=True, timeout=SCRAPER_TIMEOUT_S
+        )
+    except subprocess.TimeoutExpired:
+        # run() has killed the scraper; uncaught, this was a raw traceback.
+        return 0, "", True
     for line in (proc.stdout + proc.stderr).strip().splitlines():
         try:
             data = _json.loads(line)
             if data.get("ok"):
-                return data["n"], ""
+                return data["n"], "", False
             else:
-                return 0, data.get("error", "Unknown error")
+                return 0, data.get("error", "Unknown error"), False
         except Exception:
             continue
     stderr = proc.stderr.strip()
-    return 0, stderr or "Scraper produced no output"
+    return 0, stderr or "Scraper produced no output", False
 
 
-if do_nehnut:
-    with st.spinner("Scraping Nehnutelnosti..."):
-        n, err = _run_scraper_subprocess("nehnutelnosti")
+for _clicked, _script, _name, _btn in ((do_nehnut, "nehnutelnosti", "Nehnutelnosti", "NEHNUT"),
+                                       (do_bazos, "bazos", "Bazos", "BAZOS"),
+                                       (do_topreal, "topreality", "Topreality", "TOPREAL")):
+    if not _clicked:
+        continue
+    with st.spinner(f"Scraping {_name} (stops after {SCRAPER_TIMEOUT_S // 60} min)..."):
+        n, err, timed_out = _run_scraper_subprocess(_script)
         if err:
-            st.error(f"❌ Nehnutelnosti: {err}")
+            st.error(f"❌ {_name}: {err}")
         else:
+            # Stopped or not, what was stored gets the usual follow-up steps.
             from modules.address_enrichment import run_address_enrichment
             run_address_enrichment()
             from modules.description_enrichment import run_description_enrichment
@@ -369,41 +406,16 @@ if do_nehnut:
             scored = _run_cf()
             from database import mark_duplicates
             mark_duplicates()
-            st.success(f"✅ Scraped {n} listings, scored {scored}.")
-            st.rerun()
-
-if do_bazos:
-    with st.spinner("Scraping Bazos..."):
-        n, err = _run_scraper_subprocess("bazos")
-        if err:
-            st.error(f"❌ Bazos: {err}")
-        else:
-            from modules.address_enrichment import run_address_enrichment
-            run_address_enrichment()
-            from modules.description_enrichment import run_description_enrichment
-            run_description_enrichment()
-            from modules.cashflow_runner import run_scoring as _run_cf
-            scored = _run_cf()
-            from database import mark_duplicates
-            mark_duplicates()
-            st.success(f"✅ Scraped {n} listings, scored {scored}.")
-            st.rerun()
-
-if do_topreal:
-    with st.spinner("Scraping Topreality..."):
-        n, err = _run_scraper_subprocess("topreality")
-        if err:
-            st.error(f"❌ Topreality: {err}")
-        else:
-            from modules.address_enrichment import run_address_enrichment
-            run_address_enrichment()
-            from modules.description_enrichment import run_description_enrichment
-            run_description_enrichment()
-            from modules.cashflow_runner import run_scoring as _run_cf
-            scored = _run_cf()
-            from database import mark_duplicates
-            mark_duplicates()
-            st.success(f"✅ Scraped {n} listings, scored {scored}.")
+            if timed_out:
+                from config import DETAIL_REFRESH_DAYS
+                flash("warning",
+                      f"⏱ {_name} hit the {SCRAPER_TIMEOUT_S // 60}-minute limit and was "
+                      f"stopped. The pages it finished are saved; scored {scored}. Click "
+                      f"{_btn} again to carry on — detail pages read in the last "
+                      f"{DETAIL_REFRESH_DAYS} days are not opened again, so each run "
+                      f"gets further.")
+            else:
+                flash("success", f"✅ Scraped {n} listings, scored {scored}.")
             st.rerun()
 
 if do_lv:
@@ -415,7 +427,7 @@ if do_lv:
     from database import mark_duplicates
     mark_duplicates()           # a rejected copy flags the flat's other copies
     bar.empty(); txt.empty()
-    st.success(f"✅ LV done — Clean: {p}, Rejected: {r}, ⚠ Unverified: {u}")
+    flash("success", f"✅ LV done — Clean: {p}, Rejected: {r}, ⚠ Unverified: {u}")
     st.rerun()
 
 if do_cf:
@@ -423,7 +435,7 @@ if do_cf:
     def cf_cb(i, n): bar.progress(i/n)
     from modules.cashflow_runner import run_scoring
     n = run_scoring(progress_callback=cf_cb)
-    bar.empty(); st.success(f"✅ Scored {n} listings"); st.rerun()
+    bar.empty(); flash("success", f"✅ Scored {n} listings"); st.rerun()
 
 if do_desc:
     bar = st.progress(0)
@@ -432,10 +444,10 @@ if do_desc:
     n = run_description_enrichment(progress_callback=desc_cb)
     bar.empty()
     if n:
-        st.success(f"✅ Parsed {n} descriptions. Re-score to apply rent premiums.")
+        flash("success", f"✅ Parsed {n} descriptions. Re-score to apply rent premiums.")
     else:
-        st.info("ℹ️ Nothing parsed — set ANTHROPIC_API_KEY, or no new descriptions "
-                "to parse.")
+        flash("info", "ℹ️ Nothing parsed — set ANTHROPIC_API_KEY, or no new descriptions "
+                      "to parse.")
     st.rerun()
 
 if do_addr:
@@ -445,10 +457,10 @@ if do_addr:
     n = run_address_enrichment(progress_callback=addr_cb)
     bar.empty()
     if n:
-        st.success(f"✅ Resolved {n} blank districts. Re-score to apply rent rates.")
+        flash("success", f"✅ Resolved {n} blank districts. Re-score to apply rent rates.")
     else:
-        st.info("ℹ️ Nothing normalized — set ANTHROPIC_API_KEY, or no blank "
-                "districts with an address to resolve.")
+        flash("info", "ℹ️ Nothing normalized — set ANTHROPIC_API_KEY, or no blank "
+                      "districts with an address to resolve.")
     st.rerun()
 
 if do_rescore:
@@ -459,7 +471,7 @@ if do_rescore:
     def rescore_cb(i, n): bar.progress(i/n)
     n = run_scoring(progress_callback=rescore_cb)
     bar.empty()
-    st.success(f"✅ Cleared {cleared} old scores, re-scored {n} listings")
+    flash("success", f"✅ Cleared {cleared} old scores, re-scored {n} listings")
     st.rerun()
 
 if do_loc:
@@ -467,7 +479,7 @@ if do_loc:
     def loc_cb(i, n, a=""): bar.progress(i/n); txt.text(f"Location {i}/{n}: {a}")
     from modules.location_iq import run_location_scoring
     n = run_location_scoring(progress_callback=loc_cb)
-    bar.empty(); txt.empty(); st.success(f"✅ Location scored {n}"); st.rerun()
+    bar.empty(); txt.empty(); flash("success", f"✅ Location scored {n}"); st.rerun()
 
 if do_reparse:
     from database import requeue_descriptions_missing_extras
@@ -476,7 +488,7 @@ if do_reparse:
     bar = st.progress(0)
     n = run_description_enrichment(progress_callback=lambda i, t: bar.progress(i / t))
     bar.empty()
-    st.success(f"✅ Re-queued {q}, parsed {n} descriptions.")
+    flash("success", f"✅ Re-queued {q}, parsed {n} descriptions.")
     st.rerun()
 
 if do_risk:
@@ -484,7 +496,7 @@ if do_risk:
     def risk_cb(i, n, a=""): bar.progress(i/n); txt.text(f"Risk {i}/{n}: {a}")
     from modules.location_iq import run_risk_backfill
     n = run_risk_backfill(progress_callback=risk_cb)
-    bar.empty(); txt.empty(); st.success(f"✅ Risk data added to {n} listings"); st.rerun()
+    bar.empty(); txt.empty(); flash("success", f"✅ Risk data added to {n} listings"); st.rerun()
 
 if do_rent:
     with st.spinner("Scraping prenájom listings and rebuilding rent comps..."):
@@ -492,34 +504,36 @@ if do_rent:
         from modules.cashflow_runner import run_scoring as _run_cf
         summary = _run_rentals(max_pages=5)
         scored = _run_cf()
-    st.success(f"✅ {summary.get('rentals', 0)} rentals across {summary.get('keys', 0)} "
-               f"districts · {len(summary.get('changed', []))} rates moved · "
-               f"re-scored {scored}.")
+    flash("success", f"✅ {summary.get('rentals', 0)} rentals across {summary.get('keys', 0)} "
+                     f"districts · {len(summary.get('changed', []))} rates moved · "
+                     f"re-scored {scored}.")
     st.rerun()
 
 if do_dupes:
     from database import mark_duplicates
     n = mark_duplicates()
-    st.success(f"✅ {n} listings are copies of a flat listed more than once.")
+    flash("success", f"✅ {n} listings are copies of a flat listed more than once.")
     st.rerun()
 
 if do_stale:
     from database import deactivate_stale_listings
     n = deactivate_stale_listings(days=21)
     if n:
-        st.success(f"✅ Deactivated {n} stale listings (last seen > 21 days ago)")
+        flash("success", f"✅ Deactivated {n} stale listings (last seen > 21 days ago)")
     else:
-        st.info("ℹ️ No stale listings — all active rows seen within the last 21 days")
+        flash("info", "ℹ️ No stale listings — all active rows seen within the last 21 days")
     st.rerun()
 
 if do_test:
     from scraper._http import get as _http_get, SCRAPER_API_KEY as _sak
     _proxy_mode = bool(_sak)
     st.info(f"Proxy mode: {'✅ ScraperAPI' if _proxy_mode else '⚠️ Direct (no SCRAPER_API_KEY set)'}")
+    # The scrapers' own URLs, so this tests what a scrape would actually fetch.
+    from scraper import nehnutelnosti as _neh, bazos as _baz, topreality as _top
     for label, url in [
-        ("nehnutelnosti.sk", "https://www.nehnutelnosti.sk/slovensko/byty/predaj/?p[page]=1"),
-        ("bazos.sk",          "https://reality.bazos.sk/predaj/byt/"),
-        ("topreality.sk",     "https://www.topreality.sk/vyhladavanie/byty/predaj?page=1"),
+        ("nehnutelnosti.sk", _neh.SEARCH_PAGE.format(page=1)),
+        ("bazos.sk",          _baz.BASE + _baz.CATEGORY),
+        ("topreality.sk",     _top.SEARCH_URL_CANDIDATES[0].format(page=1)),
     ]:
         try:
             _r = _http_get(url, timeout=12)
@@ -529,6 +543,12 @@ if do_test:
         except Exception as _e:
             st.error(f"❌ **{label}** → {_e}")
 
+# The result of the step that ran before the rerun (see flash): kept above the
+# tiles, and as a toast for a page scrolled away from them.
+for _kind, _text in st.session_state.pop("flash", []):
+    getattr(st, _kind)(_text)
+    st.toast(_text, duration="long")
+
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 from database import (
@@ -536,7 +556,6 @@ from database import (
     days_on_market, DEAL_STAGES,
 )
 
-stats    = get_stats()
 raw_data = get_all_active()
 
 using_demo = show_demo or not raw_data
@@ -546,6 +565,8 @@ if using_demo:
         st.info("ℹ️ No data in DB yet — showing demo listings. Run the pipeline to populate.")
 else:
     data = raw_data
+# LV-rejected listings never reach the lists; the Rejected tile counts them.
+rejected_rows = [] if using_demo else get_all_active(rejected=True)
 
 # Per-listing context that lives outside the main query: price history, deal
 # stage, latest vibe note, the other portals' copies of the same flat.
@@ -565,6 +586,8 @@ for l in data:
     # A flat is as old as its oldest copy on any portal.
     seen = [c.get("scraped_at") for c in l["_copies"] + [l] if c.get("scraped_at")]
     l["_dom"]     = days_on_market(min(seen)) if seen else None
+for l in rejected_rows:
+    l["_ph"]      = price_hist.get(l.get("id"))
 
 from engine.financial import is_cashflow_negative
 
@@ -580,41 +603,87 @@ def _cf_negative(l) -> bool:
 
 # Apply filters
 district_needle = (district_q or "").strip().lower()
-data = [l for l in data
-        if (l.get("price_eur") or 0) <= max_price
-        and (l.get("size_m2")  or 0) >= min_size
-        and (not classes or (l.get("classification") or "PENDING") in classes)
-        and (not sources or (l.get("source") or "") in sources)
-        and (not district_needle or district_needle in (l.get("district") or "").lower())
-        and (not cond_filter or (l.get("condition") or "").lower() in cond_filter)
-        and (not req_parking or (l.get("has_parking") or 0))
-        and (not req_furnished or (l.get("furnished") or "") in ("furnished", "semi"))
-        and (not req_elevator or (l.get("has_elevator") or 0))
-        and (not drops_only or ((l["_ph"] or {}).get("change_pct") or 0) < 0)
-        # Not scored is not positive: there is no surplus to clear the bar.
-        and (not cf_positive_only
-             or (_shown_surplus(l) is not None and not _cf_negative(l)))
-        and (not hide_dev or not (l.get("is_dev_project") or 0))]
+
+
+def passes_filters(l, by_class=True):
+    """The sidebar filters. A rejected listing is checked without the
+    Classification one: being rejected is all its tile counts."""
+    return ((l.get("price_eur") or 0) <= max_price
+            and (l.get("size_m2")  or 0) >= min_size
+            and (not by_class or not classes or (l.get("classification") or "PENDING") in classes)
+            and (not sources or (l.get("source") or "") in sources)
+            and (not district_needle or district_needle in (l.get("district") or "").lower())
+            and (not cond_filter or (l.get("condition") or "").lower() in cond_filter)
+            and (not req_parking or (l.get("has_parking") or 0))
+            and (not req_furnished or (l.get("furnished") or "") in ("furnished", "semi"))
+            and (not req_elevator or (l.get("has_elevator") or 0))
+            and (not drops_only or ((l["_ph"] or {}).get("change_pct") or 0) < 0)
+            # Not scored is not positive: there is no surplus to clear the bar.
+            and (not cf_positive_only
+                 or (_shown_surplus(l) is not None and not _cf_negative(l)))
+            and (not hide_dev or not (l.get("is_dev_project") or 0)))
+
+
+n_loaded = len(data)
+data = [l for l in data if passes_filters(l)]
 # One copy per flat, chosen among the copies that passed the filters above.
 if hide_dups:
     from engine.duplicates import one_per_flat
     data = one_per_flat(data)
+# Listings in the database that the sidebar (filters, hidden portal copies)
+# keeps off the page — an empty list then means "widen the filters", not
+# "the database is empty".
+n_hidden = n_loaded - len(data)
+
+
+from config import NEAR_FLOOR_DISCOUNT
+
+
+def _value_rank(l):
+    """Sort key, best first (used with reverse=True): deepest discount to the
+    regional median, then the higher yield.
+
+    A discount at NEAR_FLOOR_DISCOUNT or deeper is more often a deposit or an
+    "od €X" price than a bargain — the card warns about it — so those rows go
+    after every other one, the least extreme first. Judged at the 4 decimals
+    the card's warning uses, so the order and the warning always agree."""
+    disc = l.get("market_discount") or 0
+    gross = l.get("gross_yield") or 0
+    if round(disc, 4) >= NEAR_FLOOR_DISCOUNT:
+        return (0, -disc, gross)
+    return (1, disc, gross)
+
+
+greens  = sorted([l for l in data if (l.get("cf_class") or l.get("classification")) == "GREEN"],
+                 key=_value_rank, reverse=True)
+yellows = sorted([l for l in data if (l.get("cf_class") or l.get("classification")) == "YELLOW"],
+                 key=_value_rank, reverse=True)
+whites  = [l for l in data if (l.get("cf_class") or l.get("classification")) == "WHITE"]
+# Listing ids are md5 hex digests, so a prefix test on "d" (meant for the demo
+# rows d1–d3) hid one real listing in sixteen. The demo rows are all scored
+# GREEN/YELLOW and never land here anyway.
+pending = [l for l in data if (l.get("cf_class") or l.get("classification") or "PENDING") == "PENDING"]
+
+
+def hidden_note(what="listings"):
+    """The empty-state line when the filters, not the database, emptied a list."""
+    return (f"No {what} match the sidebar filters — {n_hidden} listing(s) are hidden by "
+            f"them (Source, Max price, Classification, …). Widen the filters to see them.")
 
 
 # ── Stats bar ─────────────────────────────────────────────────────────────────
-# The counts describe the listings below. `x or demo_count` used to fill in a
-# real zero (no YELLOW deals yet) with the demo rows' count; the demo counts
-# belong only to the demo rows.
-if using_demo:
-    shown = {
-        "total":    len(DEMO),
-        "green":    sum(1 for d in DEMO if d["cf_class"] == "GREEN"),
-        "yellow":   sum(1 for d in DEMO if d["cf_class"] == "YELLOW"),
-        "white":    sum(1 for d in DEMO if d["cf_class"] == "WHITE"),
-        "rejected": 0, "pending": 0,
-    }
-else:
-    shown = stats
+# The tiles count the listings the page shows, so they move with the sidebar
+# filters: Total = Green + Yellow + White + Pending. Rejected listings are
+# never shown in the lists; their tile counts the ones the same filters
+# (bar Classification) let through, and they are not counted as Pending.
+shown = {
+    "total":    len(data),
+    "green":    len(greens),
+    "yellow":   len(yellows),
+    "white":    len(whites),
+    "rejected": sum(1 for l in rejected_rows if passes_filters(l, by_class=False)),
+    "pending":  len(pending),
+}
 st.markdown(f"""
 <div class="sg">
   <div class="sc b"><div class="sn">{shown['total']}</div><div class="sl">Total</div></div>
@@ -625,6 +694,10 @@ st.markdown(f"""
   <div class="sc a"><div class="sn">{shown['pending']}</div><div class="sl">Pending</div></div>
 </div>
 """, unsafe_allow_html=True)
+if n_hidden:
+    st.markdown(f'<div class="muted" style="margin:-10px 0 14px">Showing {len(data)} of '
+                f'{n_loaded} listings · {n_hidden} hidden by the sidebar filters</div>',
+                unsafe_allow_html=True)
 
 
 # ── Price-cut alerts ──────────────────────────────────────────────────────────
@@ -657,10 +730,15 @@ if _drops:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def fe(v, prefix="€", suffix="", decimals=0):
+def fe(v, prefix="€", suffix="", decimals=0, signed=None):
+    """Money with the sign ahead of the symbol: -€41/mo, +€23/mo, €78,000.
+    signed (default: on for /mo) adds the + to non-negative amounts."""
     if v is None: return "—"
-    sign = "+" if (suffix == "/mo" and v >= 0) else ""
-    return f"{prefix}{sign}{v:,.{decimals}f}{suffix}"
+    if signed is None:
+        signed = suffix == "/mo"
+    v = round(v, decimals) + 0.0   # + 0.0 turns -0.0 into 0.0: no "-€0"
+    sign = "-" if v < 0 else ("+" if signed else "")
+    return f"{sign}{prefix}{abs(v):,.{decimals}f}{suffix}"
 
 def fp(v):
     return f"{(v or 0)*100:.1f}%" if v is not None else "—"
@@ -748,6 +826,15 @@ def _lv_link(l):
     return "https://kataster.skgeodesy.sk/EsriRegistrationWeb/"
 
 
+def _save_stage(lid):
+    """SAVE STAGE, run as a callback — before the page redraws, so the card
+    shows the new stage at once. The stage is in the card's header, and an
+    expander whose label changes comes back closed, so it is kept open."""
+    from database import set_deal_stage
+    set_deal_stage(lid, st.session_state[f"stg_{lid}"], st.session_state[f"stgn_{lid}"])
+    st.session_state[f"card_{lid}"] = True
+
+
 def render_card(l):
     cls      = (l.get("cf_class") or l.get("classification") or "PENDING").upper()
     css_cls  = {"GREEN":"g","YELLOW":"y","WHITE":"w","PENDING":"w"}.get(cls,"w")
@@ -777,9 +864,15 @@ def render_card(l):
     cut = f"   ·   🔻{ph['change_pct']:+.0%}" if ph and (ph.get("change_pct") or 0) < 0 else ""
     stage_tag = f"   ·   [{stage['stage']}]" if stage else ""
     header = (f"{emoji}  {title[:60]}   ·   €{price:,.0f}   ·   {below}   ·   "
-              f"{fe(surplus,'€','',0)}/mo{cut}{stage_tag}")
+              f"{fe(surplus, suffix='/mo')}{cut}{stage_tag}")
 
-    with st.expander(header):
+    # Only an open card builds its body. Every click reruns the whole script,
+    # and a collapsed expander still ran its ~40 widgets, so the page slowed
+    # to half a minute a click at ~700 listings.
+    card = st.expander(header, key=f"card_{l.get('id')}", on_change="rerun")
+    if not card.open:
+        return
+    with card:
         # Row 1: key metrics
         c1,c2,c3,c4,c5,c6 = st.columns(6)
         with c1:
@@ -792,7 +885,7 @@ def render_card(l):
                       + (f" for '{l['rent_key']}'" if l.get("rent_key") else ""))
             st.metric("Total Costs",f"€{total_c:,.0f}/mo" if total_c else "—")
         with c3:
-            surplus_str = f"€{surplus:+,.0f}/mo" if surplus is not None else "—"
+            surplus_str = fe(surplus, suffix="/mo")
             st.metric("Surplus/mo",   surplus_str)
             st.metric("Self-Fund",    fp(ratio))
         with c4:
@@ -813,7 +906,11 @@ def render_card(l):
         with c6:
             median_m2 = l.get("regional_median_m2")
             from engine.regional_prices import benchmark_note
-            st.metric("vs Market", below,
+            # Direction in the label, number in the value: "45% below market"
+            # doesn't fit a 6-column metric and was cut to "45% b…".
+            st.metric("vs Market" if disc is None else
+                      ("Below market" if disc >= 0 else "Above market"),
+                      "—" if disc is None else f"{abs(disc) * 100:.0f}%",
                       help=(f"Asking €/m² vs €{median_m2:,.0f}/m² "
                             f"(≈ €{median_m2 * size:,.0f} for {size:.0f} m²) — "
                             f"{benchmark_note(district or '', l.get('rooms'))}")
@@ -915,7 +1012,7 @@ def render_card(l):
                 html += f'<div class="brow"><span class="l">{lbl}</span><span class="v">€{val:,.0f}/mo</span></div>' if val is not None else ""
             html += f'<div class="brow tot"><span class="l">TOTAL COSTS</span><span class="v">€{total_c:,.0f}/mo</span></div>' if total_c else ""
             surplus_cls = "pos" if (surplus or 0) >= 0 else "neg"
-            html += f'<div class="brow tot {surplus_cls}"><span class="l">NET SURPLUS</span><span class="v">€{surplus:+,.0f}/mo</span></div>' if surplus is not None else ""
+            html += f'<div class="brow tot {surplus_cls}"><span class="l">NET SURPLUS</span><span class="v">{fe(surplus, suffix="/mo")}</span></div>' if surplus is not None else ""
             st.markdown(html, unsafe_allow_html=True)
 
             if saving and saving > 0:
@@ -945,10 +1042,10 @@ def render_card(l):
                 html = '<div class="muted" style="margin-top:10px">FINANCING STRESS (s.r.o.)</div>'
                 if sts is not None:
                     html += (f'<div class="brow {"pos" if sts >= 0 else "neg"}"><span class="l">Rate +2 pp</span>'
-                             f'<span class="v">€{sts:+,.0f}/mo · self-funding '
+                             f'<span class="v">{fe(sts, suffix="/mo")} · self-funding '
                              f'{fp(l.get("stress_ratio_sro"))}</span></div>')
                 html += (f'<div class="brow {"pos" if inv.surplus_sro >= 0 else "neg"}"><span class="l">70% LTV (3rd+ flat)</span>'
-                         f'<span class="v">€{inv.surplus_sro:+,.0f}/mo · self-funding {fp(inv.ratio_sro)} · '
+                         f'<span class="v">{fe(inv.surplus_sro, suffix="/mo")} · self-funding {fp(inv.ratio_sro)} · '
                          f'cash in €{inv.total_cash_invested:,.0f}</span></div>')
                 st.markdown(html, unsafe_allow_html=True)
 
@@ -990,18 +1087,15 @@ def render_card(l):
         lid = l.get("id", "")
         with s1:
             cur = (stage or {}).get("stage", "NEW")
-            new_stage = st.selectbox("Deal stage", DEAL_STAGES,
-                                     index=DEAL_STAGES.index(cur) if cur in DEAL_STAGES else 0,
-                                     key=f"stg_{lid}")
-            stage_note = st.text_input("Stage note", value=(stage or {}).get("note") or "",
-                                       key=f"stgn_{lid}", placeholder="e.g. viewing Sat 10:00")
+            st.selectbox("Deal stage", DEAL_STAGES,
+                         index=DEAL_STAGES.index(cur) if cur in DEAL_STAGES else 0,
+                         key=f"stg_{lid}")
+            st.text_input("Stage note", value=(stage or {}).get("note") or "",
+                          key=f"stgn_{lid}", placeholder="e.g. viewing Sat 10:00")
             # Demo rows aren't in the database: writing their ids would leave
             # deal stages (and LV checks, notes) for listings that don't exist.
-            if st.button("SAVE STAGE", key=f"stgb_{lid}", use_container_width=True,
-                         disabled=using_demo):
-                from database import set_deal_stage
-                set_deal_stage(lid, new_stage, stage_note)
-                st.rerun()
+            st.button("SAVE STAGE", key=f"stgb_{lid}", use_container_width=True,
+                      disabled=using_demo, on_click=_save_stage, args=(lid,))
         with s2:
             v = l.get("_vibe")
             if v:
@@ -1090,6 +1184,25 @@ def render_memo_button(l, key):
             st.warning(f"Memo: {e}")
 
 
+CARDS_PER_PAGE = 25
+
+
+def render_cards(listings, section):
+    """One page of a section's cards, so a click never redraws hundreds of
+    them. The picker's key carries the count: when the filters change how
+    many there are, the section starts again at its first page."""
+    pages = -(-len(listings) // CARDS_PER_PAGE)
+    page = 0
+    if pages > 1:
+        n = len(listings)
+        page = st.selectbox(
+            "Cards", range(pages), key=f"page_{section}_{n}", width=260,
+            format_func=lambda p: f"{p * CARDS_PER_PAGE + 1}–"
+                                  f"{min((p + 1) * CARDS_PER_PAGE, n)} of {n}")
+    for l in listings[page * CARDS_PER_PAGE:(page + 1) * CARDS_PER_PAGE]:
+        render_card(l)
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TABS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1106,22 +1219,6 @@ def render_memo_button(l, key):
     "ONE-CLICK CLOSE",
 ])
 
-def _value_rank(l):
-    """Deepest discount to the regional median first, then the higher yield."""
-    return (l.get("market_discount") or 0, l.get("gross_yield") or 0)
-
-
-greens  = sorted([l for l in data if (l.get("cf_class") or l.get("classification")) == "GREEN"],
-                 key=_value_rank, reverse=True)
-yellows = sorted([l for l in data if (l.get("cf_class") or l.get("classification")) == "YELLOW"],
-                 key=_value_rank, reverse=True)
-whites  = [l for l in data if (l.get("cf_class") or l.get("classification")) == "WHITE"]
-# Listing ids are md5 hex digests, so a prefix test on "d" (meant for the demo
-# rows d1–d3) hid one real listing in sixteen. The demo rows are all scored
-# GREEN/YELLOW and never land here anyway.
-pending = [l for l in data if (l.get("cf_class") or l.get("classification") or "PENDING") == "PENDING"]
-
-
 # ── Tab 0: Triage Table ───────────────────────────────────────────────────────
 # Flat, sortable view of every scored listing so you can spot the best
 # surplus / yield in one scan instead of expanding each card individually.
@@ -1130,7 +1227,8 @@ with t0:
 
     scored = greens + yellows + whites
     if not scored:
-        st.info("No scored listings yet — run the pipeline (NEHNUT / BAZOS / TOPREAL → 💰 CASHFLOW SCORE) to populate this view.")
+        st.info(hidden_note("scored listings") if n_hidden else
+                "No scored listings yet — run the pipeline (NEHNUT / BAZOS / TOPREAL → 💰 CASHFLOW SCORE) to populate this view.")
     else:
         from engine.financial import compute_deal_score
         emoji_map = {"GREEN": "🟢", "YELLOW": "🟡", "WHITE": "⚪", "PENDING": "⏳"}
@@ -1195,14 +1293,15 @@ with t0:
             height=min(600, 40 + 35 * len(df)),
             column_config={
                 "Score":   st.column_config.NumberColumn(format="%d", help="0–100 composite deal score"),
-                "Price":   st.column_config.NumberColumn(format="€%d"),
-                "Max 🟡":  st.column_config.NumberColumn(format="€%d", help="Highest price that still scores YELLOW"),
-                "Max 🟢":  st.column_config.NumberColumn(format="€%d", help="Highest price that scores GREEN"),
+                "Stage":   st.column_config.TextColumn(width="medium"),
+                "Price":   st.column_config.NumberColumn(format="euro", step=1),
+                "Max 🟡":  st.column_config.NumberColumn(format="euro", step=1, help="Highest price that still scores YELLOW"),
+                "Max 🟢":  st.column_config.NumberColumn(format="euro", step=1, help="Highest price that scores GREEN"),
                 "To 🟡":   st.column_config.NumberColumn(format="%+.1f%%", help="Change from the asking price to the max YELLOW price, as on the card — the cut you need to negotiate (positive = already inside)"),
                 "Size":    st.column_config.NumberColumn(format="%d m²"),
-                "Rent":    st.column_config.NumberColumn(format="€%d"),
-                "Surplus": st.column_config.NumberColumn(format="€%+d"),
-                "+2pp":    st.column_config.NumberColumn(format="€%+d", help="s.r.o. surplus at the mortgage rate + 2 pp"),
+                "Rent":    st.column_config.NumberColumn(format="euro", step=1),
+                "Surplus": st.column_config.NumberColumn(format="euro", step=1),
+                "+2pp":    st.column_config.NumberColumn(format="euro", step=1, help="s.r.o. surplus at the mortgage rate + 2 pp"),
                 "Below%":  st.column_config.NumberColumn(
                     format="%.0f%%", help="Asking €/m² below the regional median "
                                           "(negative = above it; blank = no benchmark)"),
@@ -1223,7 +1322,8 @@ with t0:
 # ── Tab 1: Snag List ──────────────────────────────────────────────────────────
 with t1:
     if not greens and not yellows and not whites and not pending:
-        st.info("No listings in DB yet — click NEHNUT, BAZOS, or TOPREAL in the sidebar to scrape.")
+        st.info(hidden_note() if n_hidden else
+                "No listings in DB yet — click NEHNUT, BAZOS, or TOPREAL in the sidebar to scrape.")
     else:
         if not greens and not yellows and not whites and pending:
             st.info(f"⏳ {len(pending)} listing(s) scraped and pending scoring. Click 💰 CASHFLOW SCORE in the sidebar to classify them.")
@@ -1233,30 +1333,33 @@ with t1:
             return f" · ⛔ {n} CASH-FLOW NEGATIVE" if n else ""
         if greens:
             st.markdown(f'<div class="muted" style="margin:14px 0 8px">🟢 GREEN — ≥20% BELOW MARKET ({len(greens)}){_neg_note(greens)}</div>', unsafe_allow_html=True)
-            for l in greens:
-                render_card(l)
+            render_cards(greens, "green")
         if yellows:
             st.markdown(f'<div class="muted" style="margin:18px 0 8px">🟡 YELLOW — 10–20% BELOW MARKET ({len(yellows)}){_neg_note(yellows)}</div>', unsafe_allow_html=True)
-            for l in yellows:
-                render_card(l)
+            render_cards(yellows, "yellow")
         if whites:
             st.markdown(f'<div class="muted" style="margin:18px 0 8px">⚪ WHITE — AT MARKET OR NO BENCHMARK ({len(whites)})</div>', unsafe_allow_html=True)
-            for l in whites:
-                render_card(l)
+            render_cards(whites, "white")
         if pending:
-            with st.expander(f"⏳ PENDING SCORING ({len(pending)} listings scraped, not yet classified)"):
+            pend = st.expander(f"⏳ PENDING SCORING ({len(pending)} listings scraped, not yet classified)",
+                               key="pending_list", on_change="rerun")
+            if pend.open:
+                rows = ""
                 for l in pending:
                     title = l.get("title") or l.get("address_raw") or l.get("district") or "—"
                     price = l.get("price_eur") or 0
                     size  = l.get("size_m2") or 0
                     src   = (l.get("source") or "").upper()
-                    st.markdown(f'<div class="brow"><span class="l">{esc(title[:60])}</span><span class="v">€{price:,.0f} · {size:.0f}m² · {esc(src)}</span></div>', unsafe_allow_html=True)
+                    rows += f'<div class="brow"><span class="l">{esc(title[:60])}</span><span class="v">€{price:,.0f} · {size:.0f}m² · {esc(src)}</span></div>'
+                pend.markdown(rows, unsafe_allow_html=True)
 
 
 # ── Map ───────────────────────────────────────────────────────────────────────
 with t_map:
     mapped = [l for l in data if l.get("lat") and l.get("lng")]
-    if not mapped:
+    if not data and n_hidden:
+        st.info(hidden_note())
+    elif not mapped:
         st.info("No coordinates yet — run 📍 LOCATION IQ (works without a Google key: "
                 "it falls back to OpenStreetMap).")
     else:
@@ -1275,7 +1378,7 @@ with t_map:
                 "title": (l.get("title") or l.get("district") or "—")[:60],
                 "price": f"€{(l.get('price_eur') or 0):,.0f}",
                 "cls": cls,
-                "surplus": "—" if surplus is None else f"€{surplus:+,.0f}/mo",
+                "surplus": fe(surplus, suffix="/mo"),
                 "maxy": f"€{l['max_price_yellow']:,.0f}" if l.get("max_price_yellow") else "—",
                 "where": "approximate (area centroid)" if approx else (l.get("geo_precision") or ""),
             })
@@ -1404,14 +1507,14 @@ with t_whatif:
     # The class is price vs market; the delta is what it earns a month under
     # the better structure (red and pointing down when it costs money).
     k1.metric("Class", r.classification,
-              delta=f"{max(r.surplus_personal, r.surplus_sro):+,.0f} €/mo cash flow",
+              delta=f"{fe(max(r.surplus_personal, r.surplus_sro))} cash flow",
               help=(f"{abs(r.market_discount):.0%} "
                     f"{'below' if r.market_discount >= 0 else 'above'} the regional median "
                     f"€/m² ({benchmark_note(wi_district, wi_rooms or None)}) · s.r.o. "
                     f"self-funding {r.ratio_sro:.0%}")
               if r.market_discount is not None else "No regional median for this district.")
     k2.metric("Best structure", "s.r.o." if r.optimal_structure == "SRO" else "Personal",
-              delta=f"€{r.annual_sro_saving:+,.0f}/yr s.r.o. vs personal")
+              delta=f"{fe(r.annual_sro_saving, suffix='/yr', signed=True)} s.r.o. vs personal")
     k3.metric("Cash in", f"€{r.total_cash_invested:,.0f}",
               help=f"Personal; the s.r.o. puts in €{r.total_cash_invested_sro:,.0f} "
                    f"({r.sro_ltv:.0%} LTV).")
@@ -1471,7 +1574,7 @@ with t_whatif:
                                "Surplus €/mo": x.surplus_sro,
                                "Self-funding %": x.ratio_sro * 100})
         st.dataframe(pd.DataFrame(shock_rows), hide_index=True, use_container_width=True,
-                     column_config={"Surplus €/mo": st.column_config.NumberColumn(format="€%+d"),
+                     column_config={"Surplus €/mo": st.column_config.NumberColumn(format="euro", step=1),
                                     "Self-funding %": st.column_config.NumberColumn(format="%.1f%%")})
         st.markdown('<div class="muted">EQUITY CASH FLOWS (s.r.o.)</div>', unsafe_allow_html=True)
         st.bar_chart(pd.DataFrame({"Year": list(range(len(irr_s.cash_flows))),
@@ -1597,7 +1700,7 @@ with t_rej:
                        f"{'' if show_overturned else ' (hidden)'}" if n_overturned else "")
                     + '</div>', unsafe_allow_html=True)
         st.dataframe(view, hide_index=True, use_container_width=True,
-                     column_config={"Price": st.column_config.NumberColumn(format="€%d"),
+                     column_config={"Price": st.column_config.NumberColumn(format="euro", step=1),
                                     "URL": st.column_config.LinkColumn(display_text="open ↗")})
         rv_opts = {f"{r_.get('title') or r_.get('address_raw') or '?'} [{r_['id'][:6]}]": r_["id"]
                    for r_ in rejected
@@ -1678,7 +1781,7 @@ with t_lv:
             disabled=[c for c in todo_df.columns if c not in editable],
             column_config={
                 "id": None,
-                "Price": st.column_config.NumberColumn(format="€%d"),
+                "Price": st.column_config.NumberColumn(format="euro", step=1),
                 "Flat LV no.": st.column_config.TextColumn(
                     help="The flat's own LV — not the plot's — from the seller or agent."),
                 "Katastrálne územie": st.column_config.TextColumn(
@@ -1748,7 +1851,7 @@ with t2:
     st.markdown("")
 
     if not data:
-        st.info("No listings loaded.")
+        st.info(hidden_note() if n_hidden else "No listings loaded.")
     else:
         opts = {f"{l.get('title') or '?'} — €{l.get('price_eur') or 0:,.0f} [{(l.get('id') or '')[:6]}]": l
                 for l in data}
@@ -1763,7 +1866,7 @@ with t2:
             if img and img.startswith("http"):
                 st.image(img, use_container_width=True)
             else:
-                st.markdown('<div style="background:#0b0d14;border:1px solid #151924;height:260px;display:flex;align-items:center;justify-content:center;color:#151924;font-family:IBM Plex Mono,monospace;font-size:0.7rem;letter-spacing:2px">NO IMAGE</div>', unsafe_allow_html=True)
+                st.markdown('<div style="background:#0b0d14;border:1px solid #151924;height:260px;display:flex;align-items:center;justify-content:center;color:#7a89a8;font-family:var(--mono);font-size:0.7rem;letter-spacing:2px">NO IMAGE</div>', unsafe_allow_html=True)
 
         with c2:
             st.markdown('<div class="muted">SATELLITE VIEW</div>', unsafe_allow_html=True)
@@ -1793,8 +1896,12 @@ with t2:
 
         st.markdown('<hr class="div">', unsafe_allow_html=True)
         st.markdown('<div class="muted">VIBE CHECK</div>', unsafe_allow_html=True)
-        vibe = st.slider("Score (1–10)", 1, 10, 5)
-        note = st.text_input("Note", placeholder="e.g. Great location, needs new windows...")
+        # Keyed per listing: an unkeyed widget is identified by its label and
+        # arguments alone, the same for every listing, so a note typed for A
+        # stayed in the box after picking B and could be saved against B.
+        vibe = st.slider("Score (1–10)", 1, 10, 5, key=f"vibe_{sel['id']}")
+        note = st.text_input("Note", placeholder="e.g. Great location, needs new windows...",
+                             key=f"note_{sel['id']}")
         if st.button("SAVE ANNOTATION", use_container_width=True, disabled=using_demo):
             from database import add_annotation
             add_annotation(sel["id"], note, vibe)
@@ -1823,7 +1930,7 @@ with t3:
     st.markdown('<div class="muted" style="color:#ff5252;margin-bottom:16px">⚠️ DRAFT ONLY — no legal validity until executed before a licensed Slovak notár</div>', unsafe_allow_html=True)
 
     if not data:
-        st.info("No listings loaded.")
+        st.info(hidden_note() if n_hidden else "No listings loaded.")
     else:
         opts = {f"{l.get('title') or '?'} — €{l.get('price_eur') or 0:,.0f} [{(l.get('id') or '')[:6]}]": l
                 for l in data}
@@ -1837,7 +1944,7 @@ with t3:
             ownership  = st.radio("Structure", ["Personal", "s.r.o."], horizontal=True)
         with f2:
             st.markdown("**DEAL**")
-            agreed     = st.number_input("Agreed Price €", value=int(sel3.get("price_eur",0)), step=500)
+            agreed     = st.number_input("Agreed Price €", value=int(sel3.get("price_eur") or 0), step=500)
             notary     = st.text_input("Notár Name")
             escrow     = st.checkbox("Notárska úschova (escrow hold)", value=True)
             deposit    = st.number_input("Deposit € (earnest money)", 0, 50000, 2000, 500)
@@ -1846,110 +1953,40 @@ with t3:
             if not buyer_name.strip():
                 st.error("Enter buyer name first.")
             else:
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-                # Pre-format optional numeric fields — an f-string format spec
-                # can't contain a conditional, so build these strings first.
-                _surplus = sel3.get("surplus_sro")
-                _saving  = sel3.get("annual_sro_saving")
-                surplus_str = f"€{_surplus:,.0f}" if isinstance(_surplus, (int, float)) else "—"
-                saving_str  = f"€{_saving:,.0f}"  if isinstance(_saving,  (int, float)) else "—"
-                draft = f"""
-╔══════════════════════════════════════════════════════════╗
-║         KÚPNA ZMLUVA — DRAFT / NÁVRH ZMLUVY             ║
-╚══════════════════════════════════════════════════════════╝
-
-Vygenerované:  {now_str}
-Stav:          DRAFT — vyžaduje notariálne vyhotovenie
-Verzia:        Sovereign RE Dashboard v2026
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-§ 1. PREDMET ZMLUVY
-
-Nehnuteľnosť: {sel3.get('title','—')}
-Adresa:       {sel3.get('address_raw','—')}
-Okres:        {sel3.get('district','—')}
-Výmera:       {sel3.get('size_m2','?')} m²
-Energetická trieda: {sel3.get('energy_class','—')}
-
-Katastrálne územie: {sel3.get('cadastral_area','[Doplniť]')}
-Číslo parcely:      {sel3.get('cadastral_number','[Doplniť]')}
-List vlastníctva:   [Overiť na Katastri pred podpisom]
-LV Status:          {sel3.get('lv_status','PENDING')} (stav k dátumu generovania)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-§ 2. ZMLUVNÉ STRANY
-
-KUPUJÚCI (Buyer):
-  Meno / Spoločnosť: {buyer_name}
-  IČO:               {buyer_ico if buyer_ico else 'N/A — fyzická osoba'}
-  Forma vlastníctva: {ownership}
-
-PREDÁVAJÚCI (Seller):
-  [Doplniť notárom — overiť totožnosť a vlastníctvo]
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-§ 3. KÚPNA CENA
-
-Dohodnutá cena:    €{agreed:,.2f}
-Záloha (depozit):  €{deposit:,.2f}
-Zostatok:          €{agreed - deposit:,.2f}
-
-Platobný mechanizmus:
-  {'✅ Notárska úschova — odporúčané' if escrow else '⚠️ Priamy prevod — neodporúčané'}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-§ 4. PODMIENKY
-
-1. Zmluva nadobúda platnosť podpisom oboch strán pred notárom.
-2. Prevod vlastníctva nastáva zápisom do katastra nehnuteľností.
-3. Predávajúci zaručuje, že nehnuteľnosť je bez právnych vád.
-4. Kupujúci vyhlasuje, že je oboznámený so stavom nehnuteľnosti.
-5. {'Finančné plnenie cez Notársku úschovu dle § 56a Notárskeho poriadku.' if escrow else 'Finančné plnenie na účet predávajúceho po podpise zmluvy.'}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-§ 5. NOTÁR
-
-Notár:   {notary if notary else '[Prideliť notára]'}
-Dátum:   [Doplniť]
-Miesto:  [Doplniť]
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-FINANČNÁ ANALÝZA (pre interné účely):
-
-s.r.o. surplus/mo:  {surplus_str}
-Ročná úspora s.r.o.: {saving_str}
-Net Yield:           {(sel3.get('net_rental_yield',0) or 0)*100:.2f}%
-LV overenie:        {sel3.get('lv_status','PENDING')} — OVERIŤ 48H PRED PODPISOM
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-⚠️  PRÁVNE UPOZORNENIE
-
-Tento dokument je počítačom generovaný NÁVRH bez právnej záväznosti.
-Nemá žiadnu právnu platnosť bez vyhotovenia a overenia licencovaným
-slovenským notárom. Vždy overte LV bezprostredne pred podpisom.
-Finálny prevod vyžaduje zápis na Katastri nehnuteľností SR.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Generated by Sovereign RE Dashboard · Private Use Only
-                """.strip()
+                from modules.contract_draft import build_contract_draft, build_internal_analysis
+                now = datetime.now()
+                draft = build_contract_draft(
+                    sel3, buyer_name=buyer_name.strip(), buyer_ico=buyer_ico,
+                    ownership=ownership, agreed_price=agreed, deposit=deposit,
+                    notary=notary, escrow=escrow, generated_at=now)
+                # The deal's numbers used to sit inside the draft you send to
+                # the notár; they are a separate note now.
+                analysis = build_internal_analysis(sel3, agreed_price=agreed, generated_at=now)
 
                 st.text_area("CONTRACT DRAFT", draft, height=500)
-                fname = f"contract_{sel3['id'][:8]}_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
+                stamp = now.strftime('%Y%m%d_%H%M')
+                # on_click="ignore": a rerun would clear the draft and the
+                # other download with it.
                 st.download_button(
                     "⬇️ DOWNLOAD DRAFT",
                     draft,
-                    file_name=fname,
+                    file_name=f"contract_{sel3['id'][:8]}_{stamp}.txt",
                     mime="text/plain",
+                    on_click="ignore",
                     use_container_width=True,
                 )
                 st.markdown('<div class="muted">Next: Send to your notár. Use Notárska úschova for all funds. Re-verify LV 48h before signing.</div>', unsafe_allow_html=True)
+                st.markdown('<div class="muted" style="margin-top:14px">INTERNAL ANALYSIS — '
+                            'for you, not part of the draft</div>', unsafe_allow_html=True)
+                st.code(analysis, language=None)
+                st.download_button(
+                    "⬇️ DOWNLOAD ANALYSIS",
+                    analysis,
+                    file_name=f"analysis_{sel3['id'][:8]}_{stamp}.txt",
+                    mime="text/plain",
+                    on_click="ignore",
+                    use_container_width=True,
+                )
                 if using_demo:
                     st.caption("Demo listing — this draft is not saved.")
                 else:
