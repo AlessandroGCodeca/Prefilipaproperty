@@ -31,9 +31,13 @@ st.set_page_config(
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
-
-html, body, [class*="css"] { font-family: 'IBM Plex Sans', sans-serif; }
+/* No web-font import: it asked fonts.googleapis.com on every page view and fell
+   back silently when offline. IBM Plex is used if installed locally. */
+:root {
+    --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Consolas, Menlo, monospace;
+    --sans: 'IBM Plex Sans', system-ui, 'Segoe UI', sans-serif;
+}
+html, body, [class*="css"] { font-family: var(--sans); }
 .stApp { background: #07090e; color: #bcc8e0; }
 
 section[data-testid="stSidebar"] {
@@ -42,12 +46,12 @@ section[data-testid="stSidebar"] {
 }
 
 .wordmark {
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: var(--mono);
     font-size: 1rem; font-weight: 700;
     color: #e4eaf5; letter-spacing: 4px; text-transform: uppercase;
 }
 .sub {
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: var(--mono);
     font-size: 0.55rem; color: #2a3450; letter-spacing: 3px;
     text-transform: uppercase; margin-top: 3px;
 }
@@ -62,14 +66,14 @@ section[data-testid="stSidebar"] {
 .sc.g::before { background:#00e676; } .sc.y::before { background:#ffd740; }
 .sc.w::before { background:#37474f; } .sc.r::before { background:#ff5252; }
 .sc.b::before { background:#448aff; } .sc.a::before { background:#ff9100; }
-.sn { font-family:'IBM Plex Mono',monospace; font-size:1.9rem; font-weight:700; color:#e4eaf5; line-height:1; }
+.sn { font-family:var(--mono); font-size:1.9rem; font-weight:700; color:#e4eaf5; line-height:1; }
 .sc.g .sn { color:#00e676; } .sc.y .sn { color:#ffd740; }
 .sc.r .sn { color:#ff5252; } .sc.b .sn { color:#448aff; }
 .sl { font-size:0.6rem; text-transform:uppercase; letter-spacing:1.5px; color:#2a3450; margin-top:5px; }
 
 /* Badges */
 .badge { display:inline-block; padding:2px 8px; border-radius:2px;
-         font-family:'IBM Plex Mono',monospace; font-size:0.62rem; font-weight:700;
+         font-family:var(--mono); font-size:0.62rem; font-weight:700;
          letter-spacing:1px; text-transform:uppercase; }
 .bg { background:rgba(0,230,118,.12); color:#00e676; }
 .by { background:rgba(255,215,64,.12); color:#ffd740; }
@@ -82,7 +86,7 @@ section[data-testid="stSidebar"] {
 /* Breakdown rows */
 .brow { display:flex; justify-content:space-between; padding:5px 0;
         border-bottom:1px solid #0e1018;
-        font-family:'IBM Plex Mono',monospace; font-size:0.76rem; }
+        font-family:var(--mono); font-size:0.76rem; }
 .brow .l { color:#2a3450; } .brow .v { color:#bcc8e0; }
 .brow.tot { border-top:1px solid #151924; border-bottom:none; }
 .brow.tot .l { color:#6b7a96; } .brow.tot .v { color:#e4eaf5; font-weight:700; }
@@ -95,7 +99,7 @@ section[data-testid="stSidebar"] {
 .stTabs [data-baseweb="tab-list"] { background:transparent; border-bottom:1px solid #151924; gap:0; }
 .stTabs [data-baseweb="tab"] {
     background:transparent; border:none; border-bottom:2px solid transparent;
-    color:#2a3450; font-family:'IBM Plex Mono',monospace; font-size:0.7rem;
+    color:#2a3450; font-family:var(--mono); font-size:0.7rem;
     letter-spacing:1px; text-transform:uppercase; padding:8px 20px; border-radius:0;
 }
 .stTabs [aria-selected="true"] { background:transparent !important; color:#00e676 !important; border-bottom:2px solid #00e676 !important; }
@@ -103,7 +107,7 @@ section[data-testid="stSidebar"] {
 /* Buttons */
 .stButton>button {
     background:#0b0d14; color:#6b7a96; border:1px solid #151924;
-    border-radius:3px; font-family:'IBM Plex Mono',monospace;
+    border-radius:3px; font-family:var(--mono);
     font-size:0.68rem; letter-spacing:1px; text-transform:uppercase;
     transition:all .15s;
 }
@@ -111,8 +115,8 @@ section[data-testid="stSidebar"] {
 
 div[data-testid="stExpander"] { background:#0b0d14; border:1px solid #151924 !important; border-radius:3px; }
 
-.muted { color:#2a3450; font-size:0.7rem; font-family:'IBM Plex Mono',monospace; }
-.mono  { font-family:'IBM Plex Mono',monospace; }
+.muted { color:#2a3450; font-size:0.7rem; font-family:var(--mono); }
+.mono  { font-family:var(--mono); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -300,15 +304,6 @@ with st.sidebar:
 
 
 # ── Pipeline actions ──────────────────────────────────────────────────────────
-def run_step(label, fn, *args, **kwargs):
-    with st.spinner(f"{label}..."):
-        try:
-            result = fn(*args, **kwargs)
-            st.success(f"✅ Done: {result}")
-            st.rerun()
-        except Exception as e:
-            st.error(f"❌ {e}")
-
 def _run_scraper_subprocess(script_name: str) -> tuple[int, str]:
     """Run a scraper as a fresh subprocess — bypasses Python module cache."""
     import subprocess, json as _json
@@ -1023,9 +1018,22 @@ def render_memo_button(l, key):
     "ONE-CLICK CLOSE",
 ])
 
+from config import NEAR_FLOOR_DISCOUNT
+
+
 def _value_rank(l):
-    """Deepest discount to the regional median first, then the higher yield."""
-    return (l.get("market_discount") or 0, l.get("gross_yield") or 0)
+    """Sort key, best first (used with reverse=True): deepest discount to the
+    regional median, then the higher yield.
+
+    A discount at NEAR_FLOOR_DISCOUNT or deeper is more often a deposit or an
+    "od €X" price than a bargain — the card warns about it — so those rows go
+    after every other one, the least extreme first. Judged at the 4 decimals
+    the card's warning uses, so the order and the warning always agree."""
+    disc = l.get("market_discount") or 0
+    gross = l.get("gross_yield") or 0
+    if round(disc, 4) >= NEAR_FLOOR_DISCOUNT:
+        return (0, -disc, gross)
+    return (1, disc, gross)
 
 
 greens  = sorted([l for l in data if (l.get("cf_class") or l.get("classification")) == "GREEN"],
@@ -1552,7 +1560,7 @@ with t2:
             if img and img.startswith("http"):
                 st.image(img, use_container_width=True)
             else:
-                st.markdown('<div style="background:#0b0d14;border:1px solid #151924;height:260px;display:flex;align-items:center;justify-content:center;color:#151924;font-family:IBM Plex Mono,monospace;font-size:0.7rem;letter-spacing:2px">NO IMAGE</div>', unsafe_allow_html=True)
+                st.markdown('<div style="background:#0b0d14;border:1px solid #151924;height:260px;display:flex;align-items:center;justify-content:center;color:#151924;font-family:var(--mono);font-size:0.7rem;letter-spacing:2px">NO IMAGE</div>', unsafe_allow_html=True)
 
         with c2:
             st.markdown('<div class="muted">SATELLITE VIEW</div>', unsafe_allow_html=True)
@@ -1582,8 +1590,12 @@ with t2:
 
         st.markdown('<hr class="div">', unsafe_allow_html=True)
         st.markdown('<div class="muted">VIBE CHECK</div>', unsafe_allow_html=True)
-        vibe = st.slider("Score (1–10)", 1, 10, 5)
-        note = st.text_input("Note", placeholder="e.g. Great location, needs new windows...")
+        # Keyed per listing: an unkeyed widget is identified by its label and
+        # arguments alone, the same for every listing, so a note typed for A
+        # stayed in the box after picking B and could be saved against B.
+        vibe = st.slider("Score (1–10)", 1, 10, 5, key=f"vibe_{sel['id']}")
+        note = st.text_input("Note", placeholder="e.g. Great location, needs new windows...",
+                             key=f"note_{sel['id']}")
         if st.button("SAVE ANNOTATION", use_container_width=True, disabled=using_demo):
             from database import add_annotation
             add_annotation(sel["id"], note, vibe)

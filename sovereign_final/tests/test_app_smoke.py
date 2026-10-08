@@ -325,3 +325,65 @@ def test_the_card_shows_claudes_lv_summary_once(populated_db):
     populated_db.set_lv_analysis("g1", "LOW", "Only a bank mortgage on the flat.")
     populated_db.set_lv_status("g1", "PASS", "", "[Claude LOW] Only a bank mortgage on the flat.")
     assert markdown_of(run_app()).count("Only a bank mortgage on the flat.") == 1
+
+
+# ── Audit B12–B16 ─────────────────────────────────────────────────────────────
+def _pick_listing(at, tag):
+    """Select the satellite viewer's listing whose label carries [tag]."""
+    sb = next(s for s in at.selectbox if s.label == "Select listing")
+    sb.select(next(o for o in sb.options if f"[{tag}]" in o)).run()
+    assert not at.exception, [e.value for e in at.exception]
+
+
+def _satellite_inputs(at):
+    # The deal pipeline has a "Note" box too (key pipe_note).
+    note = next(t for t in at.text_input if t.label == "Note" and t.key != "pipe_note")
+    vibe = next(s for s in at.slider if s.label == "Score (1–10)")
+    return note, vibe
+
+
+def test_a_typed_note_does_not_follow_you_to_the_next_listing(populated_db):
+    # The note box and the vibe slider had no per-listing key, so what was typed
+    # for one flat stayed in them after picking another and could be saved there.
+    at = run_app()
+    _pick_listing(at, "g1")
+    note, vibe = _satellite_inputs(at)
+    note.set_value("note for g1")
+    vibe.set_value(9)
+    at.run()
+    _pick_listing(at, "w1")
+    note, vibe = _satellite_inputs(at)
+    assert note.value == "" and vibe.value == 5
+    next(b for b in at.button if b.label == "SAVE ANNOTATION").click().run()
+    assert not any(n["note"] == "note for g1" for n in populated_db.get_annotations("w1"))
+
+
+def test_the_page_makes_no_external_font_request(db):
+    # The CSS used to @import IBM Plex from fonts.googleapis.com: a request to
+    # Google on every page view, and a silent fallback whenever it was blocked.
+    css = next(m.value for m in run_app().markdown if "<style>" in m.value)
+    assert not re.search(r"@import|url\(\s*['\"]?(https?:)?//", css)
+
+
+def _card_titles(at, prefix):
+    return [re.search(rf"{prefix}\w+", e.label).group(0) for e in at.expander
+            if re.search(rf"{prefix}\w+", e.label)]
+
+
+def test_best_deal_ranking_puts_near_floor_discounts_after_the_rest(db):
+    # Trnava, 50 m². Deepest-discount-first used to float the 45%-below rows —
+    # the ones the card itself warns may be a deposit or an "od €X" price — to
+    # the top of the GREEN list.
+    from config import NEAR_FLOOR_DISCOUNT
+    from engine.regional_prices import regional_median_price
+    median = regional_median_price("Trnava") * 50
+    for name, below in (("Suspect45", 0.45), ("Deal30", 0.30), ("Suspect41", 0.41),
+                        ("Deal22", 0.22), ("Deal39", 0.39)):
+        assert (below >= NEAR_FLOOR_DISCOUNT) == name.startswith("Suspect")
+        _add_scored(db, name, "Trnava", round(median * (1 - below)), 50, title=name)
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    assert _card_titles(at, "(?:Deal|Suspect)") == [
+        "Deal39", "Deal30", "Deal22",      # real bargains, deepest first
+        "Suspect41", "Suspect45",          # near the floor, least extreme first
+    ]
