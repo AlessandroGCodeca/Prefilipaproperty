@@ -295,11 +295,40 @@ def _fetch(url: str, sess=None) -> tuple[int, str]:
         return 0, ""
 
 
+def _fetch_failure(statuses: list[int]) -> str:
+    """Why the search pages gave no listings, from the status each fetch got
+    (0 = no HTTP response at all: DNS, timeout, proxy or connection error).
+
+    Only a page that loaded, or a 404 on every URL, says the site changed. A
+    connection that never answered, or a 403/429/5xx, says nothing about the
+    URL scheme — blaming it sends you editing SEARCH_URL_CANDIDATES for what
+    is really a network, proxy or blocking problem."""
+    if any(s == 200 for s in statuses):
+        return ("Topreality: the search pages loaded but held no listings. The site "
+                "likely changed its URL scheme or page markup — update "
+                "SEARCH_URL_CANDIDATES and DETAIL_HREF_PATTERNS in scraper/topreality.py.")
+    if any(s == 0 for s in statuses):
+        return ("Topreality: could not reach the site (no response — network, DNS, "
+                "timeout or proxy error). Check the connection and SCRAPER_API_KEY, "
+                "then retry; the scraper itself is probably fine.")
+    if all(s in (404, 410) for s in statuses):
+        return ("Topreality: every search URL answered 'not found'. The site likely "
+                "changed its URL scheme — update SEARCH_URL_CANDIDATES in "
+                "scraper/topreality.py.")
+    codes = ", ".join(str(s) for s in sorted(set(statuses)))
+    return (f"Topreality: the site (or ScraperAPI) refused the search pages (HTTP {codes}). "
+            "It may be blocking requests or be down; retry later — the URL scheme "
+            "is probably unchanged.")
+
+
 def _detect_search_url(sess) -> str:
-    """Probe candidates until we find one returning detail-page links."""
+    """Probe candidates until we find one returning detail-page links.
+    Raises RuntimeError saying what went wrong when none does."""
+    statuses: list[int] = []
     for fmt in SEARCH_URL_CANDIDATES:
         url = fmt.format(page=1)
         status, html = _fetch(url, sess)
+        statuses.append(status)
         if status == 200 and len(html) > 5000:
             links = _extract_listing_links(html)
             if links:
@@ -308,8 +337,9 @@ def _detect_search_url(sess) -> str:
             else:
                 log.info(f"  · {fmt} → 200 but 0 links")
         else:
-            log.warning(f"  · {fmt} → HTTP {status}, len={len(html)}")
-    return ""
+            log.warning(f"  · {fmt} → {'no response' if status == 0 else f'HTTP {status}'}, "
+                        f"len={len(html)}")
+    raise RuntimeError(_fetch_failure(statuses))
 
 
 def _deactivate_category_pages() -> int:
@@ -443,13 +473,7 @@ def run(max_pages: int = 5) -> int:
     log.info(f"🔍 Topreality.sk ({max_pages} pages)...")
     sess = make_session(BASE)
 
-    fmt = _detect_search_url(sess)
-    if not fmt:
-        raise RuntimeError(
-            "Topreality: none of the candidate search URLs returned listings. "
-            "The site likely changed its URL scheme — update SEARCH_URL_CANDIDATES "
-            "in scraper/topreality.py."
-        )
+    fmt = _detect_search_url(sess)   # raises, with the reason, if nothing works
 
     # Listings we already hold complete, recent data for. Their detail page is
     # not re-fetched; last_seen_at is touched instead so the staleness sweep
@@ -462,11 +486,14 @@ def run(max_pages: int = 5) -> int:
     seen_urls: set[str] = set()
     total = 0
     touched = 0
+    page_statuses: list[int] = []
     for p in range(1, max_pages + 1):
         url = fmt.format(page=p)
         status, html = _fetch(url, sess)
+        page_statuses.append(status)
         if status != 200:
-            log.warning(f"  Page {p}: HTTP {status}, skipping")
+            log.warning(f"  Page {p}: {'no response' if status == 0 else f'HTTP {status}'}, "
+                        f"skipping")
             continue
         links = _extract_listing_links(html)
         new_links = [u for u in links if u not in seen_urls]
@@ -502,6 +529,9 @@ def run(max_pages: int = 5) -> int:
         time.sleep(SCRAPE_DELAY_SEC)
 
     if total == 0 and touched == 0:
+        if page_statuses and 200 not in page_statuses:
+            # No page was ever read, so the link patterns were never tested.
+            raise RuntimeError(_fetch_failure(page_statuses))
         raise RuntimeError(
             "Topreality: 0 listings parsed. Check DETAIL_HREF_PATTERNS in "
             "scraper/topreality.py — the link patterns may need updating."
