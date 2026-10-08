@@ -3,6 +3,7 @@ scraper/bazos.py — Sovereign Investor Dashboard
 Scrapes private-seller listings from reality.bazos.sk
 """
 
+import logging
 import hashlib, time, re
 from datetime import datetime, timezone
 
@@ -15,6 +16,8 @@ from database import upsert_listing, init_db
 from scraper._http import get, make_session
 from scraper.nehnutelnosti import _extract_location_from_text
 from scraper.textparse import rooms_from_title
+
+log = logging.getLogger(__name__)
 
 BASE         = "https://reality.bazos.sk"
 CATEGORY     = "/predam/byt/"
@@ -46,7 +49,7 @@ def _price(text: str) -> float:
             v = float(re.sub(r"[\s\xa0  ]", "", m.group(1)))
             if _is_plausible_price(v):
                 candidates.append(v)
-        except Exception:
+        except ValueError:
             pass
     if candidates:
         return max(candidates)
@@ -62,7 +65,7 @@ def _price(text: str) -> float:
             v = float(digits)
             if _is_plausible_price(v):
                 return v
-        except Exception:
+        except ValueError:
             pass
     return 0.0
 
@@ -165,13 +168,13 @@ def scrape_page(offset: int, session=None) -> list[dict]:
             if r.status_code == 200:
                 break
         except Exception as e:
-            print(f"    ⚠️ Offset {offset} ({url}): {e}", flush=True)
+            log.warning(f"    ⚠️ Offset {offset} ({url}): {e}")
             r = None
     else:
         return []
 
     if not r or r.status_code != 200:
-        print(f"    ⚠️ Offset {offset}: HTTP {r.status_code if r else '?'}", flush=True)
+        log.warning(f"    ⚠️ Offset {offset}: HTTP {r.status_code if r else '?'}")
         return []
 
     soup = BeautifulSoup(r.text, "html.parser")
@@ -195,7 +198,7 @@ def scrape_page(offset: int, session=None) -> list[dict]:
                 if rec:
                     results.append(rec)
             except Exception as e:
-                print(f"    ⚠️ Card error: {e}", flush=True)
+                log.warning(f"    ⚠️ Card error: {e}")
     else:
         # Fallback: collect all /inzerat/ links (avoids missing listings)
         links = soup.select("a[href*='/inzerat/']")
@@ -210,7 +213,7 @@ def scrape_page(offset: int, session=None) -> list[dict]:
                 if rec:
                     results.append(rec)
             except Exception as e:
-                print(f"    ⚠️ Link error: {e}", flush=True)
+                log.warning(f"    ⚠️ Link error: {e}")
 
     return results
 
@@ -238,7 +241,7 @@ def _backfill_blank_districts() -> int:
     finally:
         conn.close()
     if updated:
-        print(f"  ↳ backfilled district on {updated} bazos rows from card text")
+        log.info(f"  ↳ backfilled district on {updated} bazos rows from card text")
     return updated
 
 
@@ -257,7 +260,7 @@ def _zero_bogus_prices() -> int:
     finally:
         conn.close()
     if n:
-        print(f"  ↳ zeroed {n} bazos listings with bogus prices (< €{_PRICE_MIN:,})")
+        log.info(f"  ↳ zeroed {n} bazos listings with bogus prices (< €{_PRICE_MIN:,})")
     return n
 
 
@@ -268,7 +271,7 @@ def run(max_pages: int = 10) -> int:
             f"Bazos blocked or unreachable: HTTP {status} — {snippet[:120]}"
         )
 
-    print(f"🔍 Bazos.sk ({max_pages} pages)...", flush=True)
+    log.info(f"🔍 Bazos.sk ({max_pages} pages)...")
     session = make_session(warmup_url=BASE)
     total = 0
     for p in range(max_pages):
@@ -279,8 +282,8 @@ def run(max_pages: int = 10) -> int:
                 upsert_listing(l)
                 total += 1
             except Exception as e:
-                print(f"    DB error: {e}", flush=True)
-        print(f"  Page {p+1} (offset={offset}): {len(listings)} found", flush=True)
+                log.warning(f"    DB error: {e}")
+        log.info(f"  Page {p+1} (offset={offset}): {len(listings)} found")
         if not listings and p > 0:
             break  # stop early if a page returns nothing (end of results)
         time.sleep(SCRAPE_DELAY_SEC)
@@ -297,10 +300,11 @@ def run(max_pages: int = 10) -> int:
     )
     zero_below_regional_floor("bazos")
     zero_above_regional_ceiling("bazos")
-    print(f"✅ Bazos done. {total} upserted.", flush=True)
+    log.info(f"✅ Bazos done. {total} upserted.")
     return total
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     init_db()
     run(max_pages=3)

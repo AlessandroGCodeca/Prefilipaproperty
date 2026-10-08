@@ -32,6 +32,7 @@ Modes:
       cadastral_number (default limit 100). Results land in cadastre_cache.
 """
 
+import logging
 import json
 import sys, os
 
@@ -163,6 +164,7 @@ def _cli_cadastre(argv: list) -> int:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     argv = sys.argv[1:]
     if argv and argv[0] == "cadastre":
         sys.exit(_cli_cadastre(argv[1:]))

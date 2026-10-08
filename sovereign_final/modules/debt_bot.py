@@ -26,16 +26,14 @@ Decision layers on an LV that IS the flat's (most reliable first):
      set. It can reject what the screen missed and clear a lien the screen
      couldn't attribute, but never an exekúcia / konkurz / súdny spor hit.
   2. modules/lv_screen — the always-on, entry-by-entry screen.
-Optional: DMR (Mistral) for a fully-local plain-language summary.
 """
 
+import logging
 import re
-
-import requests
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import DMR_ENDPOINT, LLM_MODEL, LV_RECHECK_DAYS
+from config import LV_RECHECK_DAYS
 from database import (
     get_pending_lv, get_lv_row, set_lv_status, set_lv_analysis,
     set_parcel_data, set_flat_lv, reset_demo_rejections, init_db,
@@ -48,6 +46,8 @@ from modules.llm_enrichment import (
     is_enabled as claude_enabled, analyze_lv as claude_analyze_lv,
     lv_text_for_claude,
 )
+
+log = logging.getLogger(__name__)
 
 _VERIFY_HINT = "Enter the flat's own LV number on its card to verify it."
 
@@ -192,50 +192,6 @@ def check_listing(row: dict) -> dict:
     return check_plot(row)
 
 
-# ── DMR LLM Analysis ──────────────────────────────────────────────────────────
-def llm_analyse_lv(lv_text: str) -> dict:
-    """
-    Use local Mistral (Docker Model Runner) to analyse LV document text.
-    Returns plain-language summary and risk level.
-    Data stays fully local — never sent externally.
-
-    Optional, privacy-first alternative to the Claude path in _decide_lv: the
-    PASS/REJECT decision uses Claude when ANTHROPIC_API_KEY is set, but callers
-    that must keep sensitive LV data on-prem can use this for a local summary.
-    """
-    try:
-        resp = requests.post(
-            f"{DMR_ENDPOINT}/chat/completions",
-            json={
-                "model": LLM_MODEL,
-                "messages": [
-                    {"role": "system", "content": (
-                        "You are a Slovak real estate legal analyst. "
-                        "Analyse the following List Vlastníctva (LV) title deed data. "
-                        "Identify any encumbrances, liens, executions, or legal risks. "
-                        "Respond in JSON with keys: summary (string), risk_level (LOW/MEDIUM/HIGH), "
-                        "flags (array of strings). Be concise and precise."
-                    )},
-                    {"role": "user", "content": f"LV DATA:\n{lv_text[:3000]}"},
-                ],
-                "max_tokens": 400,
-            },
-            timeout=30,
-        )
-        content = resp.json()["choices"][0]["message"]["content"]
-        import json
-        try:
-            parsed = json.loads(content)
-            return {
-                "llm_analysis":   parsed.get("summary", content),
-                "llm_risk_level": parsed.get("risk_level", "MEDIUM"),
-            }
-        except json.JSONDecodeError:
-            return {"llm_analysis": content, "llm_risk_level": "MEDIUM"}
-    except Exception as e:
-        return {"llm_analysis": f"DMR unavailable: {e}", "llm_risk_level": "UNKNOWN"}
-
-
 # ── Unified LV decision (Claude-authoritative, screen fallback) ──────────────
 def _decide_lv(api_result: dict) -> dict:
     """Refine a screened LV result with Claude's structured LV analysis.
@@ -336,14 +292,14 @@ def run_debt_filter(progress_callback=None) -> tuple[int, int, int]:
     # honest re-check below. Idempotent — a clean DB is a no-op.
     healed = reset_demo_rejections()
     if healed:
-        print(f"♻️  Reset {healed} fabricated [DEMO] rejections back to PENDING.")
+        log.info(f"♻️  Reset {healed} fabricated [DEMO] rejections back to PENDING.")
 
     pending = get_pending_lv(recheck_days=LV_RECHECK_DAYS)
     if not pending:
-        print("✅ No pending LV checks.")
+        log.info("✅ No pending LV checks.")
         return 0, 0, 0
 
-    print(f"🔒 Running LV debt filter on {len(pending)} listings...")
+    log.info(f"🔒 Running LV debt filter on {len(pending)} listings...")
     passed = rejected = unverified = plots = 0
 
     for i, row in enumerate(pending):
@@ -354,10 +310,10 @@ def run_debt_filter(progress_callback=None) -> tuple[int, int, int]:
         result = _check_and_store(row)
         if result["status"] == "REJECT":
             rejected += 1
-            print(f"  ❌ {addr} — {result['detail']}")
+            log.warning(f"  ❌ {addr} — {result['detail']}")
         elif result["status"] == "PASS":
             passed += 1
-            print(f"  ✅ {addr} — {result['detail']}")
+            log.info(f"  ✅ {addr} — {result['detail']}")
         else:
             unverified += 1
             if result.get("parcel"):
@@ -367,11 +323,11 @@ def run_debt_filter(progress_callback=None) -> tuple[int, int, int]:
         # (CADASTRAL_DELAY_SEC) and cache hits shouldn't wait at all.
 
     if unverified:
-        print(f"  ⚠️  {unverified} UNVERIFIED — no LV of the flat itself was read "
-              f"({plots} building plot(s) found from map pins). Enter a flat's "
-              f"LV number on its card to verify it.")
-    print(f"\n✅ LV filter complete. Clean: {passed} | Rejected: {rejected} | "
-          f"Unverified: {unverified}\n")
+        log.warning(f"  ⚠️  {unverified} UNVERIFIED — no LV of the flat itself was read "
+                    f"({plots} building plot(s) found from map pins). Enter a flat's "
+                    f"LV number on its card to verify it.")
+    log.info(f"✅ LV filter complete. Clean: {passed} | Rejected: {rejected} | "
+             f"Unverified: {unverified}")
     return passed, rejected, unverified
 
 
@@ -417,5 +373,6 @@ def save_flat_lvs(entries, verify: bool = False, progress_callback=None) -> dict
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     init_db()
     run_debt_filter()

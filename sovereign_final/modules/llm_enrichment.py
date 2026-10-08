@@ -28,6 +28,7 @@ Design rules:
 Run once per listing and cache the result — these fields don't change.
 """
 
+import logging
 import json
 import sys
 import os
@@ -36,6 +37,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
     ANTHROPIC_API_KEY, ANTHROPIC_MODEL_BULK, ANTHROPIC_MODEL_LV, LV_SOFT_FLAGS_REJECT,
 )
+
+log = logging.getLogger(__name__)
 
 # How much of an LV's parts A and B (the property and its owners) goes to
 # Claude ahead of part C. A whole building's LV can list hundreds of
@@ -110,7 +113,7 @@ def _ask_json(system: str, user: str, schema: dict, *, model: str = ANTHROPIC_MO
         return json.loads(text)
     except Exception as e:
         # Never surface the key or raw client internals; a one-line note is enough.
-        print(f"    ↳ llm_enrichment call failed: {type(e).__name__}")
+        log.warning(f"    ↳ llm_enrichment call failed: {type(e).__name__}")
         return None
 
 

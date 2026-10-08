@@ -13,7 +13,28 @@
 5. Dashboard opens at http://localhost:8501
 ```
 
-That's it.
+That's it. Edit `.env` later and run `docker compose up -d` (or START.bat) to
+apply it — no rebuild.
+
+### Who can open it
+
+The dashboard listens on **this computer only** (`127.0.0.1:8501` in
+`docker-compose.yml`). It has no login unless `DASHBOARD_PASSWORD` is set in
+`.env`, and anyone who can open it can press buttons that spend your paid API
+credits and read your deal notes and contract drafts (buyer names). To use it
+from a phone or another PC:
+
+1. set `DASHBOARD_PASSWORD` in `.env`;
+2. change the dashboard's port in `docker-compose.yml` from
+   `"127.0.0.1:8501:8501"` to `"8501:8501"`;
+3. `docker compose up -d`.
+
+Over the internet, put it behind a reverse proxy with HTTPS (Caddy, Cloudflare
+Tunnel, Tailscale) — the password alone travels in the clear over plain HTTP.
+
+API keys live in `.env`, which Docker hands to the containers when they start
+(`env_file`). `.dockerignore` keeps it out of the image, so the keys are never
+baked into an image layer.
 
 Storage is one SQLite file, `data/sovereign.db` inside this folder (whatever
 directory a script is started from) — locally, and in Docker on
@@ -36,7 +57,13 @@ CI runs on every PR. To run locally from `sovereign_final/`:
 python3 -m pytest tests/
 ```
 
-Expected: ~1,045 passing (the dashboard smoke test in `tests/test_app_smoke.py` needs `streamlit` installed and is skipped without it).
+Everything should pass (about 1,500 tests; the dashboard tests in
+`tests/test_app_smoke.py` need `streamlit` installed and are skipped without
+it). CI also runs `ruff check . --select=E9,F` and runs the suite on Windows.
+
+Dependencies are pinned to exact versions in `requirements.txt`, so a Docker
+rebuild installs what the tests last passed with. Dependabot opens a PR each
+week with upgrades, and CI tests them before they land.
 
 ---
 
@@ -45,7 +72,7 @@ Expected: ~1,045 passing (the dashboard smoke test in `tests/test_app_smoke.py` 
 ```
 sovereign_final/
 ├── app.py                    ← Streamlit dashboard (9 tabs)
-├── scheduler.py              ← Daily 06:00 CET automation
+├── scheduler.py              ← Daily 06:00 CET automation, retries a failed run
 ├── config.py                 ← All 2026 Slovak tax rates
 ├── database.py               ← SQLite storage
 ├── enrich_pending.py         ← Re-read listings missing a price, size or district
@@ -53,7 +80,8 @@ sovereign_final/
 ├── repair_districts.py       ← Fix towns misread as Bratislava, then rescore
 ├── diagnose.py               ← Data-quality report (coverage, classification)
 ├── START.bat                 ← Windows one-click launcher
-├── docker-compose.yml        ← dashboard + scheduler + local LLM
+├── restart.sh                ← Restart the dashboard outside Docker
+├── docker-compose.yml        ← dashboard + scheduler
 ├── docker/Dockerfile         ← App image
 ├── requirements.txt
 ├── .env.example              ← Copy to .env
@@ -77,8 +105,11 @@ sovereign_final/
 │   ├── location_iq.py        ← Location scorer (Google, or OpenStreetMap)
 │   ├── risk_data.py          ← Real noise / flood / construction data
 │   ├── memo.py               ← PDF investment memo
-│   └── contract_draft.py     ← ONE-CLICK CLOSE contract draft + internal analysis
-└── dev/                      ← One-off debug/exploration scripts (not runtime)
+│   ├── contract_draft.py     ← ONE-CLICK CLOSE contract draft + internal analysis
+│   ├── pipeline_state.py     ← Pipeline lock + last scheduled run's status
+│   ├── jobs.py               ← Runs the sidebar buttons in the background
+│   └── backup.py             ← Daily database copy + export of your data
+└── dev/                      ← Debug probes: LV check, nehnutelnosti, topreality
 ```
 
 ---
@@ -94,7 +125,7 @@ sovereign_final/
 | DEAL PIPELINE | Board of the deals you're working: WATCHING → VIEWING → OFFER → NEGOTIATING → DUE DILIGENCE → NOTARY → CLOSED / PASSED, with a timeline per deal |
 | SATELLITE VIEWER | Listing photo vs Google satellite + Street View + vibe score, and every note saved for the listing |
 | REJECTED | Every LV rejection with its reason, detail and LV risk read; re-verify from here |
-| LV TO-DO | Every GREEN / YELLOW deal whose title deed isn't verified, with what the plot check found; type the flats' own LV numbers in bulk, then save (checked on the next LV run) or save & verify now |
+| LV TO-DO | Every GREEN / YELLOW deal whose title deed isn't verified, with what the plot check found; type the flats' own LV numbers in bulk, then save (checked on the next LV run) or save & verify now (in the background, like the pipeline buttons) |
 | RENT COMPS | Live €/m² per district from prenájom listings vs the baseline table |
 | ONE-CLICK CLOSE | Pre-filled Slovak notary contract draft with download; the deal's numbers are a separate download, not part of the draft |
 
@@ -117,14 +148,29 @@ NEHNUT → BAZOS → TOPREAL → RENT COMPS → housekeeping → LV DEBT FILTER
 ```
 
 Housekeeping = deactivate stale listings (>21d unseen) + flag dev projects.
+(Skipped on a day no portal could be read: "unseen" then says nothing.)
 A nehnutelnosti listing is deactivated sooner, the moment any read of its page
 finds a grid of similar listings where the listing was — that is what a
 removed listing's URL serves.
 Runs automatically every morning at 06:00 CET via scheduler container. When
-the scheduler starts it runs the pipeline only if none has finished since the
-last 06:00 (first start, or the PC was off at 06:00) — restarting Docker or
-the PC does not re-scrape a day that is already done. Or click buttons in
-sidebar to run manually anytime.
+the scheduler starts it runs the pipeline only if none has succeeded since the
+last 06:00 (first start, the PC was off at 06:00, or the run failed) —
+restarting Docker or the PC does not re-scrape a day that is already done. Or
+click buttons in sidebar to run manually anytime.
+
+A run **succeeds** when at least one portal was read. When all three scrapers
+fail (blocked, offline) the run is not counted as done: it is retried an hour
+later, up to three times that day, and the dashboard says so — in red at the
+top of the page, and on the status line under PIPELINE in the sidebar, which
+always shows when the last scheduled run finished, what it found, and which
+steps failed. The details are in `logs/scheduler.log`.
+
+A sidebar button runs its step **in the background**: the page stays usable,
+a progress bar shows under PIPELINE, and the result stays there until the next
+step. The pipeline buttons are greyed out while a step runs. The scheduler and
+the buttons share one lock, so a button pressed during the 06:00 run says the
+scheduler is busy instead of running the same step twice — and the 06:00 run
+waits (up to an hour) for a step you started.
 
 Changed the rent/tax assumptions in `config.py`? Click **♻️ RESCORE ALL** to
 clear existing scores and re-run scoring (the plain CASHFLOW SCORE button only
@@ -338,15 +384,48 @@ threshold (€41,445) is the 2023 figure carried over — it is 176.8 × the
 
 ---
 
+## Backups
+
+Before each scheduled run, the scheduler writes to `backups/` in this folder
+(on your computer, outside Docker's volume — `docker compose down -v` can't
+delete it):
+
+- `sovereign-YYYY-MM-DD.db` — a full copy of the database, as it was before
+  that day's first run;
+- `your-data-YYYY-MM-DD.json` — what you typed: deal stages and their
+  history, notes and vibe scores, contract drafts, the flat LV numbers you
+  entered, and enough of each listing to find it again. Readable without the
+  app.
+
+The newest 14 of each are kept (`BACKUP_KEEP` in `.env`). Back up now, or put
+a copy back:
+
+```powershell
+docker compose exec dashboard python -m modules.backup
+docker compose stop scheduler
+docker compose exec dashboard python -m modules.backup restore backups/sovereign-2026-10-08.db
+docker compose start scheduler
+```
+
+Restore goes through SQLite rather than copying the file over, so a leftover
+write-ahead log can't corrupt the restored database.
+
+---
+
 ## Docker Commands (PowerShell)
 
 ```powershell
-docker compose up -d --build   # Start everything (rebuilds after a code update)
-docker compose down         # Stop everything
+docker compose up -d --build --remove-orphans   # Start everything (rebuilds after a code update)
+docker compose down         # Stop everything (keeps the database; `down -v` deletes it)
 docker compose logs -f      # Live logs
 docker compose ps           # Container status
 docker compose restart      # Restart all
 ```
+
+The local Mistral model (`model-runner`) is gone: nothing used it. If an older
+setup pulled it, reclaim the space with
+`docker image rm ai/mistral:7b-instruct-q4_k_m` and `docker volume rm` on the
+volume `docker volume ls` lists as `<this folder's name>_model_cache`.
 
 ---
 
@@ -357,3 +436,26 @@ docker compose restart      # Restart all
 - Re-verify LV **48 hours before signing** — titles change
 - s.r.o. structuring requires a licensed Slovak **účtovník**
 - This tool provides data scoring only — not investment advice
+
+### Before this becomes a product
+
+The tool is built for one person's own purchases. Selling access to its feed
+(the €500/month subscription idea) or assigning deals for a fee changes the
+legal position, and needs advice from a Slovak lawyer **before** it starts:
+
+- **Portal terms.** nehnutelnosti.sk is read through a real browser to get
+  past its WAF; bazos.sk and topreality.sk are scraped too. Their terms of use
+  and database rights govern reusing — let alone reselling — that data.
+- **The cadastre.** `kataster_scraper.py` scrapes kataster.skgeodesy.sk
+  unofficially; ÚGKK offers no API or licence for it, and the site geo-blocks
+  many foreign IPs.
+- **Personal data (GDPR).** The `cadastre_cache` table keeps owner names,
+  registered addresses and full LV texts; listings and notes can name sellers
+  and agents; contract drafts name buyers. Using that beyond your own
+  purchases needs a legal basis, a retention limit and a privacy notice.
+- **Brokerage.** Arranging sales between other people for a fee is
+  real-estate brokerage: it needs the right trade licence, and estate agents
+  carry anti-money-laundering duties.
+- **Investment advice.** A paid feed that ranks properties as "deals" may be
+  read as advice; the "not investment advice" line above is not enough on its
+  own.

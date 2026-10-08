@@ -234,12 +234,16 @@ FURNISHED_RENT_PREMIUM  = 1.10   # fully furnished: +10%
 SEMI_FURNISHED_PREMIUM  = 1.05   # partially furnished: +5%
 BALCONY_RENT_PREMIUM    = 1.03   # balcony / loggia / terrace: +3% (common, modest)
 
+# ── Dashboard login ───────────────────────────────────────────────────────────
+# Blank = no login (safe only while the port is bound to 127.0.0.1, as
+# docker-compose.yml does). Set it in .env before opening the dashboard to a
+# network.
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
+
 # ── APIs ──────────────────────────────────────────────────────────────────────
 GOOGLE_API_KEY    = os.getenv("GOOGLE_PLACES_API_KEY", "")
 # NOTE: there is no CADASTRAL_API_KEY — ÚGKK SR has no public API or keys.
 # LV checks scrape kataster.skgeodesy.sk directly via kataster_scraper.py.
-DMR_ENDPOINT      = os.getenv("DMR_ENDPOINT", "http://localhost:12434/v1")
-LLM_MODEL         = os.getenv("LLM_MODEL", "mistral:7b-instruct-q4_k_m")
 # ScraperAPI key — bypasses IP blocks on nehnutelnosti/bazos when running
 # from a server/cloud environment. Free tier: https://www.scraperapi.com
 SCRAPER_API_KEY   = os.getenv("SCRAPER_API_KEY", "")
@@ -492,5 +496,8 @@ SALE_PRICE_MIN_EUR = int(float(os.getenv("SALE_PRICE_MIN_EUR", "15000") or 15000
 BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR       = os.path.join(BASE_DIR, "data")
 SQLITE_PATH    = os.path.join(DATA_DIR, "sovereign.db")
-CONTRACTS_DIR  = os.path.join(BASE_DIR, "contracts")
 LOGS_DIR       = os.path.join(BASE_DIR, "logs")
+# Daily database copies and data exports (modules/backup). In Docker this is
+# a folder on the host (docker-compose.yml), outside the sovereign_data volume.
+BACKUP_DIR     = os.path.join(BASE_DIR, "backups")
+BACKUP_KEEP    = int(os.getenv("BACKUP_KEEP", "14") or 14)   # days of each kept

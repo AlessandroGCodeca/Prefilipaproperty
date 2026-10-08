@@ -9,6 +9,7 @@ to Playwright if HTTP returns nothing or hits a WAF.
   python3 -m scraper.topreality          # direct run, 3 pages
 """
 
+import logging
 import hashlib, time, re, json
 from urllib.parse import urljoin, urlparse
 from datetime import datetime, timezone
@@ -27,6 +28,8 @@ from scraper.nehnutelnosti import _extract_location_from_text
 from scraper.textparse import rooms_from_title, is_excluded_listing
 from engine.regional_prices import pick_sale_price as _pick_sale_price
 from scraper.geo import pin_from_ld, pin_from_meta
+
+log = logging.getLogger(__name__)
 
 BASE = "https://www.topreality.sk"
 
@@ -85,7 +88,7 @@ def _price_from_text(t: str, size_m2: float = 0.0, district: str = "") -> float:
             v = float(re.sub(r"[\s\xa0  ]", "", m.group(1)))
             if _is_plausible_price(v):
                 candidates.append(v)
-        except Exception:
+        except ValueError:
             pass
     return _pick_sale_price(candidates, size_m2, district)
 
@@ -108,14 +111,14 @@ def _size_from_text(t: str) -> float:
                 v = float(m.group(1).replace(",", "."))
                 if 15 < v < 500:
                     return v
-            except Exception:
+            except ValueError:
                 pass
     for m in re.finditer(r"(\d{2,4}(?:[.,]\d+)?)\s*(?:m²|m2)\b", target):
         try:
             v = float(m.group(1).replace(",", "."))
             if 20 < v < 300:
                 return v
-        except Exception:
+        except ValueError:
             pass
     return 0.0
 
@@ -211,7 +214,7 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
                         v = float(p)
                         if _is_plausible_price(v):
                             ld_data["price"] = v
-                    except Exception:
+                    except (TypeError, ValueError):
                         pass
             addr = b.get("address")
             if isinstance(addr, dict):
@@ -226,7 +229,7 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
             if isinstance(fs, dict) and fs.get("value"):
                 try:
                     ld_data["size"] = float(fs["value"])
-                except Exception:
+                except (TypeError, ValueError):
                     pass
             if not ld_data.get("pin"):
                 ld_data["pin"] = pin_from_ld(b)
@@ -331,13 +334,13 @@ def _detect_search_url(sess) -> str:
         if status == 200 and len(html) > 5000:
             links = _extract_listing_links(html)
             if links:
-                print(f"  ✓ search URL works: {fmt} ({len(links)} links page 1)", flush=True)
+                log.info(f"  ✓ search URL works: {fmt} ({len(links)} links page 1)")
                 return fmt
             else:
-                print(f"  · {fmt} → 200 but 0 links", flush=True)
+                log.info(f"  · {fmt} → 200 but 0 links")
         else:
-            print(f"  · {fmt} → {'no response' if status == 0 else f'HTTP {status}'}, "
-                  f"len={len(html)}", flush=True)
+            log.warning(f"  · {fmt} → {'no response' if status == 0 else f'HTTP {status}'}, "
+                        f"len={len(html)}")
     raise RuntimeError(_fetch_failure(statuses))
 
 
@@ -368,8 +371,8 @@ def _deactivate_category_pages() -> int:
     finally:
         conn.close()
     if stale:
-        print(f"  ↳ deactivated {len(stale)} topreality category-page rows "
-              f"(URL not a -r{{ID}}.html detail page)")
+        log.info(f"  ↳ deactivated {len(stale)} topreality category-page rows "
+                 f"(URL not a -r{{ID}}.html detail page)")
     return len(stale)
 
 
@@ -397,7 +400,7 @@ def _backfill_blank_districts() -> int:
     finally:
         conn.close()
     if updated:
-        print(f"  ↳ backfilled district on {updated} topreality rows")
+        log.info(f"  ↳ backfilled district on {updated} topreality rows")
     return updated
 
 
@@ -432,7 +435,7 @@ def _deactivate_non_apartments() -> int:
     finally:
         conn.close()
     if n:
-        print(f"  ↳ deactivated {n} non-apartment topreality listings (title/url match)", flush=True)
+        log.info(f"  ↳ deactivated {n} non-apartment topreality listings (title/url match)")
     return n
 
 
@@ -455,8 +458,8 @@ def _zero_bogus_prices() -> int:
     finally:
         conn.close()
     if n:
-        print(f"  ↳ zeroed {n} topreality listings with bogus prices "
-              f"(< €{_PRICE_MIN:,})", flush=True)
+        log.info(f"  ↳ zeroed {n} topreality listings with bogus prices "
+                 f"(< €{_PRICE_MIN:,})")
     return n
 
 
@@ -469,7 +472,7 @@ def check_reachable() -> tuple[int, str]:
 
 
 def run(max_pages: int = 5) -> int:
-    print(f"🔍 Topreality.sk ({max_pages} pages)...", flush=True)
+    log.info(f"🔍 Topreality.sk ({max_pages} pages)...")
     sess = make_session(BASE)
 
     fmt = _detect_search_url(sess)   # raises, with the reason, if nothing works
@@ -479,9 +482,8 @@ def run(max_pages: int = 5) -> int:
     # doesn't retire a listing that is still live on the site.
     fresh_urls = get_fresh_detail_urls("topreality", max_age_days=DETAIL_REFRESH_DAYS)
     if fresh_urls:
-        print(f"  {len(fresh_urls)} listings already scraped in the last "
-              f"{DETAIL_REFRESH_DAYS} days — their detail pages will be skipped",
-              flush=True)
+        log.info(f"  {len(fresh_urls)} listings already scraped in the last "
+                 f"{DETAIL_REFRESH_DAYS} days — their detail pages will be skipped")
 
     seen_urls: set[str] = set()
     total = 0
@@ -492,20 +494,19 @@ def run(max_pages: int = 5) -> int:
         status, html = _fetch(url, sess)
         page_statuses.append(status)
         if status != 200:
-            print(f"  Page {p}: {'no response' if status == 0 else f'HTTP {status}'}, "
-                  f"skipping", flush=True)
+            log.warning(f"  Page {p}: {'no response' if status == 0 else f'HTTP {status}'}, "
+                        f"skipping")
             continue
         links = _extract_listing_links(html)
         new_links = [u for u in links if u not in seen_urls]
         seen_urls.update(new_links)
-        print(f"  Page {p}: {len(links)} links ({len(new_links)} new)", flush=True)
+        log.info(f"  Page {p}: {len(links)} links ({len(new_links)} new)")
 
         skip_links = [u for u in new_links if u in fresh_urls]
         fetch_links = [u for u in new_links if u not in fresh_urls]
         if skip_links:
             touched += touch_listings(skip_links)
-            print(f"  Page {p}: skipped {len(skip_links)} already-scraped detail pages",
-                  flush=True)
+            log.info(f"  Page {p}: skipped {len(skip_links)} already-scraped detail pages")
 
         page_count = 0
         now = datetime.now(timezone.utc).isoformat()
@@ -522,11 +523,11 @@ def run(max_pages: int = 5) -> int:
                     total += 1
                     page_count += 1
                 except Exception as e:
-                    print(f"    DB error: {e}", flush=True)
+                    log.warning(f"    DB error: {e}")
             time.sleep(0.4)
         # Stamp after the upserts, so a row always exists to stamp.
         mark_details_enriched(enriched_ids)
-        print(f"  Page {p}: upserted {page_count}", flush=True)
+        log.info(f"  Page {p}: upserted {page_count}")
         time.sleep(SCRAPE_DELAY_SEC)
 
     if total == 0 and touched == 0:
@@ -546,10 +547,11 @@ def run(max_pages: int = 5) -> int:
     )
     zero_below_regional_floor("topreality")
     zero_above_regional_ceiling("topreality")
-    print(f"✅ Topreality done. {total} upserted.", flush=True)
+    log.info(f"✅ Topreality done. {total} upserted.")
     return total
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     init_db()
     run(max_pages=3)

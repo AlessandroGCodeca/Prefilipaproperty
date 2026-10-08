@@ -3,6 +3,7 @@ modules/cashflow_runner.py — Sovereign Investor Dashboard
 Runs the financial engine on all unscored PASS listings.
 """
 
+import logging
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -12,20 +13,22 @@ from database import (
 )
 from engine.financial import analyse, result_to_db_dict, deal_extras, base_rent_rate
 
+log = logging.getLogger(__name__)
+
 
 def run_scoring(progress_callback=None) -> int:
     requeued = requeue_scores_without_benchmark()
     if requeued:
-        print(f"♻️  {requeued} listings now have a regional median — re-scoring them.")
+        log.info(f"♻️  {requeued} listings now have a regional median — re-scoring them.")
     stale = requeue_scores_with_stale_class()
     if stale:
-        print(f"♻️  {stale} scores no longer match the current class rules — re-scoring them.")
+        log.info(f"♻️  {stale} scores no longer match the current class rules — re-scoring them.")
     older = requeue_scores_from_older_model()
     if older:
-        print(f"♻️  {older} scores came from an older model or tax table — re-scoring them.")
+        log.info(f"♻️  {older} scores came from an older model or tax table — re-scoring them.")
     listings = get_unscored_cashflow()
     if not listings:
-        print("✅ No new listings to score.")
+        log.info("✅ No new listings to score.")
         return 0
 
     # Live €/m² from prenájom comps (engine/rent_comps), read once per run.
@@ -33,9 +36,9 @@ def run_scoring(progress_callback=None) -> int:
     from engine.rent_comps import load_live_rates
     rates = load_live_rates()
     if rates:
-        print(f"🏘️  Using live rent comps for {len(rates)} districts.")
+        log.info(f"🏘️  Using live rent comps for {len(rates)} districts.")
 
-    print(f"💰 Scoring {len(listings)} listings...")
+    log.info(f"💰 Scoring {len(listings)} listings...")
     scored = 0
     emojis = {"GREEN": "🟢", "YELLOW": "🟡", "WHITE": "⚪"}
 
@@ -62,15 +65,16 @@ def run_scoring(progress_callback=None) -> int:
             upsert_cashflow(db_data)
             scored += 1
             e = emojis.get(result.classification, "")
-            print(f"  {e} {result.classification} | €{result.price_eur:,.0f} | "
-                  f"s.r.o. surplus €{result.surplus_sro:+,.0f}/mo | {row.get('district','?')}")
+            log.info(f"  {e} {result.classification} | €{result.price_eur:,.0f} | "
+                     f"s.r.o. surplus €{result.surplus_sro:+,.0f}/mo | {row.get('district','?')}")
         except Exception as ex:
-            print(f"  ⚠️ Score error for {row['id']}: {ex}")
+            log.warning(f"  ⚠️ Score error for {row['id']}: {ex}")
 
-    print(f"\n✅ Cash-flow scoring done. {scored} scored.\n")
+    log.info(f"✅ Cash-flow scoring done. {scored} scored.")
     return scored
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     init_db()
     run_scoring()
