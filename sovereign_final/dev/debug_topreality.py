@@ -5,14 +5,14 @@ Debug topreality.sk: fetch the search page and print:
   - any 'next page' / pagination links
   - count of likely-listing links per pattern guess
 
-  python3 debug_topreality.py
+  python3 dev/debug_topreality.py     (from sovereign_final/)
 """
 import re
 from collections import Counter
 from urllib.parse import urlparse
 
 import sys, os
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scraper._http import get, make_session
 
 URL = "https://www.topreality.sk/vyhladavanie/byty/predaj?page=1"
@@ -24,9 +24,9 @@ r = get(URL, session=sess, timeout=25)
 print(f"Page 1: HTTP {r.status_code}, {len(r.text):,} chars")
 
 # Save for inspection
-with open("topreality_p1.html", "w") as f:
+with open("topreality_p1.html", "w", encoding="utf-8") as f:
     f.write(r.text)
-print(f"Saved → topreality_p1.html\n")
+print("Saved → topreality_p1.html\n")
 
 html = r.text
 

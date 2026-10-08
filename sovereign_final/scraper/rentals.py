@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import time
 from datetime import datetime, timezone
@@ -37,6 +38,8 @@ from scraper.textparse import (
     rooms_from_title, area_from_text, EXCLUDE_KEYWORDS, keyword_pattern,
     matches_keywords, strip_diacritics,
 )
+
+log = logging.getLogger(__name__)
 
 BAZOS_BASE = "https://reality.bazos.sk"
 BAZOS_CATEGORY = "/prenajmu/byt/"
@@ -170,10 +173,10 @@ def scrape_bazos(max_pages: int = 5) -> int:
         try:
             r = get(url, session=session, timeout=20)
         except Exception as e:
-            print(f"  bazos rentals offset {offset}: {e}", flush=True)
+            log.warning(f"  bazos rentals offset {offset}: {e}")
             break
         if r.status_code != 200:
-            print(f"  bazos rentals offset {offset}: HTTP {r.status_code}", flush=True)
+            log.warning(f"  bazos rentals offset {offset}: HTTP {r.status_code}")
             break
         rows = parse_bazos_page(r.text)
         for row in rows:
@@ -181,8 +184,8 @@ def scrape_bazos(max_pages: int = 5) -> int:
                 upsert_rental(row)
                 stored += 1
             except Exception as e:
-                print(f"    DB error: {e}", flush=True)
-        print(f"  bazos rentals page {p + 1}: {len(rows)} comps", flush=True)
+                log.warning(f"    DB error: {e}")
+        log.info(f"  bazos rentals page {p + 1}: {len(rows)} comps")
         if not rows and p > 0:
             break
         time.sleep(SCRAPE_DELAY_SEC)
@@ -262,7 +265,7 @@ def scrape_topreality(max_pages: int = 3, max_details: int = 60) -> int:
             fmt = cand
             break
     if not fmt:
-        print("  topreality rentals: no search URL returned listings", flush=True)
+        log.info("  topreality rentals: no search URL returned listings")
         return 0
     stored = fetched = 0
     seen: set[str] = set()
@@ -289,7 +292,7 @@ def scrape_topreality(max_pages: int = 3, max_details: int = 60) -> int:
                 upsert_rental(rec)
                 stored += 1
             time.sleep(0.4)
-        print(f"  topreality rentals page {p}: {stored} comps so far", flush=True)
+        log.info(f"  topreality rentals page {p}: {stored} comps so far")
         time.sleep(SCRAPE_DELAY_SEC)
     return stored
 
@@ -302,16 +305,17 @@ def run(max_pages: int = 5) -> dict:
         try:
             counts[name] = fn(max_pages)
         except Exception as e:
-            print(f"  ⚠️ {name} rentals: {e}", flush=True)
+            log.warning(f"  ⚠️ {name} rentals: {e}")
             counts[name] = 0
     from engine.rent_comps import rebuild_rent_comps
     summary = rebuild_rent_comps()
-    print(f"✅ Rent comps: {sum(counts.values())} rentals read, "
-          f"{summary['keys']} districts, {len(summary['changed'])} rates moved, "
-          f"{summary['rescored']} scores queued for re-scoring.", flush=True)
+    log.info(f"✅ Rent comps: {sum(counts.values())} rentals read, "
+             f"{summary['keys']} districts, {len(summary['changed'])} rates moved, "
+             f"{summary['rescored']} scores queued for re-scoring.")
     return {**counts, **summary}
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     init_db()
     run(max_pages=2)

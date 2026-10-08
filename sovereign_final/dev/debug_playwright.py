@@ -3,9 +3,8 @@
 Debug Playwright against nehnutelnosti.sk: visible browser, logs all
 responses, saves screenshot + HTML, patches navigator.webdriver.
 
-  python3 debug_playwright.py
+  python3 dev/debug_playwright.py     (from sovereign_final/)
 """
-import sys, json
 from playwright.sync_api import sync_playwright
 
 URL = "https://www.nehnutelnosti.sk/vysledky/byty/slovensko/predaj?page=1"
@@ -78,7 +77,7 @@ with sync_playwright() as pw:
     with open("playwright_dom.html", "w", encoding="utf-8") as f:
         f.write(html)
     print(f"saved playwright_dom.html ({len(html):,} chars)")
-    print(f"saved playwright_screenshot.png")
+    print("saved playwright_screenshot.png")
 
     print(f"\n{'='*60}")
     print(f"All responses ({len(all_responses)}):")

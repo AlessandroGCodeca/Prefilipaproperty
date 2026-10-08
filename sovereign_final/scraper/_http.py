@@ -3,11 +3,14 @@ scraper/_http.py — shared HTTP helper
 Routes requests through ScraperAPI when SCRAPER_API_KEY is set,
 otherwise makes direct requests (works fine on residential IPs).
 """
+import logging
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import requests
 from config import SCRAPER_API_KEY
+
+log = logging.getLogger(__name__)
 
 # https: the key rides in the query string, and over plain http it (and every
 # URL being scraped) crosses the network in the clear.
@@ -74,6 +77,7 @@ def make_session(warmup_url: str = None) -> requests.Session:
         try:
             get(warmup_url, session=s, timeout=10)
             time.sleep(0.5)
-        except Exception:
-            pass
+        except Exception as e:
+            # Only cookies are lost; the real request reports its own error.
+            log.warning(f"Warm-up request to {warmup_url} failed: {e}")
     return s

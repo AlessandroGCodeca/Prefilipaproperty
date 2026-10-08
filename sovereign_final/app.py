@@ -4,6 +4,7 @@ Slovakia 2026 | Private Use Only
 Run: streamlit run app.py
 """
 
+import logging
 import os, sys
 from html import escape as _html_escape
 import streamlit as st
@@ -11,6 +12,13 @@ import pandas as pd
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
+
+# Pipeline steps log their progress. The scheduler writes the lines to
+# logs/scheduler.log; the dashboard's go to its terminal (in Docker,
+# `docker compose logs dashboard`). A no-op on every rerun after the first.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S")
+logging.getLogger("httpx").setLevel(logging.WARNING)   # one line per Claude call
 
 
 def esc(v) -> str:
@@ -126,6 +134,32 @@ div[data-testid="stMetricValue"] { font-size:1.45rem; }
 </style>
 """, unsafe_allow_html=True)
 
+# ── Login ─────────────────────────────────────────────────────────────────────
+def _require_password() -> None:
+    """Gate the page behind DASHBOARD_PASSWORD when one is set. Without one the
+    dashboard is open to anyone who can reach its port — fine on 127.0.0.1,
+    not on a network: its buttons spend paid API credits, and it shows deal
+    notes and the buyer names in contract drafts."""
+    import hmac
+    import time
+    from config import DASHBOARD_PASSWORD
+    if not DASHBOARD_PASSWORD or st.session_state.get("_authed"):
+        return
+    st.markdown('<div class="wordmark">SOVEREIGN</div>', unsafe_allow_html=True)
+    with st.form("login"):
+        typed = st.text_input("Password", type="password", key="login_pw")
+        entered = st.form_submit_button("ENTER")
+    if entered:
+        if hmac.compare_digest(typed.encode(), DASHBOARD_PASSWORD.encode()):
+            st.session_state["_authed"] = True
+            st.rerun()
+        time.sleep(1)                  # slows guessing
+        st.error("Wrong password.")
+    st.stop()
+
+
+_require_password()
+
 # ── Init ──────────────────────────────────────────────────────────────────────
 from database import init_db, get_all_active, get_stats, backfill_dev_project_flags
 init_db()
@@ -193,6 +227,35 @@ DEMO = [
 ]
 
 
+# ── Pipeline status ───────────────────────────────────────────────────────────
+# The scheduler's last run (modules/pipeline_state), and the job a sidebar
+# button started (modules/jobs). Buttons run their step in the background, so
+# the page stays usable and the result stays on screen until the next one.
+from modules import jobs
+from modules.pipeline_state import read_status as _read_run_status, summarize as _summarize_run
+from database import get_pipeline_lock
+
+_run_level, _run_text = _summarize_run(_read_run_status(), get_pipeline_lock())
+_SHOW = {"success": st.success, "info": st.info, "warning": st.warning, "error": st.error}
+
+
+@st.fragment(run_every=2 if jobs.running() else None)
+def _job_panel():
+    job = jobs.current()
+    if job is None:
+        return
+    if job.running:
+        st.session_state["_job_watch"] = job.id
+        st.progress(job.progress or 0.0,
+                    text=f"⏳ {job.label} · {job.elapsed()}" + (f" · {job.note}" if job.note else ""))
+        return
+    _SHOW.get(job.level, st.info)(job.message)
+    if st.session_state.get("_job_watch") == job.id:
+        # This page watched the job run: redraw all of it on the new data.
+        del st.session_state["_job_watch"]
+        st.rerun()
+
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown('<div class="wordmark">SOVEREIGN</div>', unsafe_allow_html=True)
@@ -200,43 +263,47 @@ with st.sidebar:
     st.markdown("---")
 
     st.markdown("#### PIPELINE")
+    st.caption({"ok": "✅", "running": "⏳", "warning": "⚠️", "error": "❌", "none": "ℹ️"}[_run_level]
+               + " " + _run_text)
+    _job_panel()
+    _busy = jobs.running()
     c1, c2, c3 = st.columns(3)
-    with c1: do_nehnut = st.button("NEHNUT",  use_container_width=True)
-    with c2: do_bazos  = st.button("BAZOS",   use_container_width=True)
-    with c3: do_topreal= st.button("TOPREAL", use_container_width=True)
-    do_lv    = st.button("🔒 LV DEBT FILTER", use_container_width=True)
-    do_cf    = st.button("💰 CASHFLOW SCORE", use_container_width=True)
-    do_desc  = st.button("📝 PARSE DESC", use_container_width=True,
+    with c1: do_nehnut = st.button("NEHNUT",  width="stretch", disabled=_busy)
+    with c2: do_bazos  = st.button("BAZOS",   width="stretch", disabled=_busy)
+    with c3: do_topreal= st.button("TOPREAL", width="stretch", disabled=_busy)
+    do_lv    = st.button("🔒 LV DEBT FILTER", width="stretch", disabled=_busy)
+    do_cf    = st.button("💰 CASHFLOW SCORE", width="stretch", disabled=_busy)
+    do_desc  = st.button("📝 PARSE DESC", width="stretch", disabled=_busy,
                          help="Run Claude on un-parsed listing descriptions to "
                               "extract parking / furnished / condition. Needs "
                               "ANTHROPIC_API_KEY. Re-score afterwards to apply the "
                               "parking & furnished rent premiums.")
-    do_addr  = st.button("🗺️ NORM ADDR", use_container_width=True,
+    do_addr  = st.button("🗺️ NORM ADDR", width="stretch", disabled=_busy,
                          help="Run Claude on listings with a blank district to "
                               "resolve city/district from the raw address, so rent "
                               "stops defaulting to €6.50/m². Needs ANTHROPIC_API_KEY. "
                               "Re-score afterwards to apply.")
-    do_rescore = st.button("♻️ RESCORE ALL",  use_container_width=True,
+    do_rescore = st.button("♻️ RESCORE ALL",  width="stretch", disabled=_busy,
                            help="Clear all cashflow scores and re-run scoring from "
                                 "scratch. Use after updating rent/tax assumptions.")
-    do_reparse = st.button("📝 RE-PARSE (new fields)", use_container_width=True,
+    do_reparse = st.button("📝 RE-PARSE (new fields)", width="stretch", disabled=_busy,
                            help="Re-run description parsing on listings parsed before "
                                 "floor / elevator / cellar / terrace were kept. Needs "
                                 "ANTHROPIC_API_KEY.")
-    do_loc   = st.button("📍 LOCATION IQ",    use_container_width=True,
+    do_loc   = st.button("📍 LOCATION IQ",    width="stretch", disabled=_busy,
                          help="Geocode + transit/amenities + real noise/flood/"
                               "construction flags. Google when GOOGLE_PLACES_API_KEY "
                               "is set, OpenStreetMap otherwise.")
-    do_risk  = st.button("🌊 RISK BACKFILL", use_container_width=True,
+    do_risk  = st.button("🌊 RISK BACKFILL", width="stretch", disabled=_busy,
                          help="Give listings located before the real risk data "
                               "existed their noise / flood / construction answers.")
-    do_rent  = st.button("🏘️ RENT COMPS", use_container_width=True,
+    do_rent  = st.button("🏘️ RENT COMPS", width="stretch", disabled=_busy,
                          help="Scrape prenájom listings, rebuild live €/m² rents per "
                               "district and queue affected listings for re-scoring.")
-    do_dupes = st.button("📡 MERGE PORTAL COPIES", use_container_width=True,
+    do_dupes = st.button("📡 MERGE PORTAL COPIES", width="stretch", disabled=_busy,
                          help="Group the same flat listed on several portals.")
-    do_stale = st.button("🧹 CLEAN STALE (21d)", use_container_width=True)
-    do_test  = st.button("🔗 TEST SITES",      use_container_width=True)
+    do_stale = st.button("🧹 CLEAN STALE (21d)", width="stretch", disabled=_busy)
+    do_test  = st.button("🔗 TEST SITES",      width="stretch")
 
     st.markdown("---")
     st.markdown("#### FILTERS")
@@ -310,14 +377,11 @@ with st.sidebar:
 
 
 # ── Pipeline actions ──────────────────────────────────────────────────────────
-def run_step(label, fn, *args, **kwargs):
-    with st.spinner(f"{label}..."):
-        try:
-            result = fn(*args, **kwargs)
-            st.success(f"✅ Done: {result}")
-            st.rerun()
-        except Exception as e:
-            st.error(f"❌ {e}")
+# Each button's step runs on a worker thread (modules/jobs) under the lock the
+# scheduler also takes. A step gets progress(i, n, note) and returns
+# (level, message) for the sidebar.
+SCRAPER_TIMEOUT_S = 1800   # ten pages plus detail pages can pass 5 min cold
+
 
 def _run_scraper_subprocess(script_name: str) -> tuple[int, str]:
     """Run a scraper as a fresh subprocess — bypasses Python module cache."""
@@ -334,10 +398,14 @@ try:
 except Exception as e:
     print(json.dumps({{"ok": False, "error": str(e)}}))
 """
-    proc = subprocess.run(
-        [sys.executable, "-c", wrapper],
-        capture_output=True, text=True, timeout=300
-    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", wrapper],
+            capture_output=True, text=True, timeout=SCRAPER_TIMEOUT_S
+        )
+    except subprocess.TimeoutExpired:
+        return 0, (f"still running after {SCRAPER_TIMEOUT_S // 60} min — stopped. "
+                   f"What it saved before that is kept.")
     for line in (proc.stdout + proc.stderr).strip().splitlines():
         try:
             data = _json.loads(line)
@@ -351,162 +419,125 @@ except Exception as e:
     return 0, stderr or "Scraper produced no output"
 
 
-if do_nehnut:
-    with st.spinner("Scraping Nehnutelnosti..."):
-        n, err = _run_scraper_subprocess("nehnutelnosti")
+def _scrape_step(module: str, name: str):
+    def step(progress):
+        n, err = _run_scraper_subprocess(module)
         if err:
-            st.error(f"❌ Nehnutelnosti: {err}")
-        else:
-            from modules.address_enrichment import run_address_enrichment
-            run_address_enrichment()
-            from modules.description_enrichment import run_description_enrichment
-            run_description_enrichment()
-            from modules.cashflow_runner import run_scoring as _run_cf
-            scored = _run_cf()
-            from database import mark_duplicates
-            mark_duplicates()
-            st.success(f"✅ Scraped {n} listings, scored {scored}.")
-            st.rerun()
+            return "error", f"❌ {name}: {err}"
+        from modules.address_enrichment import run_address_enrichment
+        run_address_enrichment()
+        from modules.description_enrichment import run_description_enrichment
+        run_description_enrichment()
+        from modules.cashflow_runner import run_scoring
+        scored = run_scoring()
+        from database import mark_duplicates
+        mark_duplicates()
+        return "success", f"✅ {name}: scraped {n} listings, scored {scored}."
+    return step
 
-if do_bazos:
-    with st.spinner("Scraping Bazos..."):
-        n, err = _run_scraper_subprocess("bazos")
-        if err:
-            st.error(f"❌ Bazos: {err}")
-        else:
-            from modules.address_enrichment import run_address_enrichment
-            run_address_enrichment()
-            from modules.description_enrichment import run_description_enrichment
-            run_description_enrichment()
-            from modules.cashflow_runner import run_scoring as _run_cf
-            scored = _run_cf()
-            from database import mark_duplicates
-            mark_duplicates()
-            st.success(f"✅ Scraped {n} listings, scored {scored}.")
-            st.rerun()
 
-if do_topreal:
-    with st.spinner("Scraping Topreality..."):
-        n, err = _run_scraper_subprocess("topreality")
-        if err:
-            st.error(f"❌ Topreality: {err}")
-        else:
-            from modules.address_enrichment import run_address_enrichment
-            run_address_enrichment()
-            from modules.description_enrichment import run_description_enrichment
-            run_description_enrichment()
-            from modules.cashflow_runner import run_scoring as _run_cf
-            scored = _run_cf()
-            from database import mark_duplicates
-            mark_duplicates()
-            st.success(f"✅ Scraped {n} listings, scored {scored}.")
-            st.rerun()
-
-if do_lv:
-    bar = st.progress(0)
-    txt = st.empty()
-    def lv_cb(i, n, a=""): bar.progress(i/n); txt.text(f"LV {i}/{n}: {a}")
+def _lv_step(progress):
     from modules.debt_bot import run_debt_filter
-    p, r, u = run_debt_filter(progress_callback=lv_cb)
     from database import mark_duplicates
+    p, r, u = run_debt_filter(progress_callback=progress)
     mark_duplicates()           # a rejected copy flags the flat's other copies
-    bar.empty(); txt.empty()
-    st.success(f"✅ LV done — Clean: {p}, Rejected: {r}, ⚠ Unverified: {u}")
-    st.rerun()
+    return "success", f"✅ LV done — Clean: {p}, Rejected: {r}, ⚠ Unverified: {u}"
 
-if do_cf:
-    bar = st.progress(0)
-    def cf_cb(i, n): bar.progress(i/n)
+
+def _cf_step(progress):
     from modules.cashflow_runner import run_scoring
-    n = run_scoring(progress_callback=cf_cb)
-    bar.empty(); st.success(f"✅ Scored {n} listings"); st.rerun()
+    return "success", f"✅ Scored {run_scoring(progress_callback=progress)} listings"
 
-if do_desc:
-    bar = st.progress(0)
-    def desc_cb(i, n): bar.progress(i / n)
+
+def _desc_step(progress):
     from modules.description_enrichment import run_description_enrichment
-    n = run_description_enrichment(progress_callback=desc_cb)
-    bar.empty()
+    n = run_description_enrichment(progress_callback=progress)
     if n:
-        st.success(f"✅ Parsed {n} descriptions. Re-score to apply rent premiums.")
-    else:
-        st.info("ℹ️ Nothing parsed — set ANTHROPIC_API_KEY, or no new descriptions "
-                "to parse.")
-    st.rerun()
+        return "success", f"✅ Parsed {n} descriptions. Re-score to apply rent premiums."
+    return "info", ("ℹ️ Nothing parsed — set ANTHROPIC_API_KEY, or no new descriptions "
+                    "to parse.")
 
-if do_addr:
-    bar = st.progress(0)
-    def addr_cb(i, n): bar.progress(i / n)
+
+def _addr_step(progress):
     from modules.address_enrichment import run_address_enrichment
-    n = run_address_enrichment(progress_callback=addr_cb)
-    bar.empty()
+    n = run_address_enrichment(progress_callback=progress)
     if n:
-        st.success(f"✅ Resolved {n} blank districts. Re-score to apply rent rates.")
-    else:
-        st.info("ℹ️ Nothing normalized — set ANTHROPIC_API_KEY, or no blank "
-                "districts with an address to resolve.")
-    st.rerun()
+        return "success", f"✅ Resolved {n} blank districts. Re-score to apply rent rates."
+    return "info", ("ℹ️ Nothing normalized — set ANTHROPIC_API_KEY, or no blank "
+                    "districts with an address to resolve.")
 
-if do_rescore:
+
+def _rescore_step(progress):
     from database import clear_cashflow_scores
     from modules.cashflow_runner import run_scoring
     cleared = clear_cashflow_scores()
-    bar = st.progress(0)
-    def rescore_cb(i, n): bar.progress(i/n)
-    n = run_scoring(progress_callback=rescore_cb)
-    bar.empty()
-    st.success(f"✅ Cleared {cleared} old scores, re-scored {n} listings")
-    st.rerun()
+    n = run_scoring(progress_callback=progress)
+    return "success", f"✅ Cleared {cleared} old scores, re-scored {n} listings"
 
-if do_loc:
-    bar = st.progress(0); txt = st.empty()
-    def loc_cb(i, n, a=""): bar.progress(i/n); txt.text(f"Location {i}/{n}: {a}")
+
+def _loc_step(progress):
     from modules.location_iq import run_location_scoring
-    n = run_location_scoring(progress_callback=loc_cb)
-    bar.empty(); txt.empty(); st.success(f"✅ Location scored {n}"); st.rerun()
+    return "success", f"✅ Location scored {run_location_scoring(progress_callback=progress)}"
 
-if do_reparse:
+
+def _reparse_step(progress):
     from database import requeue_descriptions_missing_extras
     from modules.description_enrichment import run_description_enrichment
     q = requeue_descriptions_missing_extras()
-    bar = st.progress(0)
-    n = run_description_enrichment(progress_callback=lambda i, t: bar.progress(i / t))
-    bar.empty()
-    st.success(f"✅ Re-queued {q}, parsed {n} descriptions.")
-    st.rerun()
+    n = run_description_enrichment(progress_callback=progress)
+    return "success", f"✅ Re-queued {q}, parsed {n} descriptions."
 
-if do_risk:
-    bar = st.progress(0); txt = st.empty()
-    def risk_cb(i, n, a=""): bar.progress(i/n); txt.text(f"Risk {i}/{n}: {a}")
+
+def _risk_step(progress):
     from modules.location_iq import run_risk_backfill
-    n = run_risk_backfill(progress_callback=risk_cb)
-    bar.empty(); txt.empty(); st.success(f"✅ Risk data added to {n} listings"); st.rerun()
+    return "success", f"✅ Risk data added to {run_risk_backfill(progress_callback=progress)} listings"
 
-if do_rent:
-    with st.spinner("Scraping prenájom listings and rebuilding rent comps..."):
-        from scraper.rentals import run as _run_rentals
-        from modules.cashflow_runner import run_scoring as _run_cf
-        summary = _run_rentals(max_pages=5)
-        scored = _run_cf()
-    st.success(f"✅ {summary.get('rentals', 0)} rentals across {summary.get('keys', 0)} "
-               f"districts · {len(summary.get('changed', []))} rates moved · "
-               f"re-scored {scored}.")
-    st.rerun()
 
-if do_dupes:
+def _rent_step(progress):
+    from scraper.rentals import run as _run_rentals
+    from modules.cashflow_runner import run_scoring as _run_cf
+    summary = _run_rentals(max_pages=5)
+    scored = _run_cf()
+    return "success", (f"✅ {summary.get('rentals', 0)} rentals across "
+                       f"{summary.get('keys', 0)} districts · "
+                       f"{len(summary.get('changed', []))} rates moved · re-scored {scored}.")
+
+
+def _dupes_step(progress):
     from database import mark_duplicates
-    n = mark_duplicates()
-    st.success(f"✅ {n} listings are copies of a flat listed more than once.")
-    st.rerun()
+    return "success", f"✅ {mark_duplicates()} listings are copies of a flat listed more than once."
 
-if do_stale:
+
+def _stale_step(progress):
     from database import deactivate_stale_listings
     n = deactivate_stale_listings(days=21)
     if n:
-        st.success(f"✅ Deactivated {n} stale listings (last seen > 21 days ago)")
-    else:
-        st.info("ℹ️ No stale listings — all active rows seen within the last 21 days")
-    st.rerun()
+        return "success", f"✅ Deactivated {n} stale listings (last seen > 21 days ago)"
+    return "info", "ℹ️ No stale listings — all active rows seen within the last 21 days"
+
+
+for _clicked, _label, _step in (
+    (do_nehnut,  "NEHNUT",                 _scrape_step("nehnutelnosti", "Nehnutelnosti")),
+    (do_bazos,   "BAZOS",                  _scrape_step("bazos", "Bazos")),
+    (do_topreal, "TOPREAL",                _scrape_step("topreality", "Topreality")),
+    (do_lv,      "LV DEBT FILTER",         _lv_step),
+    (do_cf,      "CASHFLOW SCORE",         _cf_step),
+    (do_desc,    "PARSE DESC",             _desc_step),
+    (do_addr,    "NORM ADDR",              _addr_step),
+    (do_rescore, "RESCORE ALL",            _rescore_step),
+    (do_loc,     "LOCATION IQ",            _loc_step),
+    (do_reparse, "RE-PARSE",               _reparse_step),
+    (do_risk,    "RISK BACKFILL",          _risk_step),
+    (do_rent,    "RENT COMPS",             _rent_step),
+    (do_dupes,   "MERGE PORTAL COPIES",    _dupes_step),
+    (do_stale,   "CLEAN STALE",            _stale_step),
+):
+    if _clicked:
+        _why = jobs.start(_label, _step)
+        if _why:
+            st.sidebar.warning(_why)
+        else:
+            st.rerun()      # draw the sidebar with the job running
 
 if do_test:
     from scraper._http import get as _http_get, SCRAPER_API_KEY as _sak
@@ -582,6 +613,12 @@ data = [l for l in data
 if hide_dups:
     from engine.duplicates import one_per_flat
     data = one_per_flat(data)
+
+
+# A failed scheduled run is easy to miss in the sidebar (collapsed on a
+# phone), and everything below is as old as the last run that worked.
+if _run_level == "error":
+    st.error(_run_text)
 
 
 # ── Stats bar ─────────────────────────────────────────────────────────────────
@@ -936,7 +973,7 @@ def render_card(l):
                                        key=f"stgn_{lid}", placeholder="e.g. viewing Sat 10:00")
             # Demo rows aren't in the database: writing their ids would leave
             # deal stages (and LV checks, notes) for listings that don't exist.
-            if st.button("SAVE STAGE", key=f"stgb_{lid}", use_container_width=True,
+            if st.button("SAVE STAGE", key=f"stgb_{lid}", width="stretch",
                          disabled=using_demo):
                 from database import set_deal_stage
                 set_deal_stage(lid, new_stage, stage_note)
@@ -956,15 +993,15 @@ def render_card(l):
 
         # Action buttons
         a1,a2,a3,a4,a5 = st.columns(5)
-        with a1: st.link_button("VIEW LISTING", l.get("url","#"), use_container_width=True)
+        with a1: st.link_button("VIEW LISTING", l.get("url","#"), width="stretch")
         with a2:
             lat, lng = l.get("lat"), l.get("lng")
             if lat and lng:
-                st.link_button("MAPS", f"https://www.google.com/maps?q={lat},{lng}&z=15", use_container_width=True)
+                st.link_button("MAPS", f"https://www.google.com/maps?q={lat},{lng}&z=15", width="stretch")
         with a3:
-            st.link_button("CHECK LV", _lv_link(l), use_container_width=True)
+            st.link_button("CHECK LV", _lv_link(l), width="stretch")
         with a4:
-            verify = st.button("RE-VERIFY LV", key=f"rv_{lid}", use_container_width=True,
+            verify = st.button("RE-VERIFY LV", key=f"rv_{lid}", width="stretch",
                                disabled=using_demo)
         with a5:
             render_memo_button(l, key=f"memo_{lid}")
@@ -986,12 +1023,14 @@ def render_card(l):
         if verify:
             try:
                 from modules.debt_bot import reverify
+                from kataster_scraper import quick_requests
                 lv_in = flat_lv.strip()
                 ku_in = flat_ku.strip()
                 changed = (lv_in != (l.get("lv_number") or "")
                            or ku_in != (l.get("cadastral_area") or ""))
-                r = reverify(lid, lv_number=lv_in if changed else None,
-                             cadastral_area=ku_in if changed else "")
+                with st.spinner("Checking the cadastre..."), quick_requests():
+                    r = reverify(lid, lv_number=lv_in if changed else None,
+                                 cadastral_area=ku_in if changed else "")
                 from database import mark_duplicates
                 mark_duplicates()   # the flat's other copies carry its LV result
                 if r["status"] == "REJECT":
@@ -1015,8 +1054,8 @@ def render_memo_button(l, key):
     if key in ready:
         st.download_button("⬇️ MEMO PDF", ready[key],
                            file_name=f"memo_{(l.get('id') or 'x')[:8]}_{datetime.now():%Y%m%d}.pdf",
-                           mime="application/pdf", key=f"{key}_dl", use_container_width=True)
-    elif st.button("📄 MEMO", key=key, use_container_width=True):
+                           mime="application/pdf", key=f"{key}_dl", width="stretch")
+    elif st.button("📄 MEMO", key=key, width="stretch"):
         from modules.memo import build_memo_pdf
         from database import get_annotations
         try:
@@ -1127,7 +1166,7 @@ with t0:
         )
         st.dataframe(
             df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             height=min(600, 40 + 35 * len(df)),
             column_config={
@@ -1354,7 +1393,7 @@ with t_whatif:
     c_left, c_right = st.columns([3, 2])
     with c_left:
         st.markdown('<div class="muted">TAX TOGGLE — PERSONAL vs s.r.o.</div>', unsafe_allow_html=True)
-        st.dataframe(cmp_df, hide_index=True, use_container_width=True,
+        st.dataframe(cmp_df, hide_index=True, width="stretch",
                      column_config={"Personal (FO)": st.column_config.NumberColumn(format="%.2f"),
                                     "s.r.o.": st.column_config.NumberColumn(format="%.2f")})
         st.caption("Personal: §6(3) passive rental, €500 exempt, no health levy, interest not "
@@ -1368,7 +1407,7 @@ with t_whatif:
             shock_rows.append({"Rate": f"{(wi_rate + bump) * 100:.1f}%",
                                "Surplus €/mo": x.surplus_sro,
                                "Self-funding %": x.ratio_sro * 100})
-        st.dataframe(pd.DataFrame(shock_rows), hide_index=True, use_container_width=True,
+        st.dataframe(pd.DataFrame(shock_rows), hide_index=True, width="stretch",
                      column_config={"Surplus €/mo": st.column_config.NumberColumn(format="euro", step=1),
                                     "Self-funding %": st.column_config.NumberColumn(format="%.1f%%")})
         st.markdown('<div class="muted">EQUITY CASH FLOWS (s.r.o.)</div>', unsafe_allow_html=True)
@@ -1439,7 +1478,7 @@ with t_pipe:
         # In demo mode the picker still offers the real tracked deals, and
         # those can move; a demo row isn't in the database.
         demo_pick = using_demo and pick_id not in {t["id"] for t in tracked}
-        if st.button("MOVE DEAL", use_container_width=True, disabled=demo_pick):
+        if st.button("MOVE DEAL", width="stretch", disabled=demo_pick):
             set_deal_stage(pick_id, pick_stage, pick_note)
             st.rerun()
         if demo_pick:
@@ -1494,7 +1533,7 @@ with t_rej:
                     + (f" · {n_overturned} overturned since"
                        f"{'' if show_overturned else ' (hidden)'}" if n_overturned else "")
                     + '</div>', unsafe_allow_html=True)
-        st.dataframe(view, hide_index=True, use_container_width=True,
+        st.dataframe(view, hide_index=True, width="stretch",
                      column_config={"Price": st.column_config.NumberColumn(format="euro", step=1),
                                     "URL": st.column_config.LinkColumn(display_text="open ↗")})
         rv_opts = {f"{r_.get('title') or r_.get('address_raw') or '?'} [{r_['id'][:6]}]": r_["id"]
@@ -1503,11 +1542,13 @@ with t_rej:
         if rv_opts:
             rv_pick = st.selectbox("Re-check a rejection (titles change — a lien can be cleared)",
                                    list(rv_opts.keys()), key="rej_pick")
-            if st.button("RE-VERIFY LV", key="rej_rv", use_container_width=True):
+            if st.button("RE-VERIFY LV", key="rej_rv", width="stretch"):
                 try:
                     from modules.debt_bot import reverify
                     from database import mark_duplicates
-                    res = reverify(rv_opts[rv_pick])
+                    from kataster_scraper import quick_requests
+                    with st.spinner("Checking the cadastre..."), quick_requests():
+                        res = reverify(rv_opts[rv_pick])
                     # A copy that is no longer rejected rejoins its group and
                     # lifts "a copy failed LV" from the others (or the reverse).
                     mark_duplicates()
@@ -1542,7 +1583,7 @@ with t_comps:
     else:
         comps_df = pd.DataFrame(ct)
         comps_df["Δ vs baseline %"] = (comps_df["In use €/m²"] / comps_df["Baseline €/m²"] - 1) * 100
-        st.dataframe(comps_df, hide_index=True, use_container_width=True,
+        st.dataframe(comps_df, hide_index=True, width="stretch",
                      column_config={c: st.column_config.NumberColumn(format="%.2f")
                                     for c in ("Live median €/m²", "Baseline €/m²", "In use €/m²")}
                      | {"Δ vs baseline %": st.column_config.NumberColumn(format="%+.1f%%")})
@@ -1572,7 +1613,7 @@ with t2:
             st.markdown('<div class="muted">LISTING PHOTO</div>', unsafe_allow_html=True)
             img = sel.get("primary_image_url","")
             if img and img.startswith("http"):
-                st.image(img, use_container_width=True)
+                st.image(img, width="stretch")
             else:
                 st.markdown('<div style="background:#0b0d14;border:1px solid #151924;height:260px;display:flex;align-items:center;justify-content:center;color:#7a89a8;font-family:IBM Plex Mono,monospace;font-size:0.7rem;letter-spacing:2px">NO IMAGE</div>', unsafe_allow_html=True)
 
@@ -1582,11 +1623,11 @@ with t2:
                 sat = (f"https://maps.googleapis.com/maps/api/staticmap"
                        f"?center={lat},{lng}&zoom=17&size=640x400&maptype=satellite"
                        f"&markers=color:red%7C{lat},{lng}&key={GMAPS_KEY}")
-                st.image(sat, use_container_width=True)
+                st.image(sat, width="stretch")
             elif lat and lng:
                 st.link_button("📡 OPEN SATELLITE (Google Maps)",
                                f"https://www.google.com/maps?q={lat},{lng}&z=17&t=k",
-                               use_container_width=True)
+                               width="stretch")
                 st.markdown('<div class="muted">Add GOOGLE_PLACES_API_KEY to .env for inline satellite.</div>', unsafe_allow_html=True)
             else:
                 st.info("No coordinates for this listing.")
@@ -1596,17 +1637,17 @@ with t2:
             with sv1:
                 st.link_button("🚶 STREET VIEW",
                                f"https://www.google.com/maps?q=&layer=c&cbll={lat},{lng}",
-                               use_container_width=True)
+                               width="stretch")
             with sv2:
                 st.link_button("🗺️ FULL MAP",
                                f"https://www.google.com/maps?q={lat},{lng}&z=15",
-                               use_container_width=True)
+                               width="stretch")
 
         st.markdown('<hr class="div">', unsafe_allow_html=True)
         st.markdown('<div class="muted">VIBE CHECK</div>', unsafe_allow_html=True)
         vibe = st.slider("Score (1–10)", 1, 10, 5)
         note = st.text_input("Note", placeholder="e.g. Great location, needs new windows...")
-        if st.button("SAVE ANNOTATION", use_container_width=True, disabled=using_demo):
+        if st.button("SAVE ANNOTATION", width="stretch", disabled=using_demo):
             from database import add_annotation
             add_annotation(sel["id"], note, vibe)
             st.success(f"✅ Vibe {vibe}/10 saved.")
@@ -1653,7 +1694,7 @@ with t3:
             escrow     = st.checkbox("Notárska úschova (escrow hold)", value=True)
             deposit    = st.number_input("Deposit € (earnest money)", 0, 50000, 2000, 500)
 
-        if st.button("GENERATE CONTRACT DRAFT", use_container_width=True):
+        if st.button("GENERATE CONTRACT DRAFT", width="stretch"):
             if not buyer_name.strip():
                 st.error("Enter buyer name first.")
             else:
@@ -1758,7 +1799,7 @@ Generated by Sovereign RE Dashboard · Private Use Only
                     draft,
                     file_name=fname,
                     mime="text/plain",
-                    use_container_width=True,
+                    width="stretch",
                 )
                 st.markdown('<div class="muted">Next: Send to your notár. Use Notárska úschova for all funds. Re-verify LV 48h before signing.</div>', unsafe_allow_html=True)
                 if using_demo:

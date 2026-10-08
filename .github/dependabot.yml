@@ -1,0 +1,20 @@
+# Weekly upgrade PRs for the pinned dependencies (audit O6). CI runs the test
+# suite on each one, so an upgrade that breaks the app shows up red there
+# instead of in the next Docker rebuild. (The Docker base image stays on
+# python:3.12-slim by hand: CI tests on 3.12, so a Python bump belongs in a PR
+# that changes both.)
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /sovereign_final
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

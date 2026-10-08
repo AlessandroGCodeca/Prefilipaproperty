@@ -23,8 +23,10 @@ if errorlevel 1 (
 REM Start all containers. --build rebuilds the image from this folder first:
 REM without it, code updated here never reaches the containers, which keep
 REM running the image built the first time. An unchanged rebuild is quick.
+REM --remove-orphans stops containers of services no longer in
+REM docker-compose.yml (the old sovereign_dmr local model).
 echo Building and launching containers...
-docker compose up -d --build
+docker compose up -d --build --remove-orphans
 if errorlevel 1 (
     echo.
     echo Docker could not build or start the containers - see the messages above.

@@ -24,12 +24,15 @@ Design rules:
 Run once per listing and cache the result — these fields don't change.
 """
 
+import logging
 import json
 import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+
+log = logging.getLogger(__name__)
 
 # analyze_lv() sends Claude at most this many characters of an LV. The report
 # lists the encumbrances (ťarchy, part C) LAST, so on a longer LV Claude never
@@ -90,7 +93,7 @@ def _ask_json(system: str, user: str, schema: dict, max_tokens: int = 1024) -> d
         return json.loads(text)
     except Exception as e:
         # Never surface the key or raw client internals; a one-line note is enough.
-        print(f"    ↳ llm_enrichment call failed: {type(e).__name__}")
+        log.warning(f"    ↳ llm_enrichment call failed: {type(e).__name__}")
         return None
 
 

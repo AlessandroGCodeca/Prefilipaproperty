@@ -7,10 +7,17 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Windows too: the project is run from a Windows PC (START.bat), and a
+    # path, encoding or file-locking difference only shows up there.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: sovereign_final
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -20,19 +27,26 @@ jobs:
           cache: pip
           cache-dependency-path: sovereign_final/requirements.txt
 
+      - name: Check every pinned version exists
+        # Playwright is left out of the test install below, so a pin to a
+        # version PyPI doesn't have (playwright==1.56.1 was one) only broke
+        # the Docker build. This resolves every line without installing.
+        run: python -m pip install --dry-run --no-deps -r requirements.txt
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Skip playwright/curl_cffi — heavy runtime-only deps not imported
-          # anywhere the tests reach. streamlit stays: tests/test_app_smoke.py
-          # runs the dashboard script with it.
-          grep -v -E "^(playwright|curl_cffi)" requirements.txt > requirements-test.txt
+          # Skip playwright — a heavy runtime-only dep (plus a browser) that
+          # nothing the tests reach imports. streamlit stays:
+          # tests/test_app_smoke.py runs the dashboard script with it.
+          grep -v -E "^playwright" requirements.txt > requirements-test.txt
           pip install -r requirements-test.txt pytest ruff
 
       - name: Lint with ruff
-        # Only fail on real-bug classes (E9 syntax, F63 invalid comparisons,
-        # F7 syntax issues, F82 undefined names). Style warnings don't fail.
-        run: ruff check . --select=E9,F63,F7,F82 --output-format=github
+        # E9 syntax errors plus every pyflakes check (F): undefined and unused
+        # names, f-strings without placeholders, redefinitions. Style is not
+        # checked.
+        run: ruff check . --select=E9,F --output-format=github
 
       - name: Run tests
         run: pytest tests/ -v --tb=short

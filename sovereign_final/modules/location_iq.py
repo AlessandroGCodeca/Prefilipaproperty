@@ -7,6 +7,7 @@ is set, and from OpenStreetMap (Nominatim + Overpass) when it isn't. The risk
 flags always come from open data via modules/risk_data — never invented.
 """
 
+import logging
 import time, math
 from datetime import datetime, timezone
 
@@ -27,6 +28,8 @@ from database import (
     get_location_rows_missing_risk, update_location_risk,
 )
 from modules import risk_data
+
+log = logging.getLogger(__name__)
 
 GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 PLACES_URL  = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
@@ -49,7 +52,7 @@ def geocode_precise(address: str) -> tuple[float | None, float | None, str]:
             loc = top["geometry"]["location"]
             return loc["lat"], loc["lng"], risk_data.google_precision(top)
     except Exception as e:
-        print(f"    Geocode error: {e}")
+        log.warning(f"    Geocode error: {e}")
     return None, None, ""
 
 
@@ -74,7 +77,7 @@ def nearest_transit(lat: float, lng: float) -> float:
             rl = results[0]["geometry"]["location"]
             return _haversine(lat, lng, rl["lat"], rl["lng"])
     except Exception as e:
-        print(f"    Transit error: {e}")
+        log.warning(f"    Transit error: {e}")
     return 9999.0
 
 
@@ -102,7 +105,7 @@ def count_amenities(lat: float, lng: float) -> dict:
             counts[key] = len(r.json().get("results", []))
             time.sleep(0.3)
         except Exception as e:
-            print(f"    Amenity error ({ptype}): {e}")
+            log.warning(f"    Amenity error ({ptype}): {e}")
 
     return counts
 
@@ -184,7 +187,7 @@ def run_location_scoring(progress_callback=None, limit: int | None = 200) -> int
     """
     listings = get_unscored_location()
     if not listings:
-        print("✅ No listings to score for location.")
+        log.info("✅ No listings to score for location.")
         return 0
     # Each listing is a few seconds of polite requests to free services, so a
     # first run over a full backlog is spread over several days.
@@ -192,7 +195,7 @@ def run_location_scoring(progress_callback=None, limit: int | None = 200) -> int
         listings = listings[:limit]
 
     provider = "Google" if GOOGLE_API_KEY else "OpenStreetMap"
-    print(f"📍 Scoring {len(listings)} locations ({provider})...")
+    log.info(f"📍 Scoring {len(listings)} locations ({provider})...")
     scored = 0
     tier_emoji = {"PRIME":"⭐","SOLID":"✅","STANDARD":"🟡","POOR":"🔴"}
 
@@ -213,7 +216,7 @@ def run_location_scoring(progress_callback=None, limit: int | None = 200) -> int
         else:
             lat, lng, precision = geocode_precise(addr)
         if lat is None:
-            print(f"  ⚠️ No geocode: {addr[:50]}")
+            log.warning(f"  ⚠️ No geocode: {addr[:50]}")
             continue
 
         risk = risk_data.assess(lat, lng, precision)
@@ -258,12 +261,12 @@ def run_location_scoring(progress_callback=None, limit: int | None = 200) -> int
         flags = " ".join(n for n, v in (("🏗", risk["construction"]),
                                         ("🔊", risk["noise"]),
                                         ("🌊", risk["flood"])) if v)
-        print(f"  {e} {tier} {score}/100 | Transit: {transit:.0f}m | "
-              f"Amenities: {sum(amenities.values())} | {precision} {flags} | {addr[:40]}")
+        log.info(f"  {e} {tier} {score}/100 | Transit: {transit:.0f}m | "
+                 f"Amenities: {sum(amenities.values())} | {precision} {flags} | {addr[:40]}")
         scored += 1
         time.sleep(SCRAPE_DELAY_SEC)
 
-    print(f"\n✅ Location scoring done. {scored} scored.\n")
+    log.info(f"✅ Location scoring done. {scored} scored.")
     return scored
 
 
@@ -316,5 +319,6 @@ def run_risk_backfill(limit: int = 100, progress_callback=None) -> int:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     init_db()
     run_location_scoring()

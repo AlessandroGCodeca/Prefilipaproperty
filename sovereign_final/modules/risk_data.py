@@ -27,6 +27,7 @@ no Google key. Nominatim geocodes in that case too.
 
 from __future__ import annotations
 
+import logging
 import math
 import time
 
@@ -40,6 +41,8 @@ from config import (
     CONSTRUCTION_RADIUS_M, AMENITY_RADIUS_METERS,
     NOISE_MAJOR_ROAD_M, NOISE_PRIMARY_M, NOISE_RAIL_M, NOISE_AIRPORT_M,
 )
+
+log = logging.getLogger(__name__)
 
 USER_AGENT = "SovereignRE/1.0 (private Slovak property research tool)"
 TRANSIT_SEARCH_M = 2000
@@ -93,7 +96,7 @@ def geocode_nominatim(address: str) -> tuple[float | None, float | None, str]:
         _last_nominatim = time.monotonic()
         results = r.json() if r.status_code == 200 else []
     except Exception as e:
-        print(f"    Nominatim error: {type(e).__name__}")
+        log.warning(f"    Nominatim error: {type(e).__name__}")
         return None, None, ""
     if not results:
         return None, None, ""
@@ -141,7 +144,7 @@ def fetch_osm(lat: float, lng: float) -> list[dict] | None:
             r = requests.post(OVERPASS_URL, data={"data": q}, timeout=60,
                               headers={"User-Agent": USER_AGENT})
         except Exception as e:
-            print(f"    Overpass error: {type(e).__name__}")
+            log.warning(f"    Overpass error: {type(e).__name__}")
             return None
         if r.status_code == 200:
             try:
@@ -152,13 +155,13 @@ def fetch_osm(lat: float, lng: float) -> list[dict] | None:
             # with partial (often empty) elements and a "remark". Empty would
             # read as "nothing nearby", so it counts as no answer.
             if "error" in str(payload.get("remark", "")).lower():
-                print("    Overpass: query did not complete")
+                log.warning("    Overpass: query did not complete")
                 return None
             return payload.get("elements", [])
         if r.status_code in (429, 504) and attempt == 0:
             time.sleep(10)
             continue
-        print(f"    Overpass HTTP {r.status_code}")
+        log.warning(f"    Overpass HTTP {r.status_code}")
         return None
     return None
 

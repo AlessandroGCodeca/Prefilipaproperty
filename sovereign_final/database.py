@@ -10,10 +10,13 @@ connections don't have), and no Postgres schema file existed. Copying
 is now ignored.
 """
 
+import logging
 import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from config import SQLITE_PATH
+
+log = logging.getLogger(__name__)
 
 
 # ── Connection ────────────────────────────────────────────────────────────────
@@ -249,7 +252,6 @@ CREATE TABLE IF NOT EXISTS contract_drafts (
     seller_name     TEXT,
     notary_name     TEXT,
     draft_text      TEXT,
-    pdf_path        TEXT,
     generated_at    TEXT,
     status          TEXT DEFAULT 'DRAFT'
 );
@@ -260,6 +262,19 @@ CREATE TABLE IF NOT EXISTS annotations (
     note        TEXT NOT NULL,
     vibe_score  INTEGER,
     created_at  TEXT
+);
+
+-- One row while pipeline work runs — the scheduler's daily run or a dashboard
+-- button — so the two never scrape or check LVs at the same time. The holder
+-- refreshes heartbeat_at while it works; a row whose heartbeat has stopped
+-- belonged to a process that died and is taken over. See
+-- modules/pipeline_state.
+CREATE TABLE IF NOT EXISTS pipeline_lock (
+    id            INTEGER PRIMARY KEY CHECK (id = 1),
+    holder        TEXT NOT NULL,
+    token         TEXT NOT NULL,
+    acquired_at   TEXT NOT NULL,
+    heartbeat_at  TEXT NOT NULL
 );
 """
 
@@ -370,9 +385,9 @@ def _ensure_cashflow_columns(conn):
             "UPDATE listings SET classification='PENDING' "
             "WHERE classification IN ('GREEN','YELLOW','WHITE')")
         if n:
-            print(f"♻️  Cleared {n} cashflow scores classed by the old self-funding "
-                  f"rule — run 💰 CASHFLOW SCORE to reclassify against the "
-                  f"regional median.")
+            log.info(f"♻️  Cleared {n} cashflow scores classed by the old self-funding "
+                     f"rule — run 💰 CASHFLOW SCORE to reclassify against the "
+                     f"regional median.")
     elif cols and any(c not in cols for c in _DEAL_EXTRA_COLUMNS):
         # Scores from before max offer, the rate-shock stress test and IRR
         # existed. get_unscored_cashflow() never looks at a scored row again,
@@ -383,8 +398,8 @@ def _ensure_cashflow_columns(conn):
             "UPDATE listings SET classification='PENDING' "
             "WHERE classification IN ('GREEN','YELLOW','WHITE')")
         if n:
-            print(f"♻️  Cleared {n} cashflow scores from before max offer, stress "
-                  f"test and IRR — run 💰 CASHFLOW SCORE to fill them in.")
+            log.info(f"♻️  Cleared {n} cashflow scores from before max offer, stress "
+                     f"test and IRR — run 💰 CASHFLOW SCORE to fill them in.")
     conn.commit()
 
 
@@ -539,7 +554,7 @@ def init_db():
         conn.commit()
     finally:
         conn.close()
-    print("✅ Database ready.")
+    log.debug("✅ Database ready.")   # the dashboard calls this on every rerun
 
 
 # ── Query Helpers ─────────────────────────────────────────────────────────────
@@ -1952,5 +1967,73 @@ def get_contract_drafts(listing_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# ── Pipeline lock (modules/pipeline_state) ────────────────────────────────────
+def try_lock_pipeline(holder: str, token: str, stale_after_s: float) -> dict | None:
+    """Take the pipeline lock as `holder` (shown to the user) under `token`
+    (unique to this attempt). Returns None when taken, else the row of whoever
+    holds it. A row whose heartbeat is older than stale_after_s is taken over:
+    the process that held it is gone."""
+    now = datetime.now(timezone.utc)
+    conn = get_conn()
+    try:
+        # IMMEDIATE takes the write lock up front, so two processes can't
+        # both read "free" and both insert.
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT holder, token, acquired_at, heartbeat_at FROM pipeline_lock WHERE id=1"
+        ).fetchone()
+        if row:
+            try:
+                age = (now - datetime.fromisoformat(row["heartbeat_at"])).total_seconds()
+            except (TypeError, ValueError):
+                age = stale_after_s
+            if age < stale_after_s:
+                conn.rollback()
+                return dict(row)
+        conn.execute(
+            "INSERT OR REPLACE INTO pipeline_lock (id, holder, token, acquired_at, heartbeat_at) "
+            "VALUES (1, ?, ?, ?, ?)", (holder, token, now.isoformat(), now.isoformat()))
+        conn.commit()
+        return None
+    finally:
+        conn.close()
+
+
+def heartbeat_pipeline_lock(token: str) -> bool:
+    """Refresh the lock's heartbeat. False when this token no longer holds it."""
+    conn = get_conn()
+    try:
+        n = conn.execute("UPDATE pipeline_lock SET heartbeat_at=? WHERE token=?",
+                         (datetime.now(timezone.utc).isoformat(), token)).rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return n > 0
+
+
+def unlock_pipeline(token: str) -> None:
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM pipeline_lock WHERE token=?", (token,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_pipeline_lock() -> dict | None:
+    """The lock row (holder, acquired_at, heartbeat_at), or None when free."""
+    conn = get_conn()
+    try:
+        if not _has_table(conn, "pipeline_lock"):
+            return None
+        row = conn.execute(
+            "SELECT holder, acquired_at, heartbeat_at FROM pipeline_lock WHERE id=1"
+        ).fetchone()
+    finally:
+        conn.close()
+    return dict(row) if row else None
+
+
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     init_db()

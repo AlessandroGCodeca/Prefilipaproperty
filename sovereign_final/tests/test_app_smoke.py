@@ -378,3 +378,118 @@ def test_theme_file_is_dark_and_the_grid_wraps():
     assert "repeat(6,1fr)" not in src and "auto-fit" in src
     assert "#2a3450" not in src                   # 1.6:1 muted text
     assert not re.search(r"\.stButton>button\s*\{", src)   # missed buttons with a tooltip
+
+
+# ── Audit O1, O4, O7 ──────────────────────────────────────────────────────────
+@pytest.fixture(autouse=True)
+def _isolated_runs(monkeypatch, tmp_path):
+    """The scheduler's status file in tmp_path, and no background job left
+    running into the next test (jobs live in the module, not the page)."""
+    from modules import jobs, pipeline_state
+    monkeypatch.setattr(pipeline_state, "STATUS_FILE", str(tmp_path / "status.json"))
+    yield
+    jobs.wait(60)
+    monkeypatch.setattr(jobs, "_job", None)
+
+
+def _click(at, label):
+    next(b for b in at.button if b.label == label).click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    return at
+
+
+def _sidebar_text(at):
+    return "\n".join(e.value for e in at.sidebar if hasattr(e, "value") and isinstance(e.value, str))
+
+
+def test_password_gate(db, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "DASHBOARD_PASSWORD", "s3cret")
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    assert not at.tabs and not at.sidebar.button       # nothing behind the gate
+    # A form's value is sent with its submit button, in the same run.
+    at.text_input(key="login_pw").input("guess")
+    at.button[0].click().run()
+    assert any("Wrong password" in e.value for e in at.error)
+    assert not at.tabs
+    at.text_input(key="login_pw").input("s3cret")
+    at.button[0].click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert len(at.tabs) == 9
+
+
+def test_no_password_set_means_no_gate(db):
+    at = run_app()
+    assert len(at.tabs) == 9
+
+
+def test_sidebar_shows_the_last_scheduled_run(db):
+    from modules import pipeline_state
+    now = datetime.now(timezone.utc)
+    pipeline_state.write_status({
+        "state": "ok", "started_at": now.isoformat(), "finished_at": now.isoformat(),
+        "summary": "🟢4 🟡9", "steps": [{"step": "Bazos.sk", "ok": True}]})
+    at = run_app()
+    assert any("Last scheduled run" in c.value and "🟢4 🟡9" in c.value for c in at.caption)
+    assert not at.error
+
+
+def test_a_failed_scheduled_run_is_shown_on_the_page(db):
+    from modules import pipeline_state
+    now = datetime.now(timezone.utc)
+    pipeline_state.write_status({
+        "state": "failed", "started_at": now.isoformat(), "finished_at": now.isoformat(),
+        "error": "all 3 scrapers failed", "next_retry_at": None, "steps": []})
+    at = run_app()
+    assert any("FAILED: all 3 scrapers failed" in e.value for e in at.error)
+
+
+def test_a_button_runs_its_step_in_the_background(db, monkeypatch):
+    import threading
+    from modules import jobs
+    release = threading.Event()
+
+    def slow_stale(days=21):
+        release.wait(30)
+        return 3
+    monkeypatch.setattr(db, "deactivate_stale_listings", slow_stale)
+    at = _click(run_app(), "🧹 CLEAN STALE (21d)")
+    # The click returned at once; the step is still going and the pipeline
+    # buttons wait for it.
+    assert jobs.running()
+    assert next(b for b in at.button if b.label == "BAZOS").disabled
+    assert at.sidebar.get("progress")
+    release.set()
+    jobs.wait(30)
+    at.run()
+    # The result stays on screen (a rerun used to wipe it), and the buttons
+    # are back.
+    assert any("Deactivated 3 stale listings" in s.value for s in at.success)
+    assert not next(b for b in at.button if b.label == "BAZOS").disabled
+    at.run()
+    assert any("Deactivated 3 stale listings" in s.value for s in at.success)
+
+
+def test_a_button_waits_for_the_scheduler(db):
+    from modules import jobs
+    from modules.pipeline_state import PipelineLock
+    with PipelineLock("scheduler"):
+        at = _click(run_app(), "🧹 CLEAN STALE (21d)")
+    assert not jobs.running()
+    assert any("scheduler is running" in w.value for w in at.warning)
+
+
+def test_a_slow_scraper_is_reported_not_a_crash(db, monkeypatch):
+    # Audit B5: subprocess.TimeoutExpired escaped as a traceback on the page.
+    import subprocess
+    from modules import jobs
+
+    def too_slow(*a, **k):
+        raise subprocess.TimeoutExpired(cmd="scraper", timeout=k.get("timeout"))
+    monkeypatch.setattr(subprocess, "run", too_slow)
+    at = _click(run_app(), "NEHNUT")
+    jobs.wait(30)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("still running after 30 min" in e.value for e in at.error)

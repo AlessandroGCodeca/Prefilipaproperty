@@ -11,6 +11,7 @@ The only working approach is Playwright (real Chromium), which:
 Install once:  pip install playwright && playwright install chromium
 """
 
+import logging
 import hashlib, time, re, json
 from datetime import datetime, timezone
 
@@ -24,6 +25,8 @@ from database import (
 from scraper.textparse import is_excluded_listing
 from scraper.geo import pin_from_item, pin_from_ld, pin_from_meta
 from scraper.slovak_cases import locative_words
+
+log = logging.getLogger(__name__)
 
 BASE        = "https://www.nehnutelnosti.sk"
 SEARCH_PAGE = BASE + "/vysledky/byty/slovensko/predaj?page={page}"
@@ -516,7 +519,7 @@ def _parse_api_item(item: dict, now: str, require_url_field: bool = False) -> di
             "lat": pin[0] if pin else None, "lng": pin[1] if pin else None,
         }
     except Exception as e:
-        print(f"    ⚠️  parse error: {e}", flush=True)
+        log.warning(f"    ⚠️  parse error: {e}")
         return None
 
 
@@ -715,14 +718,14 @@ def _merge_ld(data: dict, ld) -> None:
         if v:
             try:
                 data["size"] = float(v)
-            except Exception:
+            except (TypeError, ValueError):
                 pass
 
     rooms = ld.get("numberOfRooms") or ld.get("numberOfBedrooms")
     if rooms:
         try:
             data["rooms"] = int(float(rooms))
-        except Exception:
+        except (TypeError, ValueError):
             pass
 
 
@@ -859,7 +862,7 @@ def _scrape_detail_page(page, url: str) -> dict:
                     if 15 < v < 500:
                         size_value = v
                         break
-                except Exception:
+                except ValueError:
                     pass
 
         # Fallback — first plausible "N m²" anywhere in rendered text
@@ -870,7 +873,7 @@ def _scrape_detail_page(page, url: str) -> dict:
                     if 20 < v < 300:
                         size_value = v
                         break
-                except Exception:
+                except ValueError:
                     pass
 
         # Last resort — pull "N m²" out of the title (Bazos-style headlines)
@@ -881,7 +884,7 @@ def _scrape_detail_page(page, url: str) -> dict:
                     v = float(m.group(1).replace(",", "."))
                     if 15 < v < 500:
                         size_value = v
-                except Exception:
+                except ValueError:
                     pass
 
         if size_value:
@@ -1144,8 +1147,10 @@ class _ApiCapture:
             items = _extract_items_from_json(data)
             if items and _looks_like_listings(items):
                 self.items.extend(items)
-                print(f"    ✅ API hit: {response.url[:80]} → {len(items)} items", flush=True)
+                log.info(f"    ✅ API hit: {response.url[:80]} → {len(items)} items")
         except Exception:
+            # Most responses that pass the URL filter aren't listing JSON (or
+            # their body is gone by now); this sniffer runs on every one of them.
             pass
 
     def take(self) -> list[dict]:
@@ -1210,7 +1215,7 @@ def _scrape_page_playwright(page, capture, page_num: int,
     try:
         page.goto(url, wait_until="networkidle", timeout=60000)
     except Exception as e:
-        print(f"    ⚠️  goto error: {e}", flush=True)
+        log.warning(f"    ⚠️  goto error: {e}")
 
     # Extra wait for any deferred XHR
     page.wait_for_timeout(3000)
@@ -1225,16 +1230,16 @@ def _scrape_page_playwright(page, capture, page_num: int,
         results = _harvest_api_listings(search_items, seen_urls, now)
     else:
         # ── Strategy 2: DOM link extraction with /detail/ selector ─────────
-        print("    No API JSON captured — trying DOM extraction...", flush=True)
+        log.info("    No API JSON captured — trying DOM extraction...")
         links = page.eval_on_selector_all(
             "a[href*='/detail/']",
             "els => els.map(e => ({href: e.href, text: e.innerText.trim().slice(0,200)}))"
         )
-        print(f"    /detail/ links in DOM: {len(links)}", flush=True)
+        log.info(f"    /detail/ links in DOM: {len(links)}")
 
         # ── Strategy 3: RSC chunk parsing from HTML source ─────────────────
         rsc_items = _parse_rsc_chunks(html)
-        print(f"    RSC /detail/ URLs found: {len(rsc_items)}", flush=True)
+        log.info(f"    RSC /detail/ URLs found: {len(rsc_items)}")
 
         # Dedupe on the CANONICAL url, not the raw href: the same listing is
         # linked under several marketing slugs, which all reduce to one row.
@@ -1263,8 +1268,7 @@ def _scrape_page_playwright(page, capture, page_num: int,
     # detail page is card text, which would overwrite better stored values.
     touch_urls = [r["url"] for r in results if r["url"] in fresh_urls]
     if touch_urls:
-        print(f"    Skipping {len(touch_urls)} detail pages already scraped recently",
-              flush=True)
+        log.info(f"    Skipping {len(touch_urls)} detail pages already scraped recently")
         results = [r for r in results if r["url"] not in fresh_urls]
 
     # ── Enrichment: open each listing's detail page in same browser ────────
@@ -1272,7 +1276,7 @@ def _scrape_page_playwright(page, capture, page_num: int,
     gone_urls: list[str] = []
     to_enrich = [r for r in results if not r.get("price_eur")]
     if to_enrich:
-        print(f"    Enriching {len(to_enrich)} listings (detail pages)...", flush=True)
+        log.info(f"    Enriching {len(to_enrich)} listings (detail pages)...")
         success = 0
         for i, listing in enumerate(to_enrich, 1):
             try:
@@ -1285,16 +1289,14 @@ def _scrape_page_playwright(page, capture, page_num: int,
                     if detail.get("price"):
                         success += 1
             except Exception as e:
-                print(f"      [{i}] enrich error: {e}", flush=True)
+                log.warning(f"      [{i}] enrich error: {e}")
             if i % 10 == 0 or i == len(to_enrich):
-                print(f"      progress {i}/{len(to_enrich)} (with price: {success})",
-                      flush=True)
+                log.info(f"      progress {i}/{len(to_enrich)} (with price: {success})")
 
     # ── Gone: the detail page showed similar listings instead of this one.
     # Upserting it would re-activate the row, so it goes back for deactivation.
     if gone_urls:
-        print(f"    {len(gone_urls)} listings gone (similar-listings page instead)",
-              flush=True)
+        log.info(f"    {len(gone_urls)} listings gone (similar-listings page instead)")
         gone = set(gone_urls)
         results = [r for r in results if r["url"] not in gone]
 
@@ -1305,7 +1307,7 @@ def _scrape_page_playwright(page, capture, page_num: int,
     extra = _harvest_api_listings(capture.take(), seen_urls, now,
                                   require_url_field=True)
     if extra:
-        print(f"    + {len(extra)} listings harvested from detail-page APIs", flush=True)
+        log.info(f"    + {len(extra)} listings harvested from detail-page APIs")
         results.extend(extra)
 
     return results, enriched_ids, touch_urls, gone_urls
@@ -1356,7 +1358,7 @@ def _deactivate_non_apartments() -> int:
     finally:
         conn.close()
     if n:
-        print(f"  ↳ deactivated {n} non-apartment nehnutelnosti listings (title/url match)", flush=True)
+        log.info(f"  ↳ deactivated {n} non-apartment nehnutelnosti listings (title/url match)")
     return n
 
 
@@ -1376,7 +1378,7 @@ def _zero_bogus_prices() -> int:
     finally:
         conn.close()
     if n:
-        print(f"  ↳ zeroed {n} nehnutelnosti listings with bogus prices (< €{_PRICE_MIN:,})")
+        log.info(f"  ↳ zeroed {n} nehnutelnosti listings with bogus prices (< €{_PRICE_MIN:,})")
     return n
 
 
@@ -1414,7 +1416,7 @@ def _dedupe_canonical_urls() -> int:
     finally:
         conn.close()
     if removed:
-        print(f"  ↳ removed {removed} nehnutelnosti duplicate-slug rows")
+        log.info(f"  ↳ removed {removed} nehnutelnosti duplicate-slug rows")
     return removed
 
 
@@ -1474,7 +1476,7 @@ def _backfill_blank_districts() -> int:
     finally:
         conn.close()
     if updated:
-        print(f"  ↳ backfilled district on {updated} nehnutelnosti rows")
+        log.info(f"  ↳ backfilled district on {updated} nehnutelnosti rows")
     return updated
 
 
@@ -1487,16 +1489,15 @@ def run(max_pages: int = 10) -> int:
 
     from playwright.sync_api import sync_playwright
 
-    print(f"🔍 Nehnutelnosti.sk ({max_pages} pages, Playwright)...", flush=True)
+    log.info(f"🔍 Nehnutelnosti.sk ({max_pages} pages, Playwright)...")
     total = 0
 
     # Listings we already hold complete, recent data for — seen again below so
     # last_seen_at stays current, but their detail page is not re-opened.
     fresh_urls = get_fresh_detail_urls("nehnutelnosti", max_age_days=DETAIL_REFRESH_DAYS)
     if fresh_urls:
-        print(f"  {len(fresh_urls)} listings already enriched in the last "
-              f"{DETAIL_REFRESH_DAYS} days — their detail pages will be skipped",
-              flush=True)
+        log.info(f"  {len(fresh_urls)} listings already enriched in the last "
+                 f"{DETAIL_REFRESH_DAYS} days — their detail pages will be skipped")
     seen_urls: set[str] = set()
     touched = 0
     gone = deactivated = 0
@@ -1520,13 +1521,13 @@ def run(max_pages: int = 10) -> int:
                         upsert_listing(l)
                         total += 1
                     except Exception as e:
-                        print(f"    DB error: {e}", flush=True)
+                        log.warning(f"    DB error: {e}")
                 # Stamp only after the upsert, so a row always exists to stamp.
                 mark_details_enriched(enriched_ids)
                 touched += touch_listings(touch_urls)
                 gone += len(gone_urls)
                 deactivated += deactivate_listings(gone_urls)
-                print(f"  Page {p}: {len(listings)} found", flush=True)
+                log.info(f"  Page {p}: {len(listings)} found")
                 time.sleep(SCRAPE_DELAY_SEC)
         finally:
             browser.close()
@@ -1537,7 +1538,7 @@ def run(max_pages: int = 10) -> int:
     if total == 0 and touched == 0 and gone == 0:
         raise RuntimeError(
             "Nehnutelnosti: 0 listings after Playwright scrape.\n"
-            "Run debug_playwright.py with headless=False to inspect live page."
+            "Run dev/debug_playwright.py (a visible browser) to inspect the live page."
         )
     _deactivate_non_apartments()
     _dedupe_canonical_urls()
@@ -1548,11 +1549,12 @@ def run(max_pages: int = 10) -> int:
     )
     zero_below_regional_floor("nehnutelnosti")
     zero_above_regional_ceiling("nehnutelnosti")
-    print(f"✅ Nehnutelnosti done. {total} upserted, "
-          f"{deactivated} gone listings deactivated on sight.", flush=True)
+    log.info(f"✅ Nehnutelnosti done. {total} upserted, "
+             f"{deactivated} gone listings deactivated on sight.")
     return total
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     init_db()
     run(max_pages=2)

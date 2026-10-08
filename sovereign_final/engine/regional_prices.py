@@ -19,6 +19,9 @@ Sources:
     https://nbs.sk/statistiky/vybrane-makroekonomicke-ukazovatele/
 """
 
+import logging
+log = logging.getLogger(__name__)
+
 # Bratislava sub-district sale-price medians €/m² (Realitná únia, April 2026,
 # staršie 3-izbové byty — the most representative category for typical
 # investor targets; 1-izb and 2-izb run higher per m² in every district).
@@ -361,7 +364,7 @@ def zero_below_regional_floor(source: str) -> int:
     finally:
         conn.close()
     if flagged:
-        print(
+        log.info(
             f"  ↳ zeroed {len(flagged)} {source} listings priced below "
             f"regional NBS floor (or €{int(GLOBAL_BLANK_DISTRICT_FLOOR)}/m² when district missing)"
         )
@@ -402,7 +405,7 @@ def zero_above_regional_ceiling(source: str) -> int:
     finally:
         conn.close()
     if flagged:
-        print(
+        log.info(
             f"  ↳ zeroed {len(flagged)} {source} listings priced above "
             f"{REGIONAL_PRICE_CEILING_RATIO:g}× the regional median "
             f"(or €{int(GLOBAL_BLANK_DISTRICT_CEILING):,}/m² when district missing)"
