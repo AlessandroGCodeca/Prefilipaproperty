@@ -29,6 +29,12 @@ jobs:
           grep -v -E "^(playwright|curl_cffi)" requirements.txt > requirements-test.txt
           pip install -r requirements-test.txt pytest ruff
 
+      - name: Check requirements.txt resolves
+        # The install above leaves playwright and curl_cffi out, so a pin pip
+        # cannot find (playwright==1.56.1, never released on PyPI) passed CI
+        # and only broke the Docker build. Resolve the whole file; install nothing.
+        run: pip install --dry-run --ignore-installed --quiet -r requirements.txt
+
       - name: Lint with ruff
         # Only fail on real-bug classes (E9 syntax, F63 invalid comparisons,
         # F7 syntax issues, F82 undefined names). Style warnings don't fail.
