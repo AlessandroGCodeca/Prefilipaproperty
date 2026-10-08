@@ -101,7 +101,7 @@ def test_empty_database_renders_the_demo_view(db):
 def test_populated_database_renders_every_tab(populated_db):
     at = run_app()
     assert not at.exception, [e.value for e in at.exception]
-    assert len(at.tabs) == 9
+    assert len(at.tabs) == 10
 
 
 def test_stats_bar_counts_the_listings_on_the_page(populated_db):
@@ -588,8 +588,9 @@ def test_best_deal_ranking_puts_near_floor_discounts_after_the_rest(db):
     # the ones the card itself warns may be a deposit or an "od €X" price — to
     # the top of the GREEN list.
     from config import NEAR_FLOOR_DISCOUNT
-    from engine.regional_prices import regional_median_price
-    median = regional_median_price("Trnava") * 50
+    from engine.regional_prices import benchmark_median
+    # make_listing's flats are 2-room: the benchmark is the room-adjusted median.
+    median = benchmark_median("Trnava", 2) * 50
     for name, below in (("Suspect45", 0.45), ("Deal30", 0.30), ("Suspect41", 0.41),
                         ("Deal22", 0.22), ("Deal39", 0.39)):
         assert (below >= NEAR_FLOOR_DISCOUNT) == name.startswith("Suspect")
@@ -655,6 +656,47 @@ def test_theme_file_is_dark_and_the_grid_wraps():
     assert not re.search(r"\.stButton>button\s*\{", src)   # missed buttons with a tooltip
 
 
+
+# ── Audit A1 / A8 / A12 ───────────────────────────────────────────────────────
+def test_a_green_that_loses_money_is_flagged_and_can_be_hidden(populated_db):
+    # g1 and w1 are GREEN (far under their medians) but cost money every month.
+    at = run_app(open_cards=("g1",))
+    assert not at.exception, [e.value for e in at.exception]
+    md = markdown_of(at)
+    assert "CASH-FLOW NEGATIVE" in md
+    assert re.search(r"GREEN — ≥20% BELOW MARKET \((\d+)\) · ⛔ \1 CASH-FLOW NEGATIVE", md)
+    next(t for t in at.toggle if t.label.startswith("💶")).set_value(True).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "CASH-FLOW NEGATIVE" not in markdown_of(at)
+
+
+def test_days_count_from_the_first_scrape_and_say_so(populated_db):
+    at = run_app(open_cards=("g1",))
+    labels = {m.label for m in at.metric}
+    assert "Days tracked" in labels and "Days listed" not in labels
+
+
+def test_the_lv_to_do_lists_unverified_deals(populated_db):
+    # g1's title deed was never read: it belongs on the queue.
+    populated_db.set_lv_status("g1", "UNVERIFIED", "", "no map pin")
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("1 listing(s) waiting · 0 edited" in c.value for c in at.caption)
+    assert at.button(key="lv_todo_save").disabled
+    assert at.button(key="lv_todo_verify").disabled
+
+
+def test_a_soft_flag_on_the_lv_is_shown_not_rejected(populated_db):
+    populated_db.set_lv_status("g1", "PASS", "", "LV 4321: Clean title",
+                               soft_flags="vecné bremeno — utility / access easement: <b>x</b>")
+    at = run_app(open_cards=("g1",))
+    assert not at.exception, [e.value for e in at.exception]
+    md = markdown_of(at)
+    assert "LV SOFT FLAG" in md
+    assert "soft flags (not rejected" in md
+    assert "<b>x</b>" not in md        # escaped like every LV note
+
+
 # ── Audit O1, O4, O7 ──────────────────────────────────────────────────────────
 @pytest.fixture(autouse=True)
 def _isolated_runs(monkeypatch, tmp_path):
@@ -691,12 +733,12 @@ def test_password_gate(db, monkeypatch):
     at.text_input(key="login_pw").input("s3cret")
     at.button[0].click().run()
     assert not at.exception, [e.value for e in at.exception]
-    assert len(at.tabs) == 9
+    assert len(at.tabs) == 10   # with LV TO-DO (audit A8)
 
 
 def test_no_password_set_means_no_gate(db):
     at = run_app()
-    assert len(at.tabs) == 9
+    assert len(at.tabs) == 10   # with LV TO-DO (audit A8)
 
 
 def test_sidebar_shows_the_last_scheduled_run(db):

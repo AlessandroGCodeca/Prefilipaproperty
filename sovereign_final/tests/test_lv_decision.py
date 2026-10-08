@@ -126,10 +126,12 @@ class TestDistressStaysRejected:
 
 
 class TestClaudeSawOnlyAPrefix:
-    """analyze_lv() sends Claude the first LV_ANALYSIS_MAX_CHARS characters, and
-    an LV lists its encumbrances (part C) last. On a longer LV Claude's "safe"
-    is a read of owners and parcels, so it must not clear what the screen found
-    in the full text — but it can still reject."""
+    """An LV lists its encumbrances (part C) last. analyze_lv() used to send only
+    the first 6,000 characters, so on a long LV Claude's "safe" was a read of
+    owners and parcels. It is now sent part C whole (lv_text_for_claude), so a
+    long LV is judged like a short one — except one the cadastre report was cut
+    short on (the scraper's LV_TEXT_MAX_CHARS cap), where Claude's "safe" still
+    cannot clear what the screen found. It can always reject."""
 
     SAFE = {"risk_level": "LOW", "is_safe_to_proceed": True,
             "flags": [], "summary": "Nothing wrong in what I was shown."}
@@ -139,17 +141,33 @@ class TestClaudeSawOnlyAPrefix:
         filler = "Vlastník: Ján Novák, Hlavná 1, Žilina. " * 300   # well past the cap
         return filler + "Časť C: ŤARCHY Záložné právo v prospech Ján Škrabák, Nitra."
 
-    def test_claude_cannot_clear_a_lien_on_an_lv_it_only_partly_read(self, monkeypatch):
-        from modules.llm_enrichment import LV_ANALYSIS_MAX_CHARS
+    def test_a_long_lv_is_sent_with_part_c_whole(self):
+        from modules.llm_enrichment import lv_text_for_claude, LV_HEAD_CHARS
         lv = self._long_lv_with_private_lien()
-        assert len(lv) > LV_ANALYSIS_MAX_CHARS
+        assert len(lv) > 6_000
+        sent, complete = lv_text_for_claude(lv)
+        assert complete
+        assert sent.endswith("Záložné právo v prospech Ján Škrabák, Nitra.")
+        assert "parts A and B shortened" in sent
+        assert len(sent) < LV_HEAD_CHARS + 200
+
+    def test_claude_can_clear_a_lien_on_a_long_lv_it_read_part_c_of(self, monkeypatch):
+        _patch_claude(monkeypatch, enabled=True, analysis=self.SAFE)
+        screened = debt_bot._parse_lv(self._long_lv_with_private_lien())
+        assert screened["status"] == "REJECT"
+        assert screened["claude_may_clear"] is True      # a lien, not distress
+        assert debt_bot._decide_lv(screened)["status"] == "PASS"
+
+    def test_claude_cannot_clear_a_lien_on_an_lv_cut_short(self, monkeypatch):
+        from kataster_scraper import LV_TEXT_MAX_CHARS
+        lv = ("Časť C: ŤARCHY Záložné právo v prospech Ján Škrabák, Nitra. "
+              + "Poznámka. " * LV_TEXT_MAX_CHARS)[:LV_TEXT_MAX_CHARS]
         _patch_claude(monkeypatch, enabled=True, analysis=self.SAFE)
         screened = debt_bot._parse_lv(lv)
         assert screened["status"] == "REJECT"
-        assert screened["claude_may_clear"] is True      # a lien, not distress
         out = debt_bot._decide_lv(screened)
         assert out["status"] == "REJECT"
-        assert "only read the first" in out["detail"]
+        assert "cut short" in out["detail"]
         assert out["llm_risk_level"] == "LOW"            # the read is still recorded
 
     def test_the_same_lien_on_a_short_lv_can_still_be_cleared(self, monkeypatch):

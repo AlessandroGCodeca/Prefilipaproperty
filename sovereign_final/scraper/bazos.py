@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import SCRAPE_DELAY_SEC
+from config import SCRAPE_DELAY_SEC, SALE_PRICE_MIN_EUR
 from database import upsert_listing, init_db
 from scraper._http import get, make_session
 from scraper.nehnutelnosti import _extract_location_from_text
@@ -27,8 +27,9 @@ PAGE_URL_QS  = BASE + CATEGORY + "?hledat=&rubriky=byt&hlokalita=&humkreis=25&ce
 PAGE_SIZE    = 20
 
 # Plausible apartment sale prices — anything outside this range is treated as
-# a deposit, monthly rent, or fee rather than a real sale price.
-_PRICE_MIN = 30_000
+# a deposit, monthly rent, or fee rather than a real sale price. The floor is
+# a setting (config.SALE_PRICE_MIN_EUR); the per-region check comes after.
+_PRICE_MIN = SALE_PRICE_MIN_EUR
 _PRICE_MAX = 10_000_000
 
 

@@ -132,7 +132,14 @@ CREATE TABLE IF NOT EXISTS cashflow_scores (
     stress_ratio_sro      REAL,
     irr_sro               REAL,
     irr_personal          REAL,
-    rent_source           TEXT
+    rent_source           TEXT,
+    sro_rate_used         REAL,
+    sro_ltv_used          REAL,
+    mortgage_monthly_sro  REAL,
+    total_cash_invested_sro REAL,
+    sro_running_cost_monthly REAL,
+    rent_key              TEXT,
+    model_version         INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS location_scores (
@@ -365,6 +372,18 @@ _CASHFLOW_NEW_COLUMNS = {
     "irr_sro":                   "REAL",
     "irr_personal":              "REAL",
     "rent_source":               "TEXT",
+    # The s.r.o.'s own loan and running cost (engine.financial.sro_financing),
+    # the rent key the estimate came from (a kraj fallback or "default" is
+    # flagged on the card), the tax table and the model the score was worked
+    # out with (requeue_scores_from_older_model).
+    "sro_rate_used":             "REAL",
+    "sro_ltv_used":              "REAL",
+    "mortgage_monthly_sro":      "REAL",
+    "total_cash_invested_sro":   "REAL",
+    "sro_running_cost_monthly":  "REAL",
+    "rent_key":                  "TEXT",
+    "tax_year":                  "INTEGER",
+    "model_version":             "INTEGER",
 }
 
 
@@ -460,6 +479,9 @@ _ENRICHMENT_COLUMNS = {
     # another agency) was LV-rejected.
     "dup_group":          "TEXT",
     "dup_lv_failed":      "INTEGER",
+    # The soft flags (utility easement, a municipality's pre-emption right)
+    # on the flat's own LV at its last check — shown, not rejected.
+    "lv_soft_flags":      "TEXT",
 }
 
 
@@ -589,6 +611,9 @@ def get_all_active(rejected: bool = False):
                    c.max_price_green,      c.max_price_yellow,
                    c.stress_surplus_sro,   c.stress_ratio_sro,
                    c.irr_sro,              c.irr_personal, c.rent_source,
+                   c.sro_rate_used,        c.sro_ltv_used,
+                   c.mortgage_monthly_sro, c.total_cash_invested_sro,
+                   c.sro_running_cost_monthly, c.rent_key, c.tax_year,
                    lc.location_score,      lc.location_tier,
                    lc.nearest_transit_m,   lc.walkability_score,
                    lc.industrial_zone,     lc.construction_risk,
@@ -1176,8 +1201,8 @@ def requeue_scores_with_stale_class() -> int:
             return 0
         _ensure_cashflow_columns(conn)
         rows = conn.execute("""
-            SELECT l.id, l.price_eur, l.size_m2, l.district, c.classification,
-                   c.max_price_green, c.max_price_yellow
+            SELECT l.id, l.price_eur, l.size_m2, l.district, l.rooms,
+                   c.classification, c.max_price_green, c.max_price_yellow
             FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
             -- Only what get_unscored_cashflow() would score again.
             WHERE l.is_active = 1 AND l.price_eur > 0 AND l.size_m2 > 0
@@ -1185,14 +1210,43 @@ def requeue_scores_with_stale_class() -> int:
         """).fetchall()
         stale = [
             r["id"] for r in rows
-            if (class_at_price(r["price_eur"], r["size_m2"], r["district"] or "")
-                    != r["classification"]
-                or max_offer_price(r["size_m2"], r["district"] or "", "GREEN")
-                    != r["max_price_green"]
-                or max_offer_price(r["size_m2"], r["district"] or "", "YELLOW")
-                    != r["max_price_yellow"])
+            if (class_at_price(r["price_eur"], r["size_m2"], r["district"] or "",
+                               r["rooms"]) != r["classification"]
+                or max_offer_price(r["size_m2"], r["district"] or "", "GREEN",
+                                   rooms=r["rooms"]) != r["max_price_green"]
+                or max_offer_price(r["size_m2"], r["district"] or "", "YELLOW",
+                                   rooms=r["rooms"]) != r["max_price_yellow"])
         ]
         n = sum(_drop_cashflow_score(conn, lid) for lid in stale)
+        conn.commit()
+    finally:
+        conn.close()
+    return n
+
+
+def requeue_scores_from_older_model() -> int:
+    """Drop the scores worked out by an older version of the engine
+    (engine.financial.SCORING_MODEL_VERSION) or under another year's tax
+    table than the one scoring uses now (config.tax_rules), so the next
+    scoring run redoes them. A new tax year's table, or a change to how the
+    figures are worked out, would otherwise reach only listings scored after
+    it. Returns the number of scores dropped."""
+    from config import tax_rules
+    from engine.financial import SCORING_MODEL_VERSION
+    conn = get_conn()
+    try:
+        if not _has_table(conn, "cashflow_scores"):
+            return 0
+        _ensure_cashflow_columns(conn)
+        rows = conn.execute("""
+            SELECT l.id FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
+            -- Only what get_unscored_cashflow() would score again.
+            WHERE l.is_active = 1 AND l.price_eur > 0 AND l.size_m2 > 0
+              AND l.lv_status != 'REJECTED'
+              AND (c.model_version IS NULL OR c.model_version != ?
+                   OR c.tax_year IS NULL OR c.tax_year != ?)
+        """, (SCORING_MODEL_VERSION, tax_rules()["year"])).fetchall()
+        n = sum(_drop_cashflow_score(conn, r["id"]) for r in rows)
         conn.commit()
     finally:
         conn.close()
@@ -1345,7 +1399,7 @@ def get_price_drops(days: int = 14, min_drop: float = 0.02,
     try:
         rows = conn.execute("""
             SELECT l.id, l.title, l.district, l.url, l.source, l.price_eur,
-                   l.size_m2, l.scraped_at, c.classification AS cf_class,
+                   l.size_m2, l.rooms, l.scraped_at, c.classification AS cf_class,
                    c.max_price_yellow, c.max_price_green
             FROM listings l LEFT JOIN cashflow_scores c ON c.listing_id = l.id
             WHERE l.is_active = 1 AND l.lv_status != 'REJECTED'
@@ -1514,7 +1568,10 @@ def upsert_cashflow(data: dict):
              scored_at, mortgage_rate_used, ltv_used, loan_term_years,
              max_price_green, max_price_yellow,
              stress_surplus_sro, stress_ratio_sro,
-             irr_sro, irr_personal, rent_source)
+             irr_sro, irr_personal, rent_source,
+             sro_rate_used, sro_ltv_used, mortgage_monthly_sro,
+             total_cash_invested_sro, sro_running_cost_monthly, rent_key,
+             tax_year, model_version)
             VALUES
             (:listing_id,:estimated_rent_eur,:mortgage_monthly,:hoa_monthly,
              :property_tax_monthly,:vacancy_cost,:maintenance_monthly,:management_monthly,
@@ -1532,7 +1589,10 @@ def upsert_cashflow(data: dict):
              :scored_at,:mortgage_rate_used,:ltv_used,:loan_term_years,
              :max_price_green,:max_price_yellow,
              :stress_surplus_sro,:stress_ratio_sro,
-             :irr_sro,:irr_personal,:rent_source)
+             :irr_sro,:irr_personal,:rent_source,
+             :sro_rate_used,:sro_ltv_used,:mortgage_monthly_sro,
+             :total_cash_invested_sro,:sro_running_cost_monthly,:rent_key,
+             :tax_year,:model_version)
         """, {**dict.fromkeys(_CASHFLOW_NEW_COLUMNS), **data})
         conn.execute(
             "UPDATE listings SET classification=? WHERE id=?",
@@ -1634,18 +1694,23 @@ def update_location_risk(listing_id: str, risk: dict) -> None:
         conn.close()
 
 
-def set_lv_status(listing_id: str, status: str, reason: str = "", detail: str = "", module: str = "debt_bot"):
+def set_lv_status(listing_id: str, status: str, reason: str = "", detail: str = "",
+                  module: str = "debt_bot", soft_flags: str | None = None):
     """Record an LV check. status: PASS (the flat's own LV was read and is
     clean), UNVERIFIED (no title deed of this flat was read — lv_detail says
-    why), or REJECTED (the flat's LV carries a blocking encumbrance)."""
+    why), or REJECTED (the flat's LV carries a blocking encumbrance).
+    soft_flags: what the flat's own LV carries that is flagged, not blocking
+    (modules/lv_screen tiers); each check replaces the last one's."""
     import uuid
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
         conn.execute(
-            "UPDATE listings SET lv_status=?, lv_detail=?, lv_checked_at=? WHERE id=?",
+            "UPDATE listings SET lv_status=?, lv_detail=?, lv_checked_at=?, "
+            "lv_soft_flags=? WHERE id=?",
             (status, (detail or "")[:1000] or None,
-             datetime.now(timezone.utc).isoformat(), listing_id))
+             datetime.now(timezone.utc).isoformat(),
+             (soft_flags or "")[:1000] or None, listing_id))
         if status == "REJECTED":
             conn.execute("""
                 INSERT INTO rejections_log (id, listing_id, reason, detail, module, flagged_at)
@@ -1782,6 +1847,48 @@ def set_flat_lv(listing_id: str, lv_number: str, cadastral_area: str = ""):
                 "cadastral_number=NULL, plot_lv_number=NULL "
                 "WHERE id=? AND COALESCE(cadastral_area, '') != ?",
                 (area, listing_id, area))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_lv_todo() -> list[dict]:
+    """The LV to-do queue: active GREEN and YELLOW listings whose title deed
+    is not verified yet, best deal first. The debt filter can verify a flat
+    only through its own LV number, which comes from the seller's papers or
+    the agent — never from the map pin, whose plot LV is a different one — so
+    almost every listing starts here as UNVERIFIED."""
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        if not _has_table(conn, "cashflow_scores"):
+            return []
+        rows = conn.execute("""
+            SELECT l.id, l.title, l.district, l.address_raw, l.url, l.source,
+                   l.price_eur, l.size_m2, l.lv_status, l.lv_number,
+                   l.cadastral_area, l.cadastral_unit_code, l.cadastral_number,
+                   l.plot_lv_number, l.lv_detail, l.lv_checked_at,
+                   c.classification AS cf_class, c.market_discount
+            FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
+            WHERE l.is_active = 1
+              AND COALESCE(l.lv_status, 'PENDING') NOT IN ('PASS', 'CLEAN', 'REJECTED')
+              AND c.classification IN ('GREEN', 'YELLOW')
+            ORDER BY CASE c.classification WHEN 'GREEN' THEN 0 ELSE 1 END,
+                     c.market_discount DESC
+        """).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+def queue_lv_check(listing_id: str) -> None:
+    """Have the next LV debt-filter run check this listing whatever its last
+    check's age — for an LV number typed in without verifying it now."""
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        conn.execute("UPDATE listings SET lv_checked_at=NULL "
+                     "WHERE id=? AND lv_status='UNVERIFIED'", (listing_id,))
         conn.commit()
     finally:
         conn.close()

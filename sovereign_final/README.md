@@ -118,13 +118,14 @@ sovereign_final/
 
 | Tab | What it does |
 |-----|-------------|
-| TRIAGE TABLE | Flat, sortable view of every scored listing — grade, price, **max offer** (🟡/🟢), ask vs max offer, below-market %, rent, surplus, **+2 pp stress**, gross yield, cap rate, **IRR**, **days listed**, **price change**, **portals**, deal stage, vibe, LV status |
-| ACTIVE SNAG LIST | 🟢🟡 deal cards, 25 a page per class, each built when you open it: cost breakdown, financing stress (+2 pp, 70% LTV), location risk with sources, price history, other portals' copies, deal stage, vibe notes, **PDF memo**, LV status and flat-LV verify |
+| TRIAGE TABLE | Flat, sortable view of every scored listing — grade, price, **max offer** (🟡/🟢), ask vs max offer, below-market %, rent, surplus, **+2 pp stress**, gross yield, cap rate, **IRR**, **days tracked** (since the first scrape — not the portal's posting date), **price change**, **portals**, deal stage, vibe, LV status, **⛔ cash-flow negative** |
+| ACTIVE SNAG LIST | 🟢🟡 deal cards, 25 a page per class, each built when you open it: cost breakdown (the s.r.o.'s own loan and running cost), financing stress (+2 pp, 70% LTV), location risk with sources, price history, other portals' copies, deal stage, vibe notes, **PDF memo**, LV status and flat-LV verify; a ⛔ CASH-FLOW NEGATIVE badge and a ⚠ rent-fallback warning where they apply |
 | MAP | Every listing with coordinates, coloured by class (faded = area-level geocode) |
-| WHAT-IF / TAX | The tax toggle calculator: any listing (or a custom one) re-run with your own price, rate, LTV, term, rent, hold period, growth and exit costs — personal vs s.r.o. side by side, rate-shock table, IRR, max offer |
+| WHAT-IF / TAX | The tax toggle calculator: any listing (or a custom one) re-run with your own price, rate, LTV, term, rent, hold period, growth and exit costs, and the s.r.o.'s loan premium, LTV and running cost — personal vs s.r.o. side by side, rate-shock table, IRR, max offer |
 | DEAL PIPELINE | Board of the deals you're working: WATCHING → VIEWING → OFFER → NEGOTIATING → DUE DILIGENCE → NOTARY → CLOSED / PASSED, with a timeline per deal |
 | SATELLITE VIEWER | Listing photo vs Google satellite + Street View + vibe score, and every note saved for the listing |
 | REJECTED | Every LV rejection with its reason, detail and LV risk read; re-verify from here |
+| LV TO-DO | Every GREEN / YELLOW deal whose title deed isn't verified, with what the plot check found; type the flats' own LV numbers in bulk, then save (checked on the next LV run) or save & verify now (in the background, like the pipeline buttons) |
 | RENT COMPS | Live €/m² per district from prenájom listings vs the baseline table |
 | ONE-CLICK CLOSE | Pre-filled Slovak notary contract draft with download; the deal's numbers are a separate download, not part of the draft |
 
@@ -235,6 +236,22 @@ Classes compare the asking €/m² with the region's median
 (`engine/regional_prices.py` — Realitná únia / NBS), and the GREEN / YELLOW
 lists rank by that discount, then gross yield.
 
+- **Room count.** The medians are for older 3-room flats; a listing is judged
+  against its region's median × `MEDIAN_ROOMS_MULTIPLIER` (1-room ×1.15,
+  2-room ×1.07, 4+ ×0.95 — estimates to replace with Realitná únia's
+  per-category medians). An unknown room count keeps the 3-room figure.
+- **Bratislava.** A city part with its own median uses it. "Bratislava I"–"V"
+  with no city part named use their okres's median, weighted by the
+  population of its city parts; Lamač, Vajnory, Rusovce, Jarovce, Čunovo,
+  Devín and Záhorská Bystrica, which have no median of their own, use their
+  okres's. Plain "Bratislava" is still the city-wide figure. The card's
+  "vs Market" tooltip says which benchmark was used.
+- **Class is not cash flow.** At the median the rent covers only 60–75% of
+  all costs, so most GREEN flats still cost money every month. A flat whose
+  surplus is below `CASHFLOW_MIN_SURPLUS` (default €0/mo) carries a
+  ⛔ CASH-FLOW NEGATIVE badge, the snag-list headings count them, and the
+  sidebar's 💶 Cash-flow positive only filter hides them.
+
 | Class | Condition |
 |-------|-----------|
 | 🟢 GREEN | 20–50% below the regional median €/m² |
@@ -261,7 +278,8 @@ Existing scores from the old rule are cleared once on upgrade — run
 |-----------|---------|
 | ✅ CLEAN | The flat's **own** LV was read and nothing on it blocks |
 | ⚠ UNVERIFIED | No LV of this flat was read — the card says how far the check got |
-| ❌ REJECTED | The flat's own LV has a non-bank lien, exekúcia, konkurz, súdny spor, vecné bremeno or predkupné právo |
+| ❌ REJECTED | The flat's own LV has a non-bank lien, exekúcia, konkurz, súdny spor, a lifetime right to use or live in the flat, a private person's or company's predkupné právo, or a vecné bremeno of a kind the screen can't read |
+| ⚑ soft flag | Shown on a CLEAN (or rejected) flat, not a reason to reject: a utility / access vecné bremeno (lines, pipes, right of way) or a predkupné právo of the state or a municipality. `LV_SOFT_FLAGS_REJECT=1` rejects these too — a judgement call for you or your lawyer |
 
 How a check runs:
 
@@ -276,14 +294,36 @@ How a check runs:
    may be a neighbour's. The card shows the plot and anything its LV lists.
 3. **The flat's own LV verifies it.** Type the flat's LV number (from the
    seller's papers or the agent) and its katastrálne územie into the card and
-   press RE-VERIFY LV. A shared LV with a flag on it stays UNVERIFIED until
-   you've checked part C against the flat's number.
+   press RE-VERIFY LV — or enter many at once in the **LV TO-DO** tab, which
+   lists every GREEN / YELLOW deal still waiting for one. A shared LV with a
+   flag on it stays UNVERIFIED until you've checked part C against the flat's
+   number.
+
+So the filter does not, on its own, keep debt-laden flats off the lists: it
+rejects a flat only once its own LV has been read. Until then the flat is
+⚠ UNVERIFIED — shown, never called clean.
 
 The screen (`modules/lv_screen.py`) reads each encumbrance separately: a lien
 passes only when its **own** creditor ("v prospech …") is a bank or ŠFRB, and
 an exekúcia / konkurz / súdny spor never passes — not even when the optional
 Claude read says otherwise. Matching is inflection-aware ("začatie exekúcie",
-"záložným právom").
+"záložným právom"). An easement is read within its own entry (up to the next
+entry number), so a neighbouring entry's wording can't soften it.
+
+The optional Claude read (`ANTHROPIC_MODEL_LV`, default `claude-opus-5-5`, high
+effort, server-side refusal fallback) is sent **part C whole** — parts A and B
+are shortened on a long LV, never part C. It used to see only the first 6,000
+characters, which on a long LV stopped before the encumbrances. Its "safe" can
+clear a lien the screen couldn't attribute; it cannot clear distress, nor any
+hit on an LV the cadastre report was cut short on. Description parsing and
+address normalisation use `ANTHROPIC_MODEL_BULK` (default `claude-haiku-5-5`,
+low effort).
+
+The screen's rules were written without live LV reports to check them
+against. `tests/fixtures/lv/` holds LV texts with their expected verdicts — so
+far only **synthetic** ones. Add real, anonymised LVs with
+`dev/capture_lv_fixture.py` (from a Slovak IP; see the README there) and each
+becomes a regression test.
 
 To check the filter against a flat whose výpis you hold:
 
@@ -304,7 +344,14 @@ Slovak IP — skgeodesy.sk geo-blocks many foreign ones.
 | Income Tax | 19% / 25% | 10% reduced (≤€100k rev) / 21% |
 | Health Levy | **0%** — passive §6(3) rental is exempt from zdravotné odvody | 0% |
 | Dividend tax on distribution | n/a | 10% (→ effective double taxation) |
-| Mortgage | 3.8% p.a. | 3.8% p.a. |
+| Loan | hypotéka 3.8% p.a., 80% LTV (70% for a 3rd+ flat) | company loan: rate + `SRO_RATE_PREMIUM_PP` (1 pp), at most `SRO_LTV_RATIO` (70%) |
+| Running cost | — | `SRO_ANNUAL_RUNNING_COST` €1,200/yr (bookkeeping, accounts, office), deductible |
+
+The s.r.o. is recommended only when it nets more than personal ownership
+after its running cost and loan terms **and** that gain repays
+`SRO_SETUP_COST` within `HOLD_YEARS`. The company-loan terms and the running
+cost are estimates — set them from a bank's quote and your účtovník's (all
+three are `.env` settings).
 
 > The personal health levy was previously modelled at 16%, which wrongly
 > over-favoured the s.r.o. route. Passive rental income under §6 ods. 3 of zákon
@@ -312,7 +359,15 @@ Slovak IP — skgeodesy.sk geo-blocks many foreign ones.
 > tax-exempt. s.r.o. deducts mortgage interest (personal §6(3) does not) but
 > pays corporate **and** dividend tax. Confirm specifics with an účtovník.
 
-**Update `config.py` every January.**
+The tax figures live in `TAX_YEAR_RULES` in `config.py`, one table per tax
+year with its source and the date it was last checked; the sidebar shows
+which table scoring uses. A year with no table of its own falls back to the
+latest one and the sidebar warns. Scores worked out under another year's table
+(or by an older version of the engine) are redone on the next scoring run.
+
+**Every January, add the new year to `TAX_YEAR_RULES`.** The 2026 personal
+threshold (€41,445) is the 2023 figure carried over — it is 176.8 × the
+životné minimum, so recompute it.
 
 ---
 

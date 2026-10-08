@@ -212,11 +212,8 @@ class TestRequeueWithoutBenchmark:
         real = rp.regional_median_price
         monkeypatch.setattr(rp, "regional_median_price",
                             lambda d: None if "amor" in (d or "") else real(d))
-        import engine.financial as fin
-        monkeypatch.setattr(fin, "regional_median_price", rp.regional_median_price)
         assert run_scoring() == 2
         monkeypatch.setattr(rp, "regional_median_price", real)
-        monkeypatch.setattr(fin, "regional_median_price", real)
 
         assert db.requeue_scores_without_benchmark() == 1   # Nowhereville stays
         assert run_scoring() == 1
@@ -224,5 +221,7 @@ class TestRequeueWithoutBenchmark:
         row = c.execute("SELECT regional_median_m2 FROM cashflow_scores "
                         "WHERE listing_id='samorin'").fetchone()
         c.close()
-        assert row[0] == REGIONAL_MEDIAN_PRICE_PER_M2["TT"]
+        # The stored benchmark is the kraj median adjusted for the 2-room flat.
+        assert row[0] == pytest.approx(REGIONAL_MEDIAN_PRICE_PER_M2["TT"]
+                                       * rp.MEDIAN_ROOMS_MULTIPLIER[2])
         assert db.requeue_scores_without_benchmark() == 0

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import SCRAPE_DELAY_SEC, DETAIL_REFRESH_DAYS
+from config import SCRAPE_DELAY_SEC, DETAIL_REFRESH_DAYS, SALE_PRICE_MIN_EUR
 from database import (
     upsert_listing, init_db, get_fresh_detail_urls, mark_details_enriched,
     touch_listings, deactivate_listings,
@@ -47,8 +47,9 @@ def _check_playwright() -> bool:
 
 # Plausible apartment sale prices — anything outside this range is treated as
 # a deposit, monthly rent, "od €X" starting price, or per-m² figure rather
-# than a real sale price.
-_PRICE_MIN = 30_000
+# than a real sale price. The floor is a setting (config.SALE_PRICE_MIN_EUR);
+# the per-region check comes after.
+_PRICE_MIN = SALE_PRICE_MIN_EUR
 _PRICE_MAX = 10_000_000
 
 # Prices as rendered: "342 000 €", with any of the space characters the site

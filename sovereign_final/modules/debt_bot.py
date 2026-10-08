@@ -2,7 +2,11 @@
 modules/debt_bot.py — Sovereign Investor Dashboard
 Module D: LV (List Vlastníctva) Debt-Bot
 
-Hard stop: any non-bank lien, execution, or lawsuit = instant REJECTED.
+Hard stop: any non-bank lien, execution, or lawsuit = instant REJECTED; so
+is a lifetime right to use the flat, a private pre-emption right, or an
+easement of unknown kind. A utility / access easement and a municipality's
+pre-emption right are soft flags: stored and shown, not rejected
+(config.LV_SOFT_FLAGS_REJECT).
 
 Three verdicts, and only one of them says the title is clean:
   PASS        the flat's OWN LV was read and nothing on it blocks.
@@ -33,13 +37,14 @@ from config import LV_RECHECK_DAYS
 from database import (
     get_pending_lv, get_lv_row, set_lv_status, set_lv_analysis,
     set_parcel_data, set_flat_lv, reset_demo_rejections, init_db,
+    queue_lv_check,
 )
 from kataster_scraper import enrich_parcel, enrich_lv, parcel_at, fold
 from modules.lv_screen import screen_lv, describe
 from engine.regional_prices import kraj_for_district
 from modules.llm_enrichment import (
     is_enabled as claude_enabled, analyze_lv as claude_analyze_lv,
-    LV_ANALYSIS_MAX_CHARS,
+    lv_text_for_claude,
 )
 
 log = logging.getLogger(__name__)
@@ -57,21 +62,25 @@ def _parse_lv(lv_text) -> dict:
     entry blocks; `raw` carries the text through to _decide_lv for Claude."""
     entries = screen_lv(lv_text)
     blocking = [e for e in entries if e["blocking"]]
+    soft = [describe(e) for e in entries if e.get("tier") == "soft" and not e["blocking"]]
     if blocking:
         return {
             "status": "REJECT", "flag": blocking[0]["flag"],
             "detail": "LV encumbrance: " + "; ".join(describe(e) for e in blocking[:3]),
-            "raw": lv_text, "entries": entries,
+            "raw": lv_text, "entries": entries, "soft_flags": soft,
             # Claude may overrule a lien it can attribute to a bank, never
             # distress (exekúcia / konkurz / súdny spor).
             "claude_may_clear": all(e["kind"] != "distress" for e in blocking),
         }
     banks = [e for e in entries if e["kind"] == "lien"]
-    detail = "Clean title — no non-bank encumbrances"
+    detail = "Clean title — no blocking encumbrances"
     if banks:
         detail += f" ({len(banks)} bank lien(s): " \
                   + "; ".join(e["creditor"] or "?" for e in banks[:3]) + ")"
-    return {"status": "PASS", "detail": detail, "raw": lv_text, "entries": entries}
+    if soft:
+        detail += f" · ⚑ {len(soft)} soft flag(s): " + "; ".join(soft[:3])
+    return {"status": "PASS", "detail": detail, "raw": lv_text, "entries": entries,
+            "soft_flags": soft}
 
 
 _FLAT_NO_RE = re.compile(r"(?<!\w)byt\w*\s+c\.?\s*(\d+)")
@@ -192,8 +201,8 @@ def _decide_lv(api_result: dict) -> dict:
     directions — it can REJECT what the screen missed and PASS a lien the
     screen couldn't attribute to a bank — with two exceptions: a distress hit
     (exekúcia, konkurz, súdny spor) stays REJECTED whatever Claude says, and so
-    does any hit on an LV longer than Claude was shown (see
-    LV_ANALYSIS_MAX_CHARS). Claude can still REJECT in both cases.
+    does any hit on an LV whose part C Claude may not have seen whole (see
+    llm_enrichment.lv_text_for_claude). Claude can still REJECT in both cases.
 
     Degrades gracefully — returns the screen's decision untouched when Claude
     is disabled, there's no LV text, the call fails, or it returns an UNKNOWN
@@ -209,9 +218,10 @@ def _decide_lv(api_result: dict) -> dict:
     if not analysis or analysis.get("risk_level") == "UNKNOWN":
         return api_result  # fall back to the screen's decision
 
-    # analyze_lv() truncates; on a longer LV Claude never saw the end, where the
-    # encumbrances are, so its "safe" cannot overrule what the screen found.
-    saw_whole_lv = len(str(raw)) <= LV_ANALYSIS_MAX_CHARS
+    # Claude is sent parts A and B shortened and part C whole. When the text
+    # may be missing some of part C (the cadastre report was cut at the
+    # scraper's cap), its "safe" cannot overrule what the screen found.
+    saw_whole_lv = lv_text_for_claude(str(raw))[1]
     flags = analysis.get("flags") or []
     summary = (analysis.get("summary") or "").strip()
     level = analysis.get("risk_level")
@@ -222,6 +232,7 @@ def _decide_lv(api_result: dict) -> dict:
         "llm_risk_level": level,
         "llm_analysis": summary,
         "llm_flags": flags,
+        "soft_flags": api_result.get("soft_flags") or [],
     }
     if not analysis.get("is_safe_to_proceed") or level == "HIGH":
         decided.update({
@@ -233,8 +244,8 @@ def _decide_lv(api_result: dict) -> dict:
           and not (api_result.get("claude_may_clear", True) and saw_whole_lv)):
         why = ("exekúcia / konkurz / súdny spor still blocks"
                if not api_result.get("claude_may_clear", True) else
-               f"it only read the first {LV_ANALYSIS_MAX_CHARS} characters of a "
-               f"longer LV and the encumbrances are listed last")
+               "the LV report was cut short before it reached Claude, so it "
+               "may not have seen all of part C, where the encumbrances are")
         decided.update({
             "status": "REJECT",
             "flag": api_result.get("flag", "LV_RISK"),
@@ -263,9 +274,13 @@ def _check_and_store(row: dict, module: str = "debt_bot") -> dict:
     result = _decide_lv(result)
     if result.get("llm_risk_level"):
         set_lv_analysis(row["id"], result["llm_risk_level"], result.get("llm_analysis", ""))
+    # Soft flags are the flat's own only when its own LV was read; an
+    # UNVERIFIED check carries none (a plot LV's are not the flat's).
+    soft = ("; ".join(result.get("soft_flags") or [])
+            if result["status"] != "UNVERIFIED" else "")
     set_lv_status(row["id"], _DB_STATUS[result["status"]],
                   result.get("flag", "DEBT_FLAG"), result.get("detail", ""),
-                  module=module)
+                  module=module, soft_flags=soft or None)
     return result
 
 
@@ -327,6 +342,34 @@ def reverify(listing_id: str, lv_number: str | None = None,
     if not row:
         return {"status": "ERROR", "detail": "Not found"}
     return _check_and_store(row, module="debt_bot_reverify")
+
+
+def save_flat_lvs(entries, verify: bool = False, progress_callback=None) -> dict:
+    """Bulk entry from the LV to-do queue. `entries` is (listing_id, flat LV
+    number, katastrálne územie) for each row whose numbers were typed in or
+    changed. verify=True checks each one now (reverify); otherwise they are
+    stored and queued for the next LV debt-filter run, so a list can be typed
+    in without the cadastre being reachable.
+
+    Returns {"saved": n, "PASS": n, "REJECT": n, "UNVERIFIED": n, "ERROR": n}
+    (the verdict counts only when verify is set)."""
+    entries = list(entries)
+    out = {"saved": 0, "PASS": 0, "REJECT": 0, "UNVERIFIED": 0, "ERROR": 0}
+    for i, (listing_id, lv_no, area) in enumerate(entries):
+        if progress_callback:
+            progress_callback(i + 1, len(entries), str(lv_no or ""))
+        lv_no, area = (lv_no or "").strip(), (area or "").strip()
+        if verify:
+            try:
+                res = reverify(listing_id, lv_number=lv_no, cadastral_area=area)
+            except Exception as e:
+                res = {"status": "ERROR", "detail": str(e)}
+            out[res["status"] if res["status"] in out else "ERROR"] += 1
+        else:
+            set_flat_lv(listing_id, lv_no, area)
+            queue_lv_check(listing_id)
+        out["saved"] += 1
+    return out
 
 
 if __name__ == "__main__":

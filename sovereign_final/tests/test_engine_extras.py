@@ -119,9 +119,17 @@ class TestIrr:
 
 class TestProjectIrr:
     def test_cash_flow_shape(self):
-        res = project_irr(120_000, 60, "Nitra", ltv=0.8, hold_years=10)
+        res = project_irr(120_000, 60, "Nitra", structure="PERSONAL", ltv=0.8,
+                          hold_years=10)
         assert len(res.cash_flows) == 11
         equity_in = 120_000 * 0.2 + 120_000 * ACQUISITION_COST_RATE
+        assert res.cash_flows[0] == pytest.approx(-equity_in)
+
+    def test_the_sro_puts_in_its_own_deposit(self):
+        # A company loan lends at most SRO_LTV_RATIO of the price.
+        from config import SRO_LTV_RATIO
+        res = project_irr(120_000, 60, "Nitra", structure="SRO", ltv=0.8, hold_years=10)
+        equity_in = 120_000 * (1 - SRO_LTV_RATIO) + 120_000 * ACQUISITION_COST_RATE
         assert res.cash_flows[0] == pytest.approx(-equity_in)
 
     def test_personal_sale_after_five_years_is_tax_free(self):
@@ -163,10 +171,19 @@ class TestProjectIrr:
         assert dear < cheap
 
     def test_sale_proceeds_net_of_loan(self):
-        res = project_irr(120_000, 60, "Nitra", ltv=0.8, hold_years=10, appreciation=0.0,
-                          exit_cost_rate=0.0)
+        res = project_irr(120_000, 60, "Nitra", structure="PERSONAL", ltv=0.8,
+                          hold_years=10, appreciation=0.0, exit_cost_rate=0.0)
         assert res.sale_price == pytest.approx(120_000)
         assert res.loan_balance_exit == pytest.approx(amortization_schedule(96_000)[9][2], abs=1)
+
+    def test_the_sro_repays_its_own_loan(self):
+        from config import MORTGAGE_RATE_PA, SRO_LTV_RATIO, SRO_RATE_PREMIUM_PP
+        res = project_irr(120_000, 60, "Nitra", structure="SRO", ltv=0.8,
+                          hold_years=10, appreciation=0.0, exit_cost_rate=0.0)
+        loan = 120_000 * SRO_LTV_RATIO
+        rate = MORTGAGE_RATE_PA + SRO_RATE_PREMIUM_PP
+        assert res.loan_balance_exit == pytest.approx(
+            amortization_schedule(loan, rate)[9][2], abs=1)
 
 
 class TestDealExtras:

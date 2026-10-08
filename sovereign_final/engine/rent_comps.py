@@ -35,7 +35,7 @@ from datetime import datetime, timedelta, timezone
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
-    RENT_PER_M2, RENT_COMP_ASKING_HAIRCUT, RENT_COMP_MIN_SAMPLE,
+    RENT_COMP_ASKING_HAIRCUT, RENT_COMP_MIN_SAMPLE,
     RENT_COMP_PRIOR_WEIGHT, RENT_COMP_MAX_AGE_DAYS, RENT_MIN_EUR, RENT_MAX_EUR,
     FURNISHED_RENT_PREMIUM, SEMI_FURNISHED_PREMIUM,
 )
@@ -149,11 +149,12 @@ def aggregate(rentals: list[dict]) -> dict[str, dict]:
 
 def rates_from_comps(comps: dict[str, dict]) -> dict[str, float]:
     """{key: blended €/m²} for every key with enough comps."""
+    from engine.financial import baseline_rent
     rates = {}
     for key, c in comps.items():
         if c["n"] < RENT_COMP_MIN_SAMPLE:
             continue
-        baseline = RENT_PER_M2.get(key, RENT_PER_M2["default"])
+        baseline = baseline_rent(key)
         rates[key] = blended_rate(c["median_eur_per_m2"], c["n"], baseline)
     return rates
 
@@ -200,7 +201,7 @@ def rebuild_rent_comps(max_age_days: int = RENT_COMP_MAX_AGE_DAYS) -> dict:
              "rescored": n scores dropped for re-scoring}.
     """
     from database import get_conn, _drop_cashflow_score
-    from engine.financial import match_rent_key
+    from engine.financial import match_rent_key, baseline_rent
     conn = get_conn()
     try:
         old_rates = rates_from_comps(_stored_comps(conn))
@@ -219,8 +220,8 @@ def rebuild_rent_comps(max_age_days: int = RENT_COMP_MAX_AGE_DAYS) -> dict:
 
         changed = []
         for key in set(old_rates) | set(new_rates):
-            before = old_rates.get(key) or RENT_PER_M2.get(key, RENT_PER_M2["default"])
-            after = new_rates.get(key) or RENT_PER_M2.get(key, RENT_PER_M2["default"])
+            before = old_rates.get(key) or baseline_rent(key)
+            after = new_rates.get(key) or baseline_rent(key)
             if before and abs(after / before - 1) >= RESCORE_THRESHOLD:
                 changed.append(key)
 
@@ -248,10 +249,11 @@ def comps_table() -> list[dict]:
         stored = {}
     finally:
         conn.close()
+    from engine.financial import baseline_rent
     rates = rates_from_comps(stored)
     rows = []
     for key, c in sorted(stored.items(), key=lambda kv: -kv[1]["n"]):
-        baseline = RENT_PER_M2.get(key, RENT_PER_M2["default"])
+        baseline = baseline_rent(key)
         rows.append({
             "District key":   key,
             "Comps":          c["n"],
