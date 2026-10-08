@@ -31,6 +31,7 @@ HELPERS = [
     ("database", "init_db", ()),
     ("database", "get_all_active", ()),
     ("database", "get_stats", ()),
+    ("database", "get_active_sources", ()),
     ("database", "get_unscored_cashflow", ()),
     ("database", "requeue_scores_without_benchmark", ()),
     ("database", "upsert_cashflow", ({"listing_id": "x", "classification": "WHITE"},)),
