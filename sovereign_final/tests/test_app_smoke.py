@@ -456,12 +456,21 @@ def test_filters_that_hide_everything_say_so(populated_db):
     assert [i for i in infos if "hidden by them" in i]
 
 
-def test_a_steps_result_survives_the_rerun(populated_db):
+def test_a_steps_result_survives_the_rerun(populated_db, monkeypatch):
     # B4: st.success(...) then st.rerun() wiped the message straight away.
+    import threading
     populated_db.upsert_listing(make_listing("old", district="Trnava", scraped_at=_now_iso(40),
                                              last_seen_at=_now_iso(30)))
+    # Hold the step until the page has drawn it running, so the finish is
+    # always seen on the run _finished makes. Unheld, a quick step could
+    # finish on the click's own redraw, toast there, and leave the run this
+    # test checks without one.
+    go, real = threading.Event(), populated_db.deactivate_stale_listings
+    monkeypatch.setattr(populated_db, "deactivate_stale_listings",
+                        lambda **k: go.wait(30) and real(**k))
     at = run_app()
     _button(at, "🧹 CLEAN STALE (21d)").click().run()
+    go.set()
     _finished(at)
     assert any("Deactivated 1 stale listings" in s.value for s in at.success)
     assert any("Deactivated 1 stale listings" in t.value for t in at.toast)
