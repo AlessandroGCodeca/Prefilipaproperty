@@ -1,0 +1,11 @@
+# Dark theme to match the custom CSS in app.py. Without it Streamlit's default
+# light theme shows through on everything the CSS doesn't reach: the header bar,
+# selectboxes, number inputs, and the red slider thumbs and multiselect tags.
+# Streamlit reads this file from the folder it is started in (sovereign_final/,
+# /app in Docker).
+[theme]
+base = "dark"
+primaryColor = "#00e676"
+backgroundColor = "#07090e"
+secondaryBackgroundColor = "#0b0d14"
+textColor = "#bcc8e0"

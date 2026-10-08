@@ -514,3 +514,118 @@ def test_contract_draft_reads_like_a_draft(populated_db):
     assert "99 000,00 €" in draft and "€99,000" not in draft
     assert any("FINANČNÁ ANALÝZA" in c.value for c in at.code)
     assert populated_db.get_contract_drafts("g1")[0]["draft_text"] == draft
+
+
+# ── Audit B12–B16 ─────────────────────────────────────────────────────────────
+def _pick_listing(at, tag):
+    """Select the satellite viewer's listing whose label carries [tag]."""
+    sb = next(s for s in at.selectbox if s.label == "Select listing")
+    sb.select(next(o for o in sb.options if f"[{tag}]" in o)).run()
+    assert not at.exception, [e.value for e in at.exception]
+
+
+def _satellite_inputs(at):
+    # The deal pipeline has a "Note" box too (key pipe_note).
+    note = next(t for t in at.text_input if t.label == "Note" and t.key != "pipe_note")
+    vibe = next(s for s in at.slider if s.label == "Score (1–10)")
+    return note, vibe
+
+
+def test_a_typed_note_does_not_follow_you_to_the_next_listing(populated_db):
+    # The note box and the vibe slider had no per-listing key, so what was typed
+    # for one flat stayed in them after picking another and could be saved there.
+    at = run_app()
+    _pick_listing(at, "g1")
+    note, vibe = _satellite_inputs(at)
+    note.set_value("note for g1")
+    vibe.set_value(9)
+    at.run()
+    _pick_listing(at, "w1")
+    note, vibe = _satellite_inputs(at)
+    assert note.value == "" and vibe.value == 5
+    next(b for b in at.button if b.label == "SAVE ANNOTATION").click().run()
+    assert not any(n["note"] == "note for g1" for n in populated_db.get_annotations("w1"))
+
+
+def test_the_page_makes_no_external_font_request(db):
+    # The CSS used to @import IBM Plex from fonts.googleapis.com: a request to
+    # Google on every page view, and a silent fallback whenever it was blocked.
+    css = next(m.value for m in run_app().markdown if "<style>" in m.value)
+    assert not re.search(r"@import|url\(\s*['\"]?(https?:)?//", css)
+
+
+def _card_titles(at, prefix):
+    return [re.search(rf"{prefix}\w+", e.label).group(0) for e in at.expander
+            if re.search(rf"{prefix}\w+", e.label)]
+
+
+def test_best_deal_ranking_puts_near_floor_discounts_after_the_rest(db):
+    # Trnava, 50 m². Deepest-discount-first used to float the 45%-below rows —
+    # the ones the card itself warns may be a deposit or an "od €X" price — to
+    # the top of the GREEN list.
+    from config import NEAR_FLOOR_DISCOUNT
+    from engine.regional_prices import regional_median_price
+    median = regional_median_price("Trnava") * 50
+    for name, below in (("Suspect45", 0.45), ("Deal30", 0.30), ("Suspect41", 0.41),
+                        ("Deal22", 0.22), ("Deal39", 0.39)):
+        assert (below >= NEAR_FLOOR_DISCOUNT) == name.startswith("Suspect")
+        _add_scored(db, name, "Trnava", round(median * (1 - below)), 50, title=name)
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    assert _card_titles(at, "(?:Deal|Suspect)") == [
+        "Deal39", "Deal30", "Deal22",      # real bargains, deepest first
+        "Suspect41", "Suspect45",          # near the floor, least extreme first
+    ]
+
+
+# ── Audit B7–B11 ──────────────────────────────────────────────────────────────
+def _read(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def test_money_puts_the_sign_ahead_of_the_euro(populated_db):
+    # Prešov, €55k for 50 m² at default financing runs a monthly deficit.
+    at = run_app(open_cards=("g1", "w1", "w2"))
+    values = [m.value for m in at.metric] + [m.label for m in at.expander]
+    assert not [v for v in values if "€-" in v or "€+" in v]
+    assert any(re.match(r"^-€\d", v) for v in values), values
+
+
+def test_vs_market_fits_its_metric(populated_db):
+    at = run_app(open_cards=("g1",))
+    g1 = next(m for m in at.metric if m.label == "Below market")
+    assert re.fullmatch(r"\d+%", g1.value)
+
+
+def test_table_money_columns_use_the_euro_format():
+    # "€%d" has no thousands separator and prints negatives as €-41.
+    src = _read(APP)
+    assert 'format="€%' not in src
+    assert 'NumberColumn(format="euro", step=1' in src
+
+
+def test_test_sites_fetches_the_scrapers_own_urls(db, monkeypatch):
+    from scraper import _http, bazos, nehnutelnosti, topreality
+    fetched = []
+
+    class _Resp:
+        status_code, text = 200, "<html>"
+
+    monkeypatch.setattr(_http, "get", lambda url, **k: fetched.append(url) or _Resp())
+    at = run_app()
+    next(b for b in at.button if b.label == "🔗 TEST SITES").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert fetched == [nehnutelnosti.SEARCH_PAGE.format(page=1),
+                       bazos.BASE + bazos.CATEGORY,
+                       topreality.SEARCH_URL_CANDIDATES[0].format(page=1)]
+
+
+def test_theme_file_is_dark_and_the_grid_wraps():
+    root = os.path.dirname(APP)
+    cfg = _read(os.path.join(root, ".streamlit", "config.toml"))
+    assert 'base = "dark"' in cfg and 'primaryColor = "#00e676"' in cfg
+    src = _read(APP)
+    assert "repeat(6,1fr)" not in src and "auto-fit" in src
+    assert "#2a3450" not in src                   # 1.6:1 muted text
+    assert not re.search(r"\.stButton>button\s*\{", src)   # missed buttons with a tooltip
