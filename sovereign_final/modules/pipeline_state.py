@@ -12,7 +12,8 @@ left behind by a process that died frees itself after STALE_AFTER_S.
 
 The scheduler also writes STATUS_FILE at the start and end of every attempt,
 failed or not, so the dashboard can show when the pipeline last ran and
-whether it worked. A pipeline whose every scraper failed used to be recorded
+whether it worked. A full run started from the dashboard (▶ RUN EVERYTHING)
+writes it the same way. A pipeline whose every scraper failed used to be recorded
 as done, and nothing on the dashboard said so.
 """
 
@@ -141,37 +142,68 @@ def _short_time(iso: str | None, now: datetime | None = None) -> str:
     return f"{when.day} {when.strftime('%b %H:%M')}"
 
 
+def _lock_abandoned(lock: dict, now: datetime | None = None) -> bool:
+    """Whether the lock's heartbeat is older than STALE_AFTER_S — the next
+    PipelineLock takes it over. A row with no readable heartbeat counts as
+    kept."""
+    beat = _parse(lock.get("heartbeat_at"))
+    if not beat:
+        return False
+    return ((now or datetime.now(beat.tzinfo)) - beat).total_seconds() >= STALE_AFTER_S
+
+
 def summarize(status: dict | None, lock: dict | None,
               now: datetime | None = None) -> tuple[str, str]:
-    """(level, text) describing the last scheduled run, for the dashboard.
-    level is 'ok', 'running', 'warning' or 'error'; 'none' when no run is
-    on record."""
+    """(level, text) describing the last full pipeline run, for the
+    dashboard: the scheduler's, or one the dashboard's ▶ RUN EVERYTHING
+    started (trigger "dashboard"). level is 'ok', 'running', 'warning' or
+    'error'; 'none' when no run is on record."""
     if not status:
-        return ("none", "No scheduled run on record yet. The scheduler (started "
-                        "with the dashboard in Docker) runs the pipeline daily at 06:00.")
+        return ("none", "No full run on record yet. ▶ RUN EVERYTHING runs every step "
+                        "below in order; the scheduler (Docker starts it) runs them "
+                        "daily at 06:00.")
     def when(key):
         return _short_time(status.get(key), now)
 
+    # Started from the dashboard: no scheduler retries it or runs it again,
+    # so the text points at the button instead.
+    manual = status.get("trigger") == "dashboard"
+    run = "full run" if manual else "scheduled run"
     state = status.get("state")
     if state == "running":
-        if lock and (lock.get("holder") or "").startswith("scheduler"):
-            return "running", f"Scheduled run in progress (started {when('started_at')})."
+        # Status files from before "holder" was written are the scheduler's.
+        # A lock nobody keeps alive is left over from a process that died
+        # mid-run (the dashboard's Terminal window closed, say).
+        if (lock and lock.get("holder") == (status.get("holder") or "scheduler")
+                and not _lock_abandoned(lock, now)):
+            return "running", f"{run.capitalize()} in progress (started {when('started_at')})."
+        if manual:
+            return ("error", f"The full run started {when('started_at')} never finished — "
+                             f"the dashboard stopped mid-run. Press ▶ RUN EVERYTHING "
+                             f"to run it again.")
         return ("error", f"The scheduled run started {when('started_at')} never "
                          f"finished — the scheduler stopped mid-run. It runs again "
                          f"at its next start or at 06:00.")
     if state == "failed":
         retry = status.get("next_retry_at")
-        then = (f"Retrying at about {when('next_retry_at')}." if retry else
-                "No more retries today — check the scheduler log (logs/scheduler.log).")
-        return ("error", f"Scheduled run {when('finished_at')} FAILED: "
+        if manual:
+            then = "Press ▶ RUN EVERYTHING to try again."
+        elif retry:
+            then = f"Retrying at about {when('next_retry_at')}."
+        else:
+            then = "No more retries today — check the scheduler log (logs/scheduler.log)."
+        return ("error", f"{run.capitalize()} {when('finished_at')} FAILED: "
                          f"{status.get('error') or 'unknown error'}. {then}")
     failed = [s["step"] for s in status.get("steps", []) if not s.get("ok")]
     finished = _parse(status.get("finished_at"))
     ref = now or datetime.now(finished.tzinfo if finished else None)
     if finished and ref - finished > OVERDUE_AFTER:
+        if manual:
+            return ("warning", f"Last full run {when('finished_at')}, over a day ago. "
+                               f"Press ▶ RUN EVERYTHING to refresh.")
         return ("warning", f"Last scheduled run {when('finished_at')} — none since. "
                            f"Is the scheduler running?")
     if failed:
-        return ("warning", f"Last scheduled run {when('finished_at')}: done, but "
+        return ("warning", f"Last {run} {when('finished_at')}: done, but "
                            f"{len(failed)} step(s) failed — {', '.join(failed)}.")
-    return "ok", f"Last scheduled run {when('finished_at')}: {status.get('summary') or 'done'}."
+    return "ok", f"Last {run} {when('finished_at')}: {status.get('summary') or 'done'}."

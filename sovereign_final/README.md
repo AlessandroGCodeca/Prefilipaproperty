@@ -16,6 +16,49 @@
 That's it. Edit `.env` later and run `docker compose up -d` (or START.bat) to
 apply it — no rebuild.
 
+## Quick Start (Mac, without Docker)
+
+```
+1. Install Python 3.13  →  python.org/downloads/macos
+   (the "macOS 64-bit universal2 installer" under a 3.13.x release)
+2. Unzip this folder anywhere
+3. Copy .env.example → .env  (optional — API keys)
+4. Double-click "Start Sovereign.command" in sovereign_final/
+5. Dashboard opens in Chrome at http://localhost:8501
+```
+
+Python 3.11–3.14 work. **3.15 does not** — Streamlit needs a pyarrow that has
+no 3.15 build, so the install fails; the start file says so and looks for an
+older Python beside it.
+
+The first start installs the libraries and the scrapers' browser (Chromium)
+into `.venv/` — a few minutes; later starts take seconds, and a newer
+`requirements.txt` is installed on the next start. Keep the Terminal window it
+opens: closing it (or Ctrl+C) stops the dashboard. Double-clicking the file
+while the dashboard runs just opens the page again.
+
+If macOS won't open the file ("Apple could not verify…", usual for a
+downloaded file), click **Open Anyway** in System Settings → Privacy &
+Security, or start it once from Terminal in `sovereign_final/`:
+
+```
+bash "Start Sovereign.command"
+```
+
+No scheduler runs without Docker: click **▶ RUN EVERYTHING** in the sidebar to
+refresh everything (or run `python scheduler.py` in a second Terminal window,
+from `sovereign_final/` with `.venv/bin/activate` sourced, for the daily 06:00
+run).
+
+The start file serves the dashboard to this Mac only (`--server.address
+127.0.0.1`), as `docker-compose.yml` does. A bare `streamlit run app.py`
+listens on every network, so anyone on the same Wi-Fi could open it — see
+below.
+
+Moving to a newer download of the project: copy the `data/` folder (the
+database: listings, deal stages, notes) and `.env` from the old folder into
+the new one before the first start.
+
 ### Who can open it
 
 The dashboard listens on **this computer only** (`127.0.0.1:8501` in
@@ -76,10 +119,12 @@ sovereign_final/
 ├── config.py                 ← All 2026 Slovak tax rates
 ├── database.py               ← SQLite storage
 ├── enrich_pending.py         ← Re-read listings missing a price, size or district
+│                               (🔎 FILL MISSING DETAILS)
 ├── repair_prices.py          ← Re-read listings whose price looks borrowed
 ├── repair_districts.py       ← Fix towns misread as Bratislava, then rescore
 ├── diagnose.py               ← Data-quality report (coverage, classification)
 ├── START.bat                 ← Windows one-click launcher
+├── Start Sovereign.command   ← macOS one-click launcher (no Docker)
 ├── restart.sh                ← Restart the dashboard outside Docker
 ├── docker-compose.yml        ← dashboard + scheduler
 ├── docker/Dockerfile         ← App image
@@ -106,7 +151,7 @@ sovereign_final/
 │   ├── risk_data.py          ← Real noise / flood / construction data
 │   ├── memo.py               ← PDF investment memo
 │   ├── contract_draft.py     ← ONE-CLICK CLOSE contract draft + internal analysis
-│   ├── pipeline_state.py     ← Pipeline lock + last scheduled run's status
+│   ├── pipeline_state.py     ← Pipeline lock + last full run's status
 │   ├── jobs.py               ← Runs the sidebar buttons in the background
 │   └── backup.py             ← Daily database copy + export of your data
 └── dev/                      ← Debug probes: LV check, nehnutelnosti, topreality
@@ -142,10 +187,23 @@ a genuinely solid one. An LV that is verified clean scores above an unverified o
 ## Pipeline (Sidebar Buttons)
 
 ```
-NEHNUT → BAZOS → TOPREAL → RENT COMPS → housekeeping → LV DEBT FILTER
-       → NORM ADDR → PARSE DESC → CASHFLOW SCORE → LOCATION IQ → RISK BACKFILL
-       → MERGE PORTAL COPIES
+NEHNUT → BAZOS → TOPREAL → FILL MISSING DETAILS → RENT COMPS → housekeeping
+       → LV DEBT FILTER → NORM ADDR → PARSE DESC → CASHFLOW SCORE
+       → LOCATION IQ → RISK BACKFILL → MERGE PORTAL COPIES
 ```
+
+**▶ RUN EVERYTHING** at the top of the sidebar runs that whole chain — the
+same run the scheduler makes at 06:00, recorded the same way — for when no
+scheduler runs (the Mac start above) or you want fresh data now. It takes a
+while (each portal can take up to 30 minutes); the page stays usable.
+
+**🔎 FILL MISSING DETAILS** re-reads nehnutelnosti listings saved without a
+price, a size or a district (`enrich_pending.py`), retires the ones taken
+down, and scores what it filled in. A listing with no price or size can't be
+scored, and the daily scrape doesn't open its page again, so without this it
+stays PENDING. The pipeline does it for up to 100 listings a run — and skips
+it when nehnutelnosti blocked that run's scrape, as every read would only time
+out — the button for up to 200. Bazos and Topreality listings aren't re-read.
 
 Housekeeping = deactivate stale listings (>21d unseen) + flag dev projects.
 (Skipped on a day no portal could be read: "unseen" then says nothing.)
@@ -162,8 +220,10 @@ A run **succeeds** when at least one portal was read. When all three scrapers
 fail (blocked, offline) the run is not counted as done: it is retried an hour
 later, up to three times that day, and the dashboard says so — in red at the
 top of the page, and on the status line under PIPELINE in the sidebar, which
-always shows when the last scheduled run finished, what it found, and which
-steps failed. The details are in `logs/scheduler.log`.
+always shows when the last full run (scheduled or ▶ RUN EVERYTHING) finished,
+what it found, and which steps failed. The details are in
+`logs/scheduler.log`. After a failed ▶ RUN EVERYTHING the status line says to
+click it again — only a running scheduler retries on its own.
 
 A sidebar button runs its step **in the background**: the page stays usable,
 a progress bar shows under PIPELINE, and the result stays there until the next

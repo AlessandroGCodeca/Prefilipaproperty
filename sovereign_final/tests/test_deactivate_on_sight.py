@@ -451,3 +451,76 @@ class TestEnrichPendingSettle:
     def test_args(self, argv, limit, dry):
         import enrich_pending as ep
         assert ep._parse_args(argv) == (limit, dry)
+
+
+class TestEnrichPendingRun:
+    """run() is what the dashboard's 🔎 FILL MISSING DETAILS button and the
+    pipeline's "Fill missing details" step call: main() minus the argv and
+    the closing summary."""
+
+    def _stub_browser(self, monkeypatch, ep, reads):
+        """A stand-in playwright (CI doesn't install the real one) whose
+        detail reads come from `reads`, keyed by URL."""
+        class _Page:
+            def goto(self, *a, **k):
+                pass
+
+            def wait_for_timeout(self, ms):
+                pass
+
+        class _Ctx:
+            def add_init_script(self, script):
+                pass
+
+            def new_page(self):
+                return _Page()
+
+        class _Browser:
+            def new_context(self, **k):
+                return _Ctx()
+
+            def close(self):
+                pass
+
+        class _PW:
+            chromium = types.SimpleNamespace(launch=lambda **k: _Browser())
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        fake = types.ModuleType("playwright.sync_api")
+        fake.sync_playwright = _PW
+        monkeypatch.setitem(sys.modules, "playwright", types.ModuleType("playwright"))
+        monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
+
+        def read(page, url):
+            if isinstance(reads[url], Exception):
+                raise reads[url]
+            return reads[url]
+        monkeypatch.setattr(ep, "_scrape_detail_page", read)
+
+    def test_counts_what_it_filled_and_reports_progress(self, monkeypatch):
+        import enrich_pending as ep
+        rows = [dict(ROW, id=i, url=f"http://x/{i}") for i in ("a", "b", "c")]
+        monkeypatch.setattr(ep, "fetch_pending", lambda limit: rows)
+        # settle() has its own tests above: here a read is just what it filled.
+        monkeypatch.setattr(ep, "settle", lambda row, detail, now, dry_run=False: detail)
+        self._stub_browser(monkeypatch, ep, {
+            "http://x/a": {"price", "size"},
+            "http://x/b": {"gone"},
+            "http://x/c": RuntimeError("timeout"),     # a failed read fills nothing
+        })
+        heard = []
+        counts = ep.run(limit=5, progress_callback=lambda i, n: heard.append((i, n)))
+        assert counts == {"checked": 3, "price": 1, "size": 1, "district": 0, "gone": 1}
+        assert heard == [(1, 3), (2, 3), (3, 3)]
+
+    def test_nothing_to_do_opens_no_browser(self, monkeypatch):
+        import enrich_pending as ep
+        monkeypatch.setattr(ep, "fetch_pending", lambda limit: [])
+        # Importing playwright now would raise.
+        monkeypatch.setitem(sys.modules, "playwright.sync_api", None)
+        assert ep.run() == {"checked": 0, "price": 0, "size": 0, "district": 0, "gone": 0}

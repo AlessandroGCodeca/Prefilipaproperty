@@ -795,3 +795,141 @@ def test_a_button_waits_for_the_scheduler(db):
         at = _click(run_app(), "🧹 CLEAN STALE (21d)")
     assert not jobs.running()
     assert any("scheduler is running" in w.value for w in at.warning)
+
+
+# ── RUN EVERYTHING, FILL MISSING DETAILS, empty states ───────────────────────
+def test_run_everything_runs_the_scheduler_pipeline_under_its_job_lock(db, monkeypatch):
+    # Without Docker no scheduler runs, and a full refresh was a dozen
+    # buttons pressed in the right order.
+    import scheduler
+    from modules import pipeline_state
+    seen = {}
+
+    def fake_run_pipeline(trigger="06:00", holder=None, call=None, progress=None):
+        seen.update(trigger=trigger, holder=holder, call=call,
+                    lock=db.get_pipeline_lock()["holder"])
+        progress(4, 14, "Topreality.sk")
+        now = datetime.now(timezone.utc).isoformat()
+        pipeline_state.write_status({
+            "state": "ok", "trigger": trigger, "holder": holder, "started_at": now,
+            "finished_at": now, "summary": "🟢2 🟡1",
+            "steps": [{"step": "Backup", "ok": True},
+                      {"step": "LV Debt Filter", "ok": False}]})
+        return True
+    monkeypatch.setattr(scheduler, "run_pipeline", fake_run_pipeline)
+    at = _finished(_click(run_app(), "▶ RUN EVERYTHING"))
+    assert seen["trigger"] == "dashboard"
+    assert seen["holder"] == seen["lock"] == "dashboard: RUN EVERYTHING"
+    assert callable(seen["call"])
+    assert any("Full run done: 🟢2 🟡1" in w.value and "LV Debt Filter" in w.value
+               for w in at.warning)
+    assert any(c.value.startswith("⚠️ Last full run") for c in at.caption)
+
+
+def test_a_failed_full_run_says_why(db, monkeypatch):
+    import scheduler
+    from modules import pipeline_state
+
+    def fake_run_pipeline(**kw):
+        pipeline_state.write_status({"state": "failed", "trigger": "dashboard",
+                                     "error": "all 3 scrapers failed", "steps": []})
+        return False
+    monkeypatch.setattr(scheduler, "run_pipeline", fake_run_pipeline)
+    at = _finished(_click(run_app(), "▶ RUN EVERYTHING"))
+    assert any("Full run failed: all 3 scrapers failed" in e.value for e in at.error)
+    assert any("RUN EVERYTHING to try again" in e.value for e in at.error)
+
+
+def test_run_everything_runs_the_browser_steps_in_a_subprocess(db, monkeypatch):
+    # The `call` RUN EVERYTHING hands run_pipeline runs the scrapers and the
+    # missing-details read the way their buttons do; a failure or a timeout
+    # raises, which fails that one step.
+    import subprocess
+    import scheduler
+
+    def ok(cmd):
+        return subprocess.CompletedProcess(cmd, 0, 'progress…\n{"ok": true, "n": 7}\n', "")
+
+    def blocked(cmd):
+        return subprocess.CompletedProcess(cmd, 0, '{"ok": false, "error": "blocked"}\n', "")
+
+    def too_slow(cmd):
+        raise subprocess.TimeoutExpired(cmd, 1)
+    replies, cmds, outcomes = iter([ok, blocked, too_slow]), [], []
+
+    def fake_subprocess_run(cmd, **k):
+        cmds.append(cmd[-1])
+        return next(replies)(cmd)
+
+    def fake_run_pipeline(trigger="06:00", holder=None, call=None, progress=None):
+        for module, kw in (("enrich_pending", {"limit": 100}),
+                           ("scraper.bazos", {"max_pages": 10}),
+                           ("scraper.bazos", {"max_pages": 10})):
+            try:
+                outcomes.append(call(module, "run", **kw))
+            except Exception as e:
+                outcomes.append(e)
+        return False
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(scheduler, "run_pipeline", fake_run_pipeline)
+    _finished(_click(run_app(), "▶ RUN EVERYTHING"))
+    assert outcomes[0] == 7
+    assert "'enrich_pending'" in cmds[0] and '"limit": 100' in cmds[0]
+    assert isinstance(outcomes[1], RuntimeError) and "blocked" in str(outcomes[1])
+    assert isinstance(outcomes[2], TimeoutError) and "30-minute limit" in str(outcomes[2])
+
+
+def test_fill_missing_details_reports_what_it_found(populated_db, monkeypatch):
+    import subprocess
+    cmds = []
+
+    def fake(cmd, **k):
+        cmds.append(cmd[-1])
+        return subprocess.CompletedProcess(cmd, 0, (
+            'Found 3 listings to enrich (LIMIT=200)\n'
+            '{"ok": true, "n": {"checked": 3, "price": 1, "size": 2, "district": 0, '
+            '"gone": 1}}\n'), "")
+    monkeypatch.setattr(subprocess, "run", fake)
+    at = _finished(_click(run_app(), "🔎 FILL MISSING DETAILS"))
+    assert "'enrich_pending'" in cmds[0] and '"limit": 200' in cmds[0]
+    assert any("Re-read 3: +price 1, +size 2, +district 0, 1 taken down" in s.value
+               for s in at.success)
+
+
+def test_fill_missing_details_with_nothing_to_fill(db, monkeypatch):
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess(
+        cmd, 0, '{"ok": true, "n": {"checked": 0, "price": 0, "size": 0, "district": 0, '
+                '"gone": 0}}\n', ""))
+    at = _finished(_click(run_app(), "🔎 FILL MISSING DETAILS"))
+    assert any("No nehnutelnosti listing is missing" in i.value for i in at.info)
+
+
+def test_nothing_scored_yet_is_not_blamed_on_the_filters(db):
+    # The triage table said "No scored listings match the sidebar filters —
+    # 41 hidden by them" while a first scrape had scored nothing at all:
+    # widening the filters would not have helped.
+    seen = dict(last_seen_at=_now_iso(), scraped_at=_now_iso(1))
+    db.upsert_listing(make_listing("u1", district="Trnava", **seen))
+    db.upsert_listing(make_listing("u2", district="Trnava", size_m2=0.0, **seen))  # hidden
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    infos = [i.value for i in at.info]
+    assert not [i for i in infos if "hidden by them" in i]
+    nothing = [i for i in infos if "Nothing is scored yet — 2 listing(s) are waiting" in i]
+    assert len(nothing) == 2          # the triage table and the snag list
+    assert "FILL MISSING DETAILS" in nothing[0]
+
+
+def test_scored_listings_the_filters_hide_still_say_so(populated_db):
+    at = run_app()
+    next(s for s in at.slider if s.label == "Max Price €").set_value(10_000).run()
+    infos = [i.value for i in at.info]
+    assert [i for i in infos if "No scored listings match the sidebar filters" in i]
+    assert not [i for i in infos if "Nothing is scored yet" in i]
+
+
+def test_no_run_on_record_points_at_run_everything(db):
+    at = run_app()
+    assert any("No full run on record yet" in c.value and "RUN EVERYTHING" in c.value
+               for c in at.caption)
