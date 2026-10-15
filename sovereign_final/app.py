@@ -124,6 +124,11 @@ section[data-testid="stSidebar"] {
 .stButton button:hover, .stDownloadButton button:hover, .stFormSubmitButton button:hover {
     border-color:#00e676; color:#00e676; background:rgba(0,230,118,.04);
 }
+/* The one primary button (▶ RUN EVERYTHING) stands out from the step buttons. */
+.stButton button[data-testid="stBaseButton-primary"] {
+    border-color:#00e676; color:#00e676; background:rgba(0,230,118,.08);
+}
+.stButton button[data-testid="stBaseButton-primary"]:disabled { opacity:.4; }
 
 div[data-testid="stExpander"] { background:#0b0d14; border:1px solid #151924 !important; border-radius:3px; }
 div[data-testid="stExpander"] summary { color:#bcc8e0; }
@@ -279,10 +284,20 @@ with st.sidebar:
                + " " + _run_text)
     _job_panel()
     _busy = jobs.running()
+    do_all   = st.button("▶ RUN EVERYTHING", type="primary", width="stretch", disabled=_busy,
+                         help="Every step below, in order: the three portals, missing "
+                              "details, rent comps, LV check, scoring, location, risk, "
+                              "portal copies — what the 06:00 scheduler runs. Takes a "
+                              "while (up to an hour); the page stays usable.")
     c1, c2, c3 = st.columns(3)
     with c1: do_nehnut = st.button("NEHNUT",  width="stretch", disabled=_busy)
     with c2: do_bazos  = st.button("BAZOS",   width="stretch", disabled=_busy)
     with c3: do_topreal= st.button("TOPREAL", width="stretch", disabled=_busy)
+    do_fill  = st.button("🔎 FILL MISSING DETAILS", width="stretch", disabled=_busy,
+                         help="Re-read nehnutelnosti listings saved without a price, "
+                              "size or district (one with no price or size can't be "
+                              "scored), retire the ones taken down, then score what "
+                              "it filled in. Bazos / Topreality listings aren't re-read.")
     do_lv    = st.button("🔒 LV DEBT FILTER", width="stretch", disabled=_busy)
     do_cf    = st.button("💰 CASHFLOW SCORE", width="stretch", disabled=_busy)
     do_desc  = st.button("📝 PARSE DESC", width="stretch", disabled=_busy,
@@ -417,9 +432,10 @@ with st.sidebar:
 SCRAPER_TIMEOUT_S = 1800   # ten pages plus detail pages can pass 5 min cold
 
 
-def _run_scraper_subprocess(script_name: str) -> tuple[int, str, bool]:
-    """Run a scraper as a fresh subprocess — bypasses Python module cache.
-    Returns (listings stored, error, stopped at SCRAPER_TIMEOUT_S)."""
+def _run_in_subprocess(module: str, func: str, kwargs: dict) -> tuple[object, str, bool]:
+    """Run module.func(**kwargs) as a fresh subprocess — bypasses Python
+    module cache, and a browser that hangs can be stopped. Returns (its
+    result, error, stopped at SCRAPER_TIMEOUT_S)."""
     import subprocess, json as _json
     _dir = os.path.dirname(__file__)
     wrapper = f"""
@@ -427,8 +443,8 @@ import sys, os, json
 sys.path.insert(0, {repr(_dir)})
 try:
     import importlib
-    mod = importlib.import_module('scraper.{script_name}')
-    n = mod.run(max_pages=10)
+    mod = importlib.import_module({module!r})
+    n = getattr(mod, {func!r})(**json.loads({_json.dumps(kwargs)!r}))
     print(json.dumps({{"ok": True, "n": n}}))
 except Exception as e:
     print(json.dumps({{"ok": False, "error": str(e)}}))
@@ -440,18 +456,77 @@ except Exception as e:
         )
     except subprocess.TimeoutExpired:
         # run() has killed the scraper; uncaught, this was a raw traceback.
-        return 0, "", True
+        return None, "", True
     for line in (proc.stdout + proc.stderr).strip().splitlines():
         try:
             data = _json.loads(line)
             if data.get("ok"):
                 return data["n"], "", False
             else:
-                return 0, data.get("error", "Unknown error"), False
+                return None, data.get("error", "Unknown error"), False
         except Exception:
             continue
     stderr = proc.stderr.strip()
-    return 0, stderr or "Scraper produced no output", False
+    return None, stderr or "Scraper produced no output", False
+
+
+def _run_scraper_subprocess(script_name: str) -> tuple[int, str, bool]:
+    """Run a scraper as a fresh subprocess. Returns (listings stored, error,
+    stopped at SCRAPER_TIMEOUT_S)."""
+    n, err, timed_out = _run_in_subprocess(f"scraper.{script_name}", "run", {"max_pages": 10})
+    return n or 0, err, timed_out
+
+
+def _call_in_subprocess(module: str, func: str, **kwargs):
+    """scheduler.run_pipeline's `call` for ▶ RUN EVERYTHING: the browser-driven
+    steps (the scrapers, filling in missing details) run in a subprocess, as
+    their buttons run them. A failure raises, which fails that step only."""
+    result, err, timed_out = _run_in_subprocess(module, func, kwargs)
+    if err:
+        raise RuntimeError(err)
+    if timed_out:
+        raise TimeoutError(f"stopped at the {SCRAPER_TIMEOUT_S // 60}-minute limit; "
+                           f"what it finished is saved")
+    return result
+
+
+RUN_ALL = "RUN EVERYTHING"
+
+
+def _all_step(progress):
+    """The whole pipeline — the scheduler's run_pipeline, so a dashboard run
+    and a 06:00 run do the same steps and record the same status."""
+    import scheduler
+    from modules.pipeline_state import read_status
+    # jobs.start() holds the pipeline lock as "dashboard: <label>" already.
+    ok = scheduler.run_pipeline(trigger="dashboard", holder=f"dashboard: {RUN_ALL}",
+                                call=_call_in_subprocess, progress=progress)
+    status = read_status() or {}
+    if not ok:
+        return "error", f"❌ Full run failed: {status.get('error') or 'unknown error'}."
+    done = f"✅ Full run done: {status.get('summary') or 'see the tiles above'}."
+    failed = [s["step"] for s in status.get("steps", []) if not s.get("ok")]
+    if failed:
+        return "warning", f"{done} ⚠ {len(failed)} step(s) failed — {', '.join(failed)}."
+    return "success", done
+
+
+def _fill_step(progress):
+    counts, err, timed_out = _run_in_subprocess("enrich_pending", "run", {"limit": 200})
+    if err:
+        return "error", f"❌ Fill missing details: {err}"
+    # Stopped or not, each listing it re-read is saved: score what it filled.
+    from modules.cashflow_runner import run_scoring
+    scored = run_scoring()
+    if timed_out:
+        return "warning", (f"⏱ FILL MISSING DETAILS hit the {SCRAPER_TIMEOUT_S // 60}-minute "
+                           f"limit and was stopped. The listings it finished are saved; "
+                           f"scored {scored}. Click it again to carry on.")
+    if not counts["checked"]:
+        return "info", "ℹ️ No nehnutelnosti listing is missing a price, size or district."
+    return "success", (f"✅ Re-read {counts['checked']}: +price {counts['price']}, "
+                       f"+size {counts['size']}, +district {counts['district']}, "
+                       f"{counts['gone']} taken down. Scored {scored}.")
 
 
 def _scrape_step(module: str, name: str, button: str):
@@ -560,9 +635,11 @@ def _stale_step(progress):
 
 
 for _clicked, _label, _step in (
+    (do_all,     RUN_ALL,                  _all_step),
     (do_nehnut,  "NEHNUT",                 _scrape_step("nehnutelnosti", "Nehnutelnosti", "NEHNUT")),
     (do_bazos,   "BAZOS",                  _scrape_step("bazos", "Bazos", "BAZOS")),
     (do_topreal, "TOPREAL",                _scrape_step("topreality", "Topreality", "TOPREAL")),
+    (do_fill,    "FILL MISSING DETAILS",   _fill_step),
     (do_lv,      "LV DEBT FILTER",         _lv_step),
     (do_cf,      "CASHFLOW SCORE",         _cf_step),
     (do_desc,    "PARSE DESC",             _desc_step),
@@ -619,7 +696,8 @@ using_demo = show_demo or not raw_data
 if using_demo:
     data = DEMO
     if not raw_data:
-        st.info("ℹ️ No data in DB yet — showing demo listings. Run the pipeline to populate.")
+        st.info("ℹ️ No data in DB yet — showing demo listings. Click ▶ RUN EVERYTHING in "
+                "the sidebar to fill it.")
 else:
     data = raw_data
 # LV-rejected listings never reach the lists; the Rejected tile counts them.
@@ -682,6 +760,10 @@ def passes_filters(l, by_class=True):
 
 
 n_loaded = len(data)
+# Scored listings before the filters: with none at all, an empty table is
+# "nothing scored yet", not "the filters hid it".
+n_scored_loaded = sum(1 for l in data if (l.get("cf_class") or l.get("classification"))
+                      in ("GREEN", "YELLOW", "WHITE"))
 data = [l for l in data if passes_filters(l)]
 # One copy per flat, chosen among the copies that passed the filters above.
 if hide_dups:
@@ -726,6 +808,15 @@ def hidden_note(what="listings"):
     """The empty-state line when the filters, not the database, emptied a list."""
     return (f"No {what} match the sidebar filters — {n_hidden} listing(s) are hidden by "
             f"them (Source, Max price, Classification, …). Widen the filters to see them.")
+
+
+def unscored_note():
+    """The empty-state line for the scored lists when nothing is scored yet,
+    whatever the filters do."""
+    return (f"⏳ Nothing is scored yet — {n_loaded} listing(s) are waiting. Click "
+            f"💰 CASHFLOW SCORE (or ▶ RUN EVERYTHING) in the sidebar to sort them into "
+            f"GREEN / YELLOW / WHITE. A listing with no price or size can't be scored: "
+            f"🔎 FILL MISSING DETAILS looks them up.")
 
 
 # A failed scheduled run is easy to miss in the sidebar (collapsed on a
@@ -1292,8 +1383,13 @@ with t0:
 
     scored = greens + yellows + whites
     if not scored:
-        st.info(hidden_note("scored listings") if n_hidden else
-                "No scored listings yet — run the pipeline (NEHNUT / BAZOS / TOPREAL → 💰 CASHFLOW SCORE) to populate this view.")
+        if n_loaded and not n_scored_loaded:
+            st.info(unscored_note())
+        elif n_hidden:
+            st.info(hidden_note("scored listings"))
+        else:
+            st.info("No scored listings yet — click ▶ RUN EVERYTHING in the sidebar "
+                    "(or NEHNUT / BAZOS / TOPREAL, then 💰 CASHFLOW SCORE) to populate this view.")
     else:
         from engine.financial import compute_deal_score
         emoji_map = {"GREEN": "🟢", "YELLOW": "🟡", "WHITE": "⚪", "PENDING": "⏳"}
@@ -1388,10 +1484,11 @@ with t0:
 with t1:
     if not greens and not yellows and not whites and not pending:
         st.info(hidden_note() if n_hidden else
-                "No listings in DB yet — click NEHNUT, BAZOS, or TOPREAL in the sidebar to scrape.")
+                "No listings in DB yet — click ▶ RUN EVERYTHING (or NEHNUT, BAZOS, "
+                "TOPREAL) in the sidebar to scrape.")
     else:
         if not greens and not yellows and not whites and pending:
-            st.info(f"⏳ {len(pending)} listing(s) scraped and pending scoring. Click 💰 CASHFLOW SCORE in the sidebar to classify them.")
+            st.info(hidden_note("scored listings") if n_scored_loaded else unscored_note())
         def _neg_note(group):
             # The class is price vs market; say how many still lose money.
             n = sum(1 for l in group if _cf_negative(l))

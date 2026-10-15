@@ -9,8 +9,13 @@ A run succeeds when at least one portal was read. A failed run (every scraper
 blocked, say) is retried hourly, up to three times; each attempt's outcome is
 written to data/pipeline_status.json, which the dashboard shows.
 Keep this running alongside the dashboard.
+
+The dashboard's ▶ RUN EVERYTHING button runs the same pipeline through
+run_pipeline(), for anyone who runs the dashboard without this scheduler.
 """
 
+import contextlib
+import importlib
 import logging, sys, os
 from datetime import datetime, timedelta
 
@@ -89,7 +94,11 @@ LOCK_WAIT_S  = 3600
 SCRAPERS = (("Nehnutelnosti.sk", "scraper.nehnutelnosti"),
             ("Bazos.sk",         "scraper.bazos"),
             ("Topreality.sk",    "scraper.topreality"))
-STEP_COUNT = 13
+STEP_COUNT = 14
+# Listings the "Fill missing details" step re-reads per run. Listings whose
+# page never shows a size stay on its list, so a run re-reads at most this
+# many of them instead of all of them every day.
+FILL_DETAILS_LIMIT = 100
 
 
 def retry_due(now: datetime, last_run: datetime | None, status: dict | None) -> bool:
@@ -124,25 +133,50 @@ def _step(steps: list, n: int, name: str, fn):
     return result
 
 
-def _scrape(module: str):
+def call_here(module: str, func: str, **kwargs):
+    """Run module.func(**kwargs) in this process. The dashboard passes its own
+    `call` to run_pipeline instead, which runs the browser-driven steps in a
+    subprocess as its buttons do."""
+    return getattr(importlib.import_module(module), func)(**kwargs)
+
+
+def _scrape(module: str, call=call_here):
     def run():
-        import importlib
-        n = importlib.import_module(module).run(max_pages=10)
+        n = call(module, "run", max_pages=10)
         return n, f"{n} listings"
     return run
 
 
-def _run_steps(steps: list) -> tuple[bool, str]:
+def _run_steps(steps: list, call=call_here, progress=None) -> tuple[bool, str]:
     """The pipeline proper. Returns (ok, why not): a run is a success when at
     least one portal was read — the rest of the pipeline works on what the
-    scrapers bring in, so a day with none of them has to be tried again."""
-    from modules.backup import run_backup
-    _step(steps, 1, "Backup", lambda: (None, run_backup()))
+    scrapers bring in, so a day with none of them has to be tried again.
+    `progress(i, n, note)`, when given, hears which step is starting."""
+    def step(n, name, fn):
+        if progress:
+            progress(n, STEP_COUNT, name)
+        return _step(steps, n, name, fn)
 
-    scraped = 0
+    from modules.backup import run_backup
+    step(1, "Backup", lambda: (None, run_backup()))
+
+    scraped = set()
     for i, (name, module) in enumerate(SCRAPERS, start=2):
-        if _step(steps, i, name, _scrape(module)) is not None:
-            scraped += 1
+        if step(i, name, _scrape(module, call)) is not None:
+            scraped.add(module)
+
+    # Listings the scrapers saved without a price, a size or a district: a
+    # listing with no price or size is never scored, and the daily scrape
+    # does not open its page again. Nehnutelnosti only (enrich_pending.py).
+    def fill_details():
+        # A portal that just blocked the scrape would make every one of these
+        # page reads wait out its timeout (25 s each), on every retry.
+        if "scraper.nehnutelnosti" not in scraped:
+            return None, "skipped (Nehnutelnosti.sk couldn't be read this run)"
+        c = call("enrich_pending", "run", limit=FILL_DETAILS_LIMIT)
+        return None, (f"{c['checked']} re-read | +price {c['price']} | +size {c['size']} | "
+                      f"+district {c['district']} | {c['gone']} gone")
+    step(5, "Fill missing details", fill_details)
 
     # Rent comps. Rentals (prenájom) feed the live €/m² rents; the rebuild
     # drops the scores of listings whose district rate moved, so the scoring
@@ -153,7 +187,7 @@ def _run_steps(steps: list) -> tuple[bool, str]:
         return None, (f"{summary.get('rentals', 0)} rentals | "
                       f"{summary.get('keys', 0)} districts | "
                       f"{summary.get('rescored', 0)} queued for re-scoring")
-    _step(steps, 5, "Rent comps (prenájom)", rent)
+    step(6, "Rent comps (prenájom)", rent)
 
     # Housekeeping: stale-listing deactivation + dev-project flagging. With no
     # portal read today, "not seen for 21 days" says nothing about a listing,
@@ -165,13 +199,13 @@ def _run_steps(steps: list) -> tuple[bool, str]:
             return None, f"flagged {dev} dev projects | stale check skipped (no portal read)"
         stale = deactivate_stale_listings(days=21)
         return None, f"Deactivated {stale} stale | flagged {dev} dev projects"
-    _step(steps, 6, "Housekeeping", housekeeping)
+    step(7, "Housekeeping", housekeeping)
 
     def lv():
         from modules.debt_bot import run_debt_filter
         p, r, u = run_debt_filter()
         return None, f"Clean: {p} | Rejected: {r} | Unverified: {u}"
-    _step(steps, 7, "LV Debt Filter", lv)
+    step(8, "LV Debt Filter", lv)
 
     # Optional; needs ANTHROPIC_API_KEY (no-op without). Before scoring, so
     # blank districts resolve to a real rent rate instead of the €6.50/m²
@@ -179,47 +213,53 @@ def _run_steps(steps: list) -> tuple[bool, str]:
     def addresses():
         from modules.address_enrichment import run_address_enrichment
         return None, f"{run_address_enrichment()} districts resolved"
-    _step(steps, 8, "Address Normalization", addresses)
+    step(9, "Address Normalization", addresses)
 
     # Optional; needs ANTHROPIC_API_KEY. Before scoring, so parking/furnished
     # rent premiums are available to the cashflow engine.
     def descriptions():
         from modules.description_enrichment import run_description_enrichment
         return None, f"{run_description_enrichment()} descriptions parsed"
-    _step(steps, 9, "Description Enrichment", descriptions)
+    step(10, "Description Enrichment", descriptions)
 
     def scoring():
         from modules.cashflow_runner import run_scoring
         return None, f"{run_scoring()} scored"
-    _step(steps, 10, "Cash-Flow Scoring", scoring)
+    step(11, "Cash-Flow Scoring", scoring)
 
     def location():
         from modules.location_iq import run_location_scoring
         return None, f"{run_location_scoring(limit=200)} scored"
-    _step(steps, 11, "Location IQ", location)
+    step(12, "Location IQ", location)
 
     # Noise / flood / construction for listings located before the real risk
     # data existed (bounded per run).
     def risk():
         from modules.location_iq import run_risk_backfill
         return None, f"{run_risk_backfill(limit=100)} listings"
-    _step(steps, 12, "Risk backfill", risk)
+    step(13, "Risk backfill", risk)
 
     # Last, so it sees today's prices and LV verdicts.
     def merge():
         from database import mark_duplicates
         return None, f"{mark_duplicates()} listings in multi-portal groups"
-    _step(steps, 13, "Merge portal copies", merge)
+    step(14, "Merge portal copies", merge)
 
     if not scraped:
         return False, f"all {len(SCRAPERS)} scrapers failed"
     return True, ""
 
 
-def run_pipeline(trigger: str = "06:00") -> bool:
+def run_pipeline(trigger: str = "06:00", holder: str | None = None,
+                 call=call_here, progress=None) -> bool:
     """One attempt at the daily pipeline. Records the attempt in
     pipeline_state's status file either way, and the finish time (which
-    stops catch-ups and retries) only when it succeeded. Returns success."""
+    stops catch-ups and retries) only when it succeeded. Returns success.
+
+    The scheduler takes the pipeline lock itself. The dashboard's RUN
+    EVERYTHING already holds it when it calls this: it passes the name it
+    holds the lock under as `holder`, so the status can tell a run in
+    progress from one that died."""
     from modules import pipeline_state
 
     start = datetime.now(TZ)
@@ -227,6 +267,7 @@ def run_pipeline(trigger: str = "06:00") -> bool:
     prev = pipeline_state.read_status() or {}
     attempt = prev.get("attempt", 0) + 1 if prev.get("slot") == slot else 1
     status = {"slot": slot, "attempt": attempt, "trigger": trigger,
+              "holder": holder or "scheduler",
               "state": "running", "started_at": start.isoformat(), "steps": []}
     try:
         pipeline_state.write_status(status)
@@ -247,9 +288,11 @@ def run_pipeline(trigger: str = "06:00") -> bool:
         log.error(f"❌ DB: {e}")
         error = f"database: {e}"
     else:
+        lock = (contextlib.nullcontext() if holder else
+                pipeline_state.PipelineLock("scheduler", wait_s=LOCK_WAIT_S))
         try:
-            with pipeline_state.PipelineLock("scheduler", wait_s=LOCK_WAIT_S):
-                ok, error = _run_steps(status["steps"])
+            with lock:
+                ok, error = _run_steps(status["steps"], call=call, progress=progress)
         except pipeline_state.PipelineBusy as busy:
             error = f"{busy} — still busy after {LOCK_WAIT_S // 60} min"
             log.error(f"❌ {error}")
@@ -272,9 +315,13 @@ def run_pipeline(trigger: str = "06:00") -> bool:
                  + (f" | ⚠ failed: {', '.join(failed)}" if failed else ""))
     else:
         retry = end + RETRY_AFTER if attempt < MAX_ATTEMPTS else None
-        log.error(f"❌ PIPELINE FAILED after ~{elapsed} min: {error}. "
-                  + (f"Retrying at {retry:%H:%M}." if retry else
-                     f"No more retries today ({attempt} attempts)."))
+        if holder:      # ▶ RUN EVERYTHING: no scheduler may be running to retry
+            then = "Click ▶ RUN EVERYTHING to try again."
+        elif retry:
+            then = f"Retrying at {retry:%H:%M}."
+        else:
+            then = f"No more retries today ({attempt} attempts)."
+        log.error(f"❌ PIPELINE FAILED after ~{elapsed} min: {error}. {then}")
         status["next_retry_at"] = retry.isoformat() if retry else None
     log.info("=" * 60)
 

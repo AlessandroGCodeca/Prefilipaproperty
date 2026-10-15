@@ -18,6 +18,9 @@ This reads them through its own path.
 
   python3 enrich_pending.py [max_listings] [--dry-run]
 
+The dashboard's 🔎 FILL MISSING DETAILS button runs it too, and so does the
+pipeline (scheduler and ▶ RUN EVERYTHING) as its "Fill missing details" step.
+
 Default max_listings=200. Pass a larger number to do more. --dry-run reads
 every page and reports what it would change, writing nothing — each gone
 listing's URL is printed so the verdict can be checked in a browser first.
@@ -105,15 +108,19 @@ def settle(row: dict, detail: dict, now: str, dry_run: bool = False) -> set[str]
     return filled
 
 
-def main() -> None:
-    limit, dry_run = _parse_args(sys.argv[1:])
+def run(limit: int = 200, dry_run: bool = False, progress_callback=None) -> dict:
+    """Re-read up to `limit` listings; return what it found: "checked" (how
+    many were read), and how many gained a "price", a "size" or a
+    "district", and how many were "gone". The dashboard's 🔎 FILL MISSING
+    DETAILS button and the pipeline's "Fill missing details" step call this;
+    progress_callback(i, n), when given, hears each listing done."""
     pending = fetch_pending(limit)
     print(f"Found {len(pending)} listings to enrich (LIMIT={limit})"
           f"{'  — DRY RUN, nothing will be written' if dry_run else ''}")
+    counts = {"checked": len(pending), "price": 0, "size": 0, "district": 0, "gone": 0}
     if not pending:
-        return
+        return counts
 
-    counts = {"price": 0, "size": 0, "district": 0, "gone": 0}
     now = datetime.now(timezone.utc).isoformat()
 
     from playwright.sync_api import sync_playwright
@@ -155,6 +162,8 @@ def main() -> None:
             except Exception as e:
                 print(f"  [{i}/{len(pending)}] error: {e}", flush=True)
 
+            if progress_callback:
+                progress_callback(i, len(pending))
             if i % 20 == 0 or i == len(pending):
                 print(f"  progress {i}/{len(pending)} "
                       f"(+price: {counts['price']}, +size: {counts['size']}, "
@@ -162,7 +171,14 @@ def main() -> None:
                       flush=True)
 
         browser.close()
+    return counts
 
+
+def main() -> None:
+    limit, dry_run = _parse_args(sys.argv[1:])
+    counts = run(limit, dry_run)
+    if not counts["checked"]:
+        return
     print(f"\nDone. Added price to {counts['price']}, size to {counts['size']}, "
           f"district to {counts['district']}; deactivated {counts['gone']} "
           f"gone listings."
