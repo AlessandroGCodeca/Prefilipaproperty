@@ -488,6 +488,16 @@ CASHFLOW_MIN_SURPLUS = float(os.getenv("CASHFLOW_MIN_SURPLUS", "0") or 0)
 # ever saw them.
 SALE_PRICE_MIN_EUR = int(float(os.getenv("SALE_PRICE_MIN_EUR", "15000") or 15000))
 
+# ── Markets and currency ──────────────────────────────────────────────────────
+# Slovakia ("sk") and Czechia ("cz") run side by side; every figure above that
+# is Slovak-specific is gathered, with Czechia's counterpart, in markets.py.
+# Czech listings keep their CZK prices. For ranking and the "All markets"
+# view they are converted to EUR with this one rate — the ČNB fixing for the
+# date below. Update both together (or set them in .env).
+CZK_PER_EUR    = float(os.getenv("CZK_PER_EUR", "24.355") or 24.355)
+FX_RATE_DATE   = os.getenv("FX_RATE_DATE", "2026-10-14")
+FX_RATE_SOURCE = os.getenv("FX_RATE_SOURCE", "ČNB kurzy devizového trhu")
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 # Anchored to this folder, not the working directory: started from anywhere
 # else (`python sovereign_final/scheduler.py`, a shortcut, a scheduled task),
