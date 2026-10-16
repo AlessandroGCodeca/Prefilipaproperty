@@ -50,9 +50,14 @@ RENT_SOURCE = {
     "checked": "2026-10-16 (web search)",
 }
 
-# Okresy around a city that are not the city: a "Praha-východ" or "Brno-venkov"
-# town must not take Prague's or Brno's rent.
-_SUBURBAN_OKRES_RE = re.compile(r"(praha)\s*-\s*(vychod|zapad)|(brno)\s*-\s*venkov")
+# Okresy around a city that are not the city: a "Praha-východ", "Brno-venkov"
+# or "Plzeň-jih" town must not take Prague's, Brno's or Plzeň's rent — however
+# the okres is written ("Praha - východ", "Praha – východ", "Praha východ").
+_SUBURBAN_OKRES_RE = re.compile(
+    r"(?<!\w)(?:praha\s*[-–]?\s*(?:vychod|zapad)|brno\s*[-–]?\s*venkov|"
+    r"plzen\s*[-–]?\s*(?:jih|sever))(?!\w)")
+_OKRES_NAME = {"praha": "Praha", "brno": "Brno", "plzen": "Plzeň", "vychod": "východ",
+               "zapad": "západ", "venkov": "venkov", "jih": "jih", "sever": "sever"}
 
 
 def _fold(text: str) -> str:
@@ -69,7 +74,7 @@ def _town_key(district: str) -> str:
     "Říčany, Praha-východ" → "říčany", "Kladno - Kročehlavy" → "kladno"."""
     first = (district or "").split(",")[0]
     first = re.split(r"\s+[-–]\s+", first)[0].strip()
-    first = re.sub(r"\s*-\s*(město|jih|sever)$", "", first, flags=re.I)
+    first = re.sub(r"\s*-\s*město$", "", first, flags=re.I)
     # A numbered city part ("Plzeň 3", "Pardubice II") is its town's.
     first = re.sub(r"\s+(\d{1,2}|[ivx]{1,4})$", "", first, flags=re.I)
     return re.sub(r"\s+", " ", first).lower().strip()
@@ -87,8 +92,12 @@ def match_rent_key(district: str) -> str:
         if re.search(rf"(?<!\w){re.escape(_fold(key))}(?!\w)", searchable):
             return key
     town = _town_key(district)
-    if _SUBURBAN_OKRES_RE.fullmatch(_fold(town)):
-        return town                      # an okres name alone: its own key
+    okres = _SUBURBAN_OKRES_RE.search(folded)
+    if okres and not re.search(r"\w", folded[:okres.start()]):
+        # The okres comes first ("Praha - východ", "Brno-venkov, Šlapanice"):
+        # its own key, written one way.
+        city, part = re.findall(r"[a-z]+", okres.group())
+        return f"{_OKRES_NAME[city]}-{_OKRES_NAME[part]}".lower()
     return town or "default"
 
 

@@ -913,7 +913,7 @@ def _shown_surplus(l):
 
 
 def _cf_negative(l) -> bool:
-    return is_cashflow_negative(_shown_surplus(l))
+    return is_cashflow_negative(_shown_surplus(l), **mkw(l))
 
 
 # Apply filters
@@ -1985,8 +1985,9 @@ def _whatif_tab():
                                      (pick or {}).get("has_balcony"), rates=live_rates, **mk)
         rate_used, rent_key, rent_src = base_rent_rate(wi_district, live_rates, **mk)
     except (LookupError, TypeError):
-        # No rent figure for this market and place: the user types one.
-        est_rent, rate_used, rent_key, rent_src = 0.0, 0.0, "default", "baseline"
+        # No rent figure for this market and place: the user types one —
+        # nothing was estimated, so no estimate or fallback is captioned.
+        est_rent, rate_used, rent_key, rent_src = 0.0, 0.0, None, None
     regulator = (prof.lending_rules.get("regulator") or "NBS") if not sk else "NBS"
     with w2:
         st.markdown("**FINANCING**")
@@ -2016,8 +2017,9 @@ def _whatif_tab():
                                            "bank fees — paid every year the company exists.")
     with w3:
         st.markdown("**RENT & HOLD**")
-        st.caption(f"Estimate {amt(cur, est_rent, '/mo')} · {rate_used:.2f} {sym}/m² for '{rent_key}' "
-                   f"({'live comps' if rent_src == 'live' else 'baseline table'})")
+        if rent_src:
+            st.caption(f"Estimate {amt(cur, est_rent, '/mo')} · {rate_used:.2f} {sym}/m² for "
+                       f"'{rent_key}' ({'live comps' if rent_src == 'live' else 'baseline table'})")
         _fb = _rent_fallback({"rent_key": rent_key, "market": wm})
         if _fb:
             st.caption("⚠ " + ("National default rent — this town is in no rent table."
@@ -2276,11 +2278,26 @@ with t_rej:
         if rv_opts:
             rv_pick = st.selectbox("Re-check a rejection (titles change — a lien can be cleared)",
                                    list(rv_opts.keys()), key="rej_pick")
+            # A Czech flat is judged on the výpis pasted for it, and its card
+            # is no longer shown: a newer (or the right) výpis goes in here.
+            rv_id, rv_doc = rv_opts[rv_pick], None
+            if next((r_.get("_market") for r_ in rejected if r_["id"] == rv_id), "sk") == "cz":
+                from database import get_lv_document
+                rv_doc = st.text_area(
+                    "Výpis z LV (text)", value=get_lv_document(rv_id) or "",
+                    key=f"rej_doc_{rv_id}", height=110,
+                    help="Paste a newer výpis z LV of this flat, then RE-VERIFY LV. "
+                         "Left blank, the flat has no výpis and rejoins the lists as "
+                         "UNVERIFIED.")
             if st.button("RE-VERIFY LV", key="rej_rv", width="stretch"):
                 try:
                     from modules.debt_bot import reverify
                     from database import mark_duplicates
                     from kataster_scraper import quick_requests
+                    if rv_doc is not None:
+                        from database import get_lv_document, set_lv_document
+                        if rv_doc.strip() != (get_lv_document(rv_id) or "").strip():
+                            set_lv_document(rv_id, rv_doc)
                     with st.spinner("Checking the cadastre..."), quick_requests():
                         res = reverify(rv_opts[rv_pick])
                     # A copy that is no longer rejected rejoins its group and
@@ -2545,9 +2562,13 @@ with t2:
 # ── Tab 3: One-Click Close ────────────────────────────────────────────────────
 with t3:
     st.markdown('<div class="muted">ONE-CLICK CLOSE — NOTARY CONTRACT DRAFT GENERATOR</div>', unsafe_allow_html=True)
-    st.markdown('<div class="muted" style="color:#ff5252;margin-bottom:16px">⚠️ DRAFT ONLY — no legal validity until executed before a licensed Slovak notár</div>', unsafe_allow_html=True)
+    # The warning names the country's own way to a valid contract, so it is
+    # written once the listing is chosen.
+    close_hdr = st.empty()
+    _sk_close_hdr = '<div class="muted" style="color:#ff5252;margin-bottom:16px">⚠️ DRAFT ONLY — no legal validity until executed before a licensed Slovak notár</div>'
 
     if not data:
+        close_hdr.markdown(_sk_close_hdr, unsafe_allow_html=True)
         st.info(hidden_note() if n_hidden else "No listings loaded.")
     else:
         opts = {f"{l.get('title') or '?'} — {amt(l, l.get('price_eur') or 0)} [{(l.get('id') or '')[:6]}]": l
@@ -2556,6 +2577,11 @@ with t3:
         # A Czech flat gets the Czech draft (modules/contract_draft_cz): a
         # kupní smlouva for a Czech advokát, amounts in Kč.
         close_cz = markets.of_row(sel3) == "cz"
+        close_hdr.markdown(
+            '<div class="muted" style="color:#ff5252;margin-bottom:16px">⚠️ DRAFT ONLY — no '
+            'legal validity until a Czech advokát or notář completes it; ownership passes on '
+            'its entry (vklad) into the katastr nemovitostí</div>' if close_cz else _sk_close_hdr,
+            unsafe_allow_html=True)
         if close_cz:
             st.warning("🇨🇿 Kupní smlouva — NÁVRH k posouzení českým advokátem (nebo notářem); "
                        "nejde o právní radu ani o hotovou smlouvu.")

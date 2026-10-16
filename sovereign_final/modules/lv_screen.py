@@ -164,6 +164,9 @@ class Vocabulary:
     tier: object                 # (label, folded entry text, holder) -> (tier, why)
     entry_no_re: re.Pattern
     distress_lien_prefix: str    # "exekučné záložné právo": the distress's own lien
+    # A back-reference stays in its own entry: a lien phrase with an entry
+    # separator (entry_no_re) since the last lien is a new lien (Czech).
+    reference_needs_same_entry: bool = False
 
 
 SK_VOCABULARY = Vocabulary(
@@ -238,7 +241,9 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
             if marker:
                 break
         if marker is None and is_reference and last_lien_at is not None \
-                and start - last_lien_at <= _ENTRY_SPAN:
+                and start - last_lien_at <= _ENTRY_SPAN \
+                and not (v.reference_needs_same_entry
+                         and v.entry_no_re.search(low, last_lien_at, start)):
             continue
         if marker is not None:
             c_start = end + marker.end()

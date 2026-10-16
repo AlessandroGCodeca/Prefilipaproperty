@@ -35,6 +35,7 @@ import logging
 import re
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -45,7 +46,7 @@ from database import (
 )
 from scraper._http import get, make_session
 from scraper.cz_common import (
-    PortalBlocked, require_robots, listing_record, sale_price, energy_cz,
+    PortalBlocked, require_robots, robots_allows, listing_record, sale_price, energy_cz,
     is_excluded_cz, cleanup,
 )
 from scraper.geo import pin_from_item
@@ -119,7 +120,13 @@ def walk_sitemap(session, fetch=None, offer: str = "prodej") -> list[tuple[int, 
     collect(index)
     children = [u for u in sitemap_locs(index)
                 if u.split("?")[0].endswith((".xml", ".xml.gz")) and u != SITEMAP_INDEX]
+    host = urlparse(SITEMAP_INDEX).netloc
     for child in children[:MAX_CHILD_SITEMAPS]:
+        # The index is the remote's document: only its own host's sitemaps,
+        # and only those its robots.txt lets us read.
+        if urlparse(child).netloc != host or not robots_allows(child)[0]:
+            log.warning(f"    sitemap {child}: skipped (another host, or robots.txt)")
+            continue
         try:
             st, b = fetch(child)
         except Exception as e:

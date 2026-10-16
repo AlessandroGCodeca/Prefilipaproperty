@@ -136,7 +136,7 @@ before; Czechia is added next to it.
 | Rentals (comps) | Bazoš `/pronajmu/byt/`, Bezrealitky rental pages | `scraper/rentals_cz.py` → `engine/rent_comps_cz.py` |
 | Rent baseline | Deloitte Rent Index Q2 2026: Praha 462, Praha 7 493, Brno 390, Hradec Králové 318, Pardubice 314, Jihlava 257, Ostrava 254, Ústí nad Labem 221 Kč/m² | other towns: live comps only, or not scored |
 | Sale-price medians | none could be read whole — **the table is empty**, so every Czech listing is WHITE; `data/cz_regional_prices.csv` fills it (format in `engine/regional_prices_cz.py`) | gap |
-| Title deed (LV) | the flat's **výpis z LV, pasted on its card**, screened with Czech vocabulary — PASS / REJECTED / UNVERIFIED as in Slovakia | ČÚZK's free services give no LV contents to a program; nahlížení is CAPTCHA-guarded |
+| Title deed (LV) | the flat's **výpis z LV, pasted on its card** (or, once rejected, in the REJECTED tab), screened with Czech vocabulary — PASS / REJECTED / UNVERIFIED as in Slovakia. PASS needs part C in the text, every entry of parts C–D to be one the screen knows, and the LV number and k.ú. to match the card's; a cooperative flat (its ad, or a družstvo owning it in part A) is never PASS | ČÚZK's free services give no LV contents to a program; nahlížení is CAPTCHA-guarded |
 | Cadastre lookups | ČÚZK API KN (free key: `CZ_CUZK_API_KEY`) + RÚIAN address points: the building under the pin, its LV and pending proceedings | never PASS on its own |
 | Flood | ÚÚR national map, VÚV T. G. M. Q100 flood areas (indicative) | `modules/risk_data_cz.py` |
 | Noise | OpenStreetMap proxy + 2022 strategic noise map of main roads (MZ ČR) | ≥65 dB flags the flat |
@@ -165,9 +165,9 @@ named here override them.
 9. Parking, furnished and balcony rent premiums, and the hold assumptions (price and rent growth, cost inflation, exit costs): carried over from Slovakia.
 10. ČÚZK API KN paths and fields (from its OpenAPI document as copied in January 2025) and the RÚIAN address layer (layer 1, field `kod`).
 11. The ÚÚR flood layer (82) and the noise map's REST path and value encoding.
-12. The výpis z LV layout the Czech screen reads (part headings, "Oprávnění pro"); without headings it reads the whole text.
+12. The výpis z LV layout the Czech screen reads (part headings, "Oprávnění pro", the "o" entry bullet, the V-/Z-/POLVZ/PV register numbers, the "Kat.území" line); without a part C heading it reads the whole text and never calls the title clean.
 13. Portal page shapes: Sreality's v1 API, Bezrealitky's sitemap and `__NEXT_DATA__` advert, iDNES's country-wide search and parameter list, Bazoš CZ's cards (taken as the Slovak site's).
-14. Each portal's robots.txt, as captured by an open-source collector on 2026-09-15 — the scrapers re-read it live every run.
+14. Each portal's robots.txt, as captured by an open-source collector on 2026-09-15 — the scrapers read it live, keeping a copy a day at most (a missing one an hour).
 
 ## Files
 

@@ -51,18 +51,24 @@ class Robots:
         groups: list[tuple[list[str], list[tuple[bool, str]]]] = []
         agents: list[str] = []
         rules: list[tuple[bool, str]] = []
-        for raw in (text or "").splitlines():
+        seen_rule = False
+        text = text or ""
+        for bom in ("\ufeff", "\u00ef\u00bb\u00bf"):    # a UTF-8 BOM, decoded or not
+            if text.startswith(bom):
+                text = text[len(bom):]
+        for raw in text.splitlines():
             line = raw.split("#", 1)[0].strip()
             if ":" not in line:
                 continue
             key, value = (x.strip() for x in line.split(":", 1))
             key = key.lower()
             if key == "user-agent":
-                if rules:                       # a new group starts
+                if seen_rule:                   # a new group starts
                     groups.append((agents, rules))
-                    agents, rules = [], []
+                    agents, rules, seen_rule = [], [], False
                 agents.append(value.lower())
             elif key in ("allow", "disallow") and agents:
+                seen_rule = True                # an empty one still ends the agents
                 if value:                       # an empty Disallow allows all
                     rules.append((key == "allow", value))
         if agents:
@@ -89,6 +95,13 @@ class Robots:
 
 
 _robots_cache: dict[str, Robots | None] = {}
+# When each fetched entry goes stale (time.monotonic()). A copy is used for a
+# day at most (RFC 9309 §2.4); a 4xx — which allows everything, and may be a
+# passing 429 or WAF answer — for an hour. An entry with no expiry (one a
+# test seeds) never goes stale.
+_robots_expires: dict[str, float] = {}
+ROBOTS_TTL_SEC = 24 * 3600
+ROBOTS_MISSING_TTL_SEC = 3600
 
 
 def robots_allows(url: str, fetch=None) -> tuple[bool, str]:
@@ -97,24 +110,29 @@ def robots_allows(url: str, fetch=None) -> tuple[bool, str]:
     An unreachable robots.txt (network error, 5xx) is not a permission: the
     caller learns why. A missing one (4xx) allows everything, by the
     standard's own rule."""
+    import time
     parts = urlparse(url)
     root = f"{parts.scheme}://{parts.netloc}"
-    if root not in _robots_cache:
+    stale = time.monotonic() >= _robots_expires.get(root, float("inf"))
+    if root not in _robots_cache or stale:
         if fetch is None:
             def fetch(u):
                 from scraper._http import get
                 r = get(u, timeout=15)
-                return r.status_code, r.text
+                # Bytes as UTF-8 (the RFC's encoding), any BOM dropped.
+                return r.status_code, r.content.decode("utf-8-sig", errors="replace")
         try:
             status, text = fetch(root + "/robots.txt")
         except Exception as e:
             return False, f"robots.txt unreachable ({type(e).__name__})"
         if 400 <= status < 500:
             _robots_cache[root] = None
+            _robots_expires[root] = time.monotonic() + ROBOTS_MISSING_TTL_SEC
         elif status != 200:
             return False, f"robots.txt answered HTTP {status}"
         else:
             _robots_cache[root] = Robots(text, ROBOTS_AGENT)
+            _robots_expires[root] = time.monotonic() + ROBOTS_TTL_SEC
     rules = _robots_cache[root]
     if rules is None or rules.allows(url):
         return True, ""
@@ -133,9 +151,10 @@ def fold(text: str) -> str:
                    if unicodedata.category(c) != "Mn").lower()
 
 
-# "3 450 000 Kč", "3.450.000 Kč", "3450000 CZK", "3 450 000,- Kč".
+# "3 450 000 Kč", "3.450.000 Kč", "3450000 CZK", "3 450 000,- Kč". An amount
+# starts a number: "52 m2 850 000 Kč" is 850 000, never 2 850 000.
 _CZK_RE = re.compile(
-    r"(\d{1,3}(?:[\s\xa0  .]\d{3})+|\d{4,10})\s*(?:,-\s*)?(?:Kč|CZK)", re.I)
+    r"(?<![\w²+])(\d{1,3}(?:[\s\xa0  .]\d{3})+|\d{4,10})\s*(?:,-\s*)?(?:Kč|CZK)", re.I)
 # An amount stated per month or per m² is a rent or a rate, not the price.
 _PER_RE = re.compile(r"^\s*(?:/|za)\s*(?:m[ěe]s|m2|m²|m\b|noc|den)", re.I)
 
@@ -202,14 +221,17 @@ def layout_cz(text: str) -> str:
 
 
 ENERGY_VALID = {"A", "B", "C", "D", "E", "F", "G"}
+# The class is a capital letter, as every portal writes it: "PENB a revize"
+# is "PENB and wiring check", not class A.
 _ENERGY_RE = re.compile(
-    r"(?:penb|energeticka\s+narocnost(?:\s+budovy)?|trida)\W{0,12}(?:trida\s+)?([a-g])(?![a-z])")
+    r"(?i:penb|energetick[aáeé]\s+n[aá]ro[cč]nost\w*(?:\s+budovy)?|t[rř][ií]d[ay])"
+    r"[\W_]{0,12}(?:(?i:t[rř][ií]da)\s+)?([A-G])(?![^\W\d_])")
 
 
 def energy_cz(text: str) -> str:
     """The PENB class (A–G — the same scale as Slovakia's) from text such as
     "Třída G - Mimořádně nehospodárná" or "PENB: C", else "UNKNOWN"."""
-    m = _ENERGY_RE.search(fold(text))
+    m = _ENERGY_RE.search(unicodedata.normalize("NFC", text or ""))
     if m and m.group(1).upper() in ENERGY_VALID:
         return m.group(1).upper()
     return "UNKNOWN"
@@ -223,16 +245,27 @@ def area_cz(text: str) -> float:
 # ── What a sale-flat listing is not ───────────────────────────────────────────
 # Stems matched at the start of a word in diacritic-folded text (as the
 # Slovak EXCLUDE_KEYWORDS are). The first group excludes wherever it stands —
-# a rental, an auction, a share of a flat ("prodej podílu", a co-ownership
-# share — "s podílem na pozemku" is an ordinary flat's land share and does
-# not count), non-residential space; the second only when
-# it comes before the flat's own noun ("Prodej garáže", not "byt s garáží").
-CZ_ALWAYS_EXCLUDE = ("pronajem", "podnajem", "drazb", "aukc", r"prodej\s+podil",
+# a rental, an auction, a share of a flat (_SHARE_RE below), non-residential
+# space; the second only when it comes before the flat's own noun or layout
+# ("Prodej garáže", not "byt s garáží" nor "Prodej 2+kk s garáží").
+CZ_ALWAYS_EXCLUDE = ("pronajem", "podnajem", "drazb", "aukc",
                      "spoluvlastnick", "nebytov", "ubytovn", "hotel", "penzion")
 CZ_PROPERTY_EXCLUDE = ("rodinn", "pozem", "garaz", "parkovac", "kancelar", "chat",
                        "chalup", "komercn", "sklad", "obchodn", "restaura", "vil")
 _ALWAYS_RE = re.compile(r"(?<![^\W\d_])(?:" + "|".join(CZ_ALWAYS_EXCLUDE) + ")")
 _PROPERTY_RE = re.compile(r"(?<![^\W\d_])(?:" + "|".join(CZ_PROPERTY_EXCLUDE) + ")")
+# A share of a flat, not the flat: "Prodám podíl na bytě", "Prodej 1/2 podílu",
+# "1/2 bytu", "id. 1/2", "podíl 1/3". A flat's land share — "s podílem na
+# pozemku", "včetně podílu" — is no sale of a share and does not count.
+_SHARE_RE = re.compile(
+    r"(?<![^\W\d_])(?:prodej\w*|proda[mv]\w*|nabiz\w*)\s+(?:(?:id\.?|idealn\w*)\s*)?"
+    r"(?:\d{1,2}\s*/\s*\d{1,2}\s+)?podil"
+    r"|(?<![^\W\d_])(?:id\.|idealn\w*)\s*\d{1,2}\s*/\s*\d{1,2}(?!\d)"
+    r"|(?<![\w/])\d{1,2}\s*/\s*\d{1,2}\s+"
+    r"(?:podil\w*(?!\w)(?!\s+(?:na\s+)?pozem)|(?:na\s+)?(?:byt[ue]|jednotk))"
+    r"|(?<![^\W\d_])podil\w*\s+\d{1,2}\s*/\s*\d{1,2}(?![\d/])(?!\s+(?:na\s+)?pozem)")
+# A layout names the flat as "byt" does; a URL slug drops the "+" ("2kk").
+_SLUG_LAYOUT_RE = re.compile(r"(?<![^\W\d_])[1-9]-?kk(?![^\W\d_])")
 
 
 def is_excluded_cz(*texts: str) -> bool:
@@ -240,10 +273,12 @@ def is_excluded_cz(*texts: str) -> bool:
     from scraper.textparse import _APARTMENT_NOUN_RE, _is_street_name
     for t in texts:
         folded = fold(t)
-        if _ALWAYS_RE.search(folded):
+        if _ALWAYS_RE.search(folded) or _SHARE_RE.search(folded):
             return True
         for m in _PROPERTY_RE.finditer(folded):
-            if _APARTMENT_NOUN_RE.search(folded, 0, m.start()):
+            if (_APARTMENT_NOUN_RE.search(folded, 0, m.start())
+                    or _LAYOUT_RE.search(folded, 0, m.start())
+                    or _SLUG_LAYOUT_RE.search(folded, 0, m.start())):
                 continue
             if not _is_street_name(folded, m.start()):
                 return True
@@ -332,7 +367,12 @@ def _place_table() -> dict[str, tuple[str, int]]:
         entries.append((part, part if part.lower().startswith("brno") else f"Brno - {part}", 1))
     towns = {"Praha"}
     for okres in OKRES_KRAJ:
-        if okres.startswith("Hlavní město") or _RURAL_OKRES_RE.search(fold(okres)):
+        if okres.startswith("Hlavní město"):
+            continue
+        if _RURAL_OKRES_RE.search(fold(okres)):
+            # "Praha-východ", "Brno-venkov": the okres around a city is not
+            # the city — named whole, it is its own place.
+            entries.append((okres, okres, 1))
             continue
         towns.add(re.sub(r"-město$", "", okres))
     towns.update(_load_obce())
@@ -352,6 +392,11 @@ def _place_table() -> dict[str, tuple[str, int]]:
 
 _TOKEN_RE = re.compile(r"\w+")          # "Ostrava-Poruba" is two words
 _LOC_PREP = {"v", "ve", "na"}
+# A bare Brno city part ("Vinohrady", "Komín", "Černovice") is Brno's only
+# when the text names Brno: Prague has its Vinohrady, Tábor its Černovice.
+_BRNO_NAMED_RE = re.compile(r"(?<!\w)brn(?:o|e|a|em|u)(?!\w)")
+# "Praha 2" is a district; "Praha 2+kk", "Praha, 5 minut od metra" are not.
+_NOT_A_DISTRICT_NO_RE = re.compile(r"\s*(?:\+|kk(?!\w)|min)")
 
 
 def place_from_text(text: str) -> str:
@@ -366,6 +411,7 @@ def place_from_text(text: str) -> str:
         return ""
     table = _place_table()
     low = pfold(snippet)
+    brno_named = bool(_BRNO_NAMED_RE.search(low))
     tokens = [(m.start(), m.end()) for m in _TOKEN_RE.finditer(low)]
     best = None                                   # (-words, rank, start, district)
     for i, (start, _) in enumerate(tokens):
@@ -377,6 +423,15 @@ def place_from_text(text: str) -> str:
                 hit = table["L:" + phrase]
             elif ("N:" + phrase) in table and snippet[start].isupper():
                 hit = table["N:" + phrase]
+            if hit and hit[0].startswith("Brno - ") and not brno_named:
+                hit = None
+            if hit and n > 1 and low[tokens[i + n - 1][0]:tokens[i + n - 1][1]].isdigit():
+                # A district number follows its city's name directly (a
+                # space or a hyphen) and is no layout or minute count.
+                gap = low[tokens[i + n - 2][1]:tokens[i + n - 1][0]]
+                rest = low[tokens[i + n - 1][1]:]
+                if not re.fullmatch(r"\s*(?:[-–]\s*)?", gap) or _NOT_A_DISTRICT_NO_RE.match(rest):
+                    hit = None
             if hit:
                 cand = (-n, hit[1], start, hit[0])
                 if best is None or cand < best:

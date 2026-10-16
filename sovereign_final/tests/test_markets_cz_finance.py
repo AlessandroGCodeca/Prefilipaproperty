@@ -13,6 +13,20 @@ from engine import property_tax_cz as ptax
 CZ = markets.CZ
 
 
+@pytest.fixture(autouse=True)
+def _no_user_medians(monkeypatch):
+    """The medians a user's own data/cz_regional_prices.csv loads stay out of
+    these tests: each starts from the empty tables the code ships with."""
+    from engine import regional_prices_cz as rpcz
+    for table in ("KRAJ_MEDIAN", "OKRES_MEDIAN", "PRAHA_DISTRICT_MEDIAN",
+                  "BRNO_DISTRICT_MEDIAN", "MEDIAN_SOURCE"):
+        monkeypatch.setattr(rpcz, table, {})
+    monkeypatch.setattr(rpcz, "_TABLES", {"kraj": rpcz.KRAJ_MEDIAN, "okres": rpcz.OKRES_MEDIAN,
+                                          "praha": rpcz.PRAHA_DISTRICT_MEDIAN,
+                                          "brno": rpcz.BRNO_DISTRICT_MEDIAN})
+    monkeypatch.setattr(rpcz, "SOURCE", dict(rpcz._DEFAULT_SOURCE))
+
+
 def _rules(year=None):
     return markets.tax_rules(year, "cz")
 

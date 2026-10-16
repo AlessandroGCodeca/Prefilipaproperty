@@ -314,12 +314,15 @@ def lv_text_for_claude(lv_text, market: str = "sk") -> tuple[str, bool]:
     from kataster_scraper import LV_TEXT_MAX_CHARS
     if market == "sk":
         from modules.lv_screen import part_c_start
+        raw = str(lv_text or "")
     else:
-        from modules.lv_screen_cz import part_c_start
-    raw = str(lv_text or "")
+        from modules.lv_screen_cz import part_c_start, _norm
+        raw = _norm(lv_text)
     # Judged before stripping: a report cut at the cap just after a space is
-    # still a cut report. A Czech výpis is pasted whole by hand: never cut.
-    complete = len(raw) < LV_TEXT_MAX_CHARS or market != "sk"
+    # still a cut report. A Czech výpis is pasted by hand, never cut — but
+    # holds part C only if its heading is there (page 1 of 2 does not).
+    complete = (len(raw) < LV_TEXT_MAX_CHARS if market == "sk"
+                else part_c_start(raw) is not None)
     text = raw.strip()
     start = part_c_start(text)
     if start is not None and start > LV_HEAD_CHARS:

@@ -367,9 +367,12 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
 
     pdf.h2("Caveats")
     if cz:
-        pdf.para("Rent, market value and risk flags are estimates from public data; there "
-                 "are no Czech regional price medians in this app yet, so the class is "
-                 "WHITE until there are. Rent is the Deloitte Rent Index (Q2 2026) figure "
+        medians = ("the market value is judged against the regional median above (its "
+                   "source as given)" if median_m2 else
+                   "there is no Czech regional price median for this place in this app, so "
+                   "the class is WHITE")
+        pdf.para("Rent, market value and risk flags are estimates from public data; "
+                 f"{medians}. Rent is the Deloitte Rent Index (Q2 2026) figure "
                  "or live pronájem comps. "
                  f"Taxes use the {l.get('tax_year') or 'current'} Czech tax table (ZDP): "
                  "§ 9 rental income taxed after the larger of actual expenses and the 30 % "

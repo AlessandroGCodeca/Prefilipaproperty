@@ -321,7 +321,7 @@ _DEV_PROJECT_TITLE_MARKERS = (
 # A Czech project's title says "1. fáze" / "2. etapa" or quotes a starting
 # price in crowns ("Byty od 3 990 000 Kč"); the Slovak markers above apply too.
 _DEV_PROJECT_TITLE_MARKERS_CZ = ("1. fáze", "2. fáze", "3. fáze", "developerský projekt")
-_DEV_PROJECT_FROM_CZK_RE = re.compile(r"(?<!\w)od\s+\d[\d\s\xa0.]*\s*(?:kč|czk)")
+_DEV_PROJECT_FROM_CZK_RE = re.compile(r"(?<!\w)od\s+\d[\d\s\xa0.]*(?:,-)?\s*(?:kč|czk)")
 
 
 def detect_dev_project(url: str, title: str, market: str = "sk") -> int:
@@ -2016,8 +2016,10 @@ def _ensure_lv_documents_table(conn):
 
 
 def set_lv_document(listing_id: str, lv_text: str) -> None:
-    """Store the pasted text of a flat's výpis z LV; blank removes it."""
-    text = (lv_text or "").strip()
+    """Store the pasted text of a flat's výpis z LV; blank removes it. Kept
+    composed (NFC): text copied from a PDF may come decomposed."""
+    import unicodedata
+    text = unicodedata.normalize("NFC", lv_text or "").strip()
     conn = get_conn()
     try:
         _ensure_lv_documents_table(conn)

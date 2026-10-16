@@ -131,10 +131,18 @@ def test_progress_runs_through_both_markets(files, full_db, stubbed):
     assert heard[0][2] == "SK · Backup" and heard[-1][2] == "CZ · Merge portal copies"
 
 
-def test_catch_up_and_retry_are_per_market(files, full_db, stubbed):
+def test_catch_up_and_retry_are_per_market(files, full_db, stubbed, monkeypatch):
     from datetime import datetime
+
+    # A fixed clock after 06:00: a run ending 05:00–06:00 would owe its retry
+    # to the next slot, and the test would fail an hour a day.
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return scheduler.TZ.localize(datetime(2026, 10, 16, 7, 0))
+    monkeypatch.setattr(scheduler, "datetime", Clock)
     stubbed("scraper.bazos")
-    now = datetime.now(scheduler.TZ)
+    now = Clock.now(scheduler.TZ)
     assert scheduler.due_markets(now) == ["sk", "cz"]
     scheduler.run_all_markets()
     # Slovakia succeeded; Czechia failed and owes a retry once its time comes.

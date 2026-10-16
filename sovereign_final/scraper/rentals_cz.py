@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
 from datetime import datetime, timezone
 
@@ -51,20 +52,34 @@ _NOT_A_RENTAL = ("prodej", "prodam", "drazb", "nebytov", "kancelar", "garaz",
                  "sklad", "obchodni prostor")
 
 
+# What an amount is when it is not the rent: a deposit (kauce, jistina), an
+# advance for services or energy (zálohy, služby, energie), fees, commission.
+_NOT_RENT = r"kauc|zaloh|poplat|proviz|vratn|jistin|sluzb|energi|depozit"
+# ... named just before it — "Kauce: 30 000 Kč", "služby 4 500 Kč", "vratná
+# kauce ve výši 30 000 Kč" (a word or two may stand between) ...
+_NOT_RENT_BEFORE_RE = re.compile(rf"(?:{_NOT_RENT})\w*\W{{0,3}}(?:\w{{1,6}}\W{{1,3}}){{0,2}}$")
+# ... or right after it — "4 500 Kč měsíčně energie", "3 000 Kč na služby"
+# (not "15 000 Kč/měs. + služby", where the label is the next amount's).
+_NOT_RENT_AFTER_RE = re.compile(
+    rf"^[ \t]*(?:/[ \t]*)?(?:(?:za[ \t]+)?mes\w*\.?[ \t]*)?(?:(?:na|za)[ \t]+)?(?:{_NOT_RENT})")
+
+
 def rent_from_text(text: str) -> float:
     """The monthly rent in Kč a text states: an amount marked per month
     first, else the first plain one — never a deposit (kauce), an advance
-    for services (zálohy), fees or commission, nor a per-m² figure."""
-    import re
+    for services or energy (zálohy, služby, energie), fees or commission,
+    nor a per-m² figure."""
     from scraper.cz_common import _CZK_RE
     monthly, plain = [], []
     for m in _CZK_RE.finditer(text or ""):
         after = fold(text[m.end():m.end() + 16])
-        # The words before the amount, within its own clause.
-        before = re.split(r"[,;:\n+]", fold(text[max(0, m.start() - 30):m.start()]))[-1]
+        # The words before the amount, within its own clause ("Kauce: 30 000
+        # Kč" keeps its label; "…energie, nájem 12 000 Kč" is the rent's).
+        before = re.split(r"[,;\n+]", fold(text[max(0, m.start() - 30):m.start()]))[-1]
         if re.match(r"\s*(?:/|za)\s*m(?:2|²)", after):
             continue
-        if re.search(r"kauc|zaloh|poplat|proviz|vratn|jistin", before):
+        if _NOT_RENT_BEFORE_RE.search(before) or \
+                _NOT_RENT_AFTER_RE.match(fold(text[m.end():m.end() + 40])):
             continue
         try:
             v = float(re.sub(r"[\s\xa0  .]", "", m.group(1)))

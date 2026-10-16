@@ -2,7 +2,8 @@
 modules/lv_cz.py — the title-deed (LV, list vlastnictví) check for a Czech
 listing, under modules/debt_bot's three verdicts:
 
-  PASS        the flat's own výpis z LV was read and nothing in it blocks.
+  PASS        the flat's own výpis z LV was read — its part C there, every
+              entry of parts C–D one the screen knows — and nothing blocks.
   REJECTED    the flat's own výpis z LV carries a blocking encumbrance.
   UNVERIFIED  no výpis of this flat was read — the detail says how far the
               check got (the building under the map pin, its LV, pending
@@ -34,9 +35,14 @@ from modules.lv_screen import fold
 NAHLIZENI_URL = "https://nahlizenidokn.cuzk.gov.cz/"
 _HINT = ("Paste the flat's výpis z LV (CzechPOINT or ČÚZK dálkový přístup) on its "
          "card to verify it.")
+# "Vlastnictví: družstevní", "družstevní byt", "(družstevní)", "členský podíl /
+# členská práva", "podíl v (bytovém) družstvu" — not "dříve družstevní", "z
+# družstevního do osobního", "není družstevní", nor a building an "bytové
+# družstvo" merely manages.
 _COOP_RE = re.compile(
-    r"vlastnictvi\s*:?\s*druzstev|druzstevn\w*\s+(?:byt|vlastnictv|podil)|"
-    r"prevod\w*\s+(?:druzstevn\w*\s+)?(?:clensk\w*\s+prav|podil\w*\s+v\s+druzstv)")
+    r"vlastnictvi\s*:?\s*druzstev|"
+    r"(?<!drive )(?<!puvodne )(?<!z )(?<!neni )(?<!\w)druzstevn\w*|"
+    r"(?<!\w)clensk\w*\s+(?:prav|podil)\w*|podil\w*\s+v\s+(?:bytov\w*\s+)?druzstv")
 
 
 def _unverified(detail: str, **extra) -> dict:
@@ -48,20 +54,66 @@ def is_cooperative(description: str) -> bool:
     return bool(_COOP_RE.search(fold(description or "")))
 
 
-def check_text(lv_text: str, lv_number=None) -> dict:
+def _ku_differs(stated: tuple[str, str] | None, card: str) -> bool:
+    """True when the výpis's k.ú. (code, folded name) is plainly not the
+    card's k.ú. ("727440", "Žižkov" or "k.ú. Žižkov [727440]")."""
+    if not stated or not (card or "").strip():
+        return False
+    code, name = stated
+    card_code = re.search(r"(?<!\d)\d{6}(?!\d)", card)
+    if code and card_code:
+        return card_code.group() != code
+    card_name = re.sub(r"\bk\.?\s*u\.?\s|\[?\d+\]?|katastraln\w*\s+uzemi", " ", fold(card))
+    card_name = re.sub(r"\s+", " ", card_name).strip(" :.,")
+    if not card_name or not name:
+        return False
+    return card_name not in name and name not in card_name
+
+
+def check_text(lv_text: str, lv_number=None, cadastral_area: str = "") -> dict:
     """The verdict on a pasted výpis z LV — modules/debt_bot._parse_lv with
-    the Czech screen."""
+    the Czech screen. A clean result needs part C to have been read whole: a
+    text with no part C heading (page 1 of 2, or not a výpis at all), or one
+    whose parts C–D hold an entry the screen does not know, is UNVERIFIED —
+    a blocking entry still REJECTs."""
     from modules.debt_bot import _parse_lv
-    from modules.lv_screen_cz import screen_lv_cz, lv_number_in, unit_numbers
+    from modules.lv_screen_cz import (
+        screen_lv_cz, lv_number_in, unit_numbers, part_c_start, unrecognised_entries,
+        ku_in, _norm,
+    )
+    lv_text = _norm(lv_text)
     stated = lv_number_in(lv_text)
     wanted = str(lv_number or "").strip()
     if wanted and stated and stated != wanted:
         return _unverified(f"The pasted výpis is LV {stated}; the card says the flat is "
                            f"on LV {wanted}. {_HINT}")
+    # LV numbers start again in every k.ú.: the same number in the next
+    # k.ú. is another property.
+    ku = ku_in(lv_text)
+    if _ku_differs(ku, cadastral_area):
+        return _unverified(f"The pasted výpis is for k.ú. {ku[1] or ku[0]}; the card says "
+                           f"k.ú. {cadastral_area.strip()}. {_HINT}")
     decision = _parse_lv(lv_text, screen=screen_lv_cz)
     units = unit_numbers(lv_text)
     label = f"LV {stated or wanted}" if (stated or wanted) else "The pasted LV"
-    if decision["status"] == "REJECT" and len(units) > 1:
+    if decision["status"] == "PASS":
+        if part_c_start(lv_text) is None:
+            return _unverified(
+                f"{label}: the pasted text has no part C ('C Věcná práva zatěžující "
+                f"nemovitosti…'), so its encumbrances weren't read — paste the whole "
+                f"výpis, parts A to E. {_HINT}")
+        unknown = unrecognised_entries(lv_text)
+        if unknown:
+            return _unverified(
+                f"{label}: nothing blocking was recognised, but parts C–D hold "
+                f"{len(unknown)} entr{'y' if len(unknown) == 1 else 'ies'} the screen "
+                f"does not know ({'; '.join(unknown[:3])}) — read "
+                f"{'it' if len(unknown) == 1 else 'them'} before relying on this title.")
+    # Several units on one Czech LV are one owner's: a private lien may be
+    # another unit's, but distress (exekuce, insolvence, a court's ban) binds
+    # every unit the owner has.
+    if decision["status"] == "REJECT" and decision.get("claude_may_clear") \
+            and len(units) > 1:
         return _unverified(
             f"{label} lists {len(units)} units and "
             f"{decision['detail'].removeprefix('LV encumbrance: ')} — check part C "
@@ -121,10 +173,12 @@ def check_building(row: dict) -> dict:
 def check_listing(row: dict) -> dict:
     """LV verdict for one Czech listing row (a get_pending_lv() row)."""
     from database import get_lv_document, get_listing_description
+    from modules.lv_screen_cz import owner_is_cooperative
     doc = get_lv_document(row["id"])
-    coop = is_cooperative(get_listing_description(row["id"]))
+    coop = is_cooperative(get_listing_description(row["id"])) or \
+        bool(doc and owner_is_cooperative(doc))
     if doc:
-        result = check_text(doc, row.get("lv_number"))
+        result = check_text(doc, row.get("lv_number"), row.get("cadastral_area") or "")
         if coop:
             return _unverified(
                 "Cooperative flat (družstevní byt): no LV of its own — the pasted LV is "

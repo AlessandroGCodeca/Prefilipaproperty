@@ -68,7 +68,10 @@ def energies_included(text: str) -> bool:
 def furnishing_from_text(text: str) -> str:
     """'furnished' / 'semi' / 'unfurnished' / 'unknown' from Czech ad text."""
     t = _fold(text)
-    if re.search(r"nezarizen|nevybaven", t):
+    # A bathroom's fittings or a fitted kitchen say nothing about furniture.
+    t = re.sub(r"socialni\w*\s+zarizeni\w*|zarizen\w*\s+kuchyn\w*|"
+               r"kuchyn\w*(?:\s+\w+){0,2}\s+zarizen\w*", " ", t)
+    if re.search(r"nezarizen|nevybaven|bez\s+nabytku", t):
         return "unfurnished"
     if re.search(r"castecne\s+(?:zarizen|vybaven)", t):
         return "semi"
@@ -77,13 +80,20 @@ def furnishing_from_text(text: str) -> str:
     return "unknown"
 
 
-# Not a whole flat let long-term: a room, a bed, a nightly let.
+# Not a whole flat let long-term: a room on offer (not a flat that names its
+# "obývací pokoj" or "3 pokoje"), a bed, a shared flat, a nightly let.
 _NOT_A_FLAT_RE = re.compile(
-    r"(?<!\w)pokoj(?:e|u)?(?!\w)|podnajem\s+pokoj|spolubydl|(?<!\w)luzk|ubytovan|"
+    r"(?:pro|pod)najem\s+pokoj|pokoj\w*\s+k\s+(?:pro|pod)najmu|"
+    r"(?:volny|samostatny)\s+pokoj\s+ve?\s+|pokoj\w*\s+ve\s+sdilen|ve\s+sdilen\w*\s+byt|"
+    r"spolubydl|(?<!\w)luzk|ubytovan|"
     r"(?:na|za|/)\s*noc(?!\w)|na\s+den(?!\w)|kratkodob|airbnb")
 
 
 def is_long_term_flat(*texts: str) -> bool:
+    """False for a room, a bed, a shared or a short let. The first text is
+    the title: one that starts with "Pokoj" offers a room."""
+    if texts and re.match(r"\W*pokoj", _fold(texts[0])):
+        return False
     return not _NOT_A_FLAT_RE.search(" ".join(_fold(t) for t in texts))
 
 

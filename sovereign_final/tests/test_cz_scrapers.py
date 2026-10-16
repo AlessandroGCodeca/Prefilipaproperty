@@ -268,7 +268,8 @@ def test_bezrealitky_sale_flat_urls():
     assert bezrealitky.sale_flat_url("https://www.bezrealitky.cz/vypis/x") is None
 
 
-def test_bezrealitky_walks_a_gzipped_sitemap_index():
+def test_bezrealitky_walks_a_gzipped_sitemap_index(robots):
+    robots("https://www.bezrealitky.cz", "User-agent: *\nDisallow: /vyhledat*\n")
     child = "https://www.bezrealitky.cz/sitemap/adverts-1.xml.gz"
     index = f"<sitemapindex><sitemap><loc>{child}</loc></sitemap></sitemapindex>".encode()
     urls = "".join(f"<url><loc>{B}{u}</loc></url>" for u in (
@@ -280,6 +281,24 @@ def test_bezrealitky_walks_a_gzipped_sitemap_index():
     assert [k for k, _ in got] == [1000003, 1000001]          # newest first, sales only
     with pytest.raises(cz.PortalBlocked):
         bezrealitky.walk_sitemap(None, fetch=lambda u: (403, b""))
+
+
+def test_bezrealitky_reads_no_child_sitemap_robots_or_its_host_rule_out(robots):
+    robots("https://www.bezrealitky.cz", "User-agent: *\nDisallow: /sitemap/private\n")
+    robots("https://api.bezrealitky.cz", "User-agent: *\nDisallow: /\n")
+    kids = ["https://api.bezrealitky.cz/sitemap/adverts-1.xml",
+            "https://www.bezrealitky.cz/sitemap/private-1.xml",
+            "https://elsewhere.example.cz/sitemap/adverts-2.xml",
+            "https://www.bezrealitky.cz/sitemap/adverts-3.xml"]
+    index = "<sitemapindex>" + "".join(f"<sitemap><loc>{k}</loc></sitemap>" for k in kids) \
+        + "</sitemapindex>"
+    asked = []
+
+    def fetch(u):
+        asked.append(u)
+        return (200, index.encode()) if u == bezrealitky.SITEMAP_INDEX else (200, b"<urlset/>")
+    bezrealitky.walk_sitemap(None, fetch=fetch)
+    assert asked == [bezrealitky.SITEMAP_INDEX, kids[3]]
 
 
 def test_bezrealitky_advert_to_listing():

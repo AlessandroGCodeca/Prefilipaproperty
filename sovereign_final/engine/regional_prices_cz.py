@@ -109,6 +109,7 @@ SOURCE = {
                "are empty unless data/cz_regional_prices.csv supplies them"),
     "checked": "2026-10-16",
 }
+_DEFAULT_SOURCE = dict(SOURCE)          # before any CSV is read (the tests' baseline)
 
 # A median's room basis and the adjustment for other room counts: no source
 # states the Czech spread, so 1.0 for every count (UNVERIFIED).

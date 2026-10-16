@@ -23,6 +23,7 @@ run_pipeline() with no market is the Slovak pipeline, exactly as before.
 import contextlib
 import importlib
 import logging, sys, os
+import threading
 from datetime import datetime, timedelta
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -499,6 +500,10 @@ def run_all_markets(trigger: str = "06:00", holder: str | None = None,
         run_them()
     else:
         try:
+            # The lock lives in the database: a first start must create the
+            # tables before taking it.
+            from database import init_db
+            init_db()
             with pipeline_state.PipelineLock("scheduler", wait_s=LOCK_WAIT_S):
                 run_them()
         except pipeline_state.PipelineBusy as busy:
@@ -507,6 +512,13 @@ def run_all_markets(trigger: str = "06:00", holder: str | None = None,
             for m in todo:
                 _record_failure(m, trigger, None, error)
                 results[m] = False
+        except Exception as e:
+            error = f"pipeline could not start: {type(e).__name__}: {e}"
+            log.error(f"❌ {error}")
+            for m in todo:
+                if m not in results:
+                    _record_failure(m, trigger, None, error)
+                    results[m] = False
     log.info("📊 Markets: " + " | ".join(
         f"{m.upper()} {'✅' if ok else '❌'}" for m, ok in results.items()))
     return results
@@ -527,14 +539,26 @@ def due_markets(now: datetime, kind: str = "catch_up") -> list[str]:
     return out
 
 
+# This process's own runs, one at a time: a retry that comes due while the
+# 06:00 run is still on its next market waits for it (the next 10-minute
+# tick), instead of queueing on the database lock and losing an attempt.
+_RUN_GUARD = threading.Lock()
+
+
 def run_daily() -> None:
-    run_all_markets(trigger="06:00")
+    with _RUN_GUARD:
+        run_all_markets(trigger="06:00")
 
 
 def retry_failed_run() -> None:
-    due = due_markets(datetime.now(TZ), "retry")
-    if due:
-        run_all_markets(trigger="retry", which=due)
+    if not _RUN_GUARD.acquire(blocking=False):
+        return
+    try:
+        due = due_markets(datetime.now(TZ), "retry")
+        if due:
+            run_all_markets(trigger="retry", which=due)
+    finally:
+        _RUN_GUARD.release()
 
 
 if __name__ == "__main__":
@@ -551,7 +575,8 @@ if __name__ == "__main__":
     if owed:
         log.info(f"   No run since the last 06:00 for {', '.join(m.upper() for m in owed)} "
                  f"— running now...")
-        run_all_markets(trigger="catch-up", which=owed)
+        with _RUN_GUARD:
+            run_all_markets(trigger="catch-up", which=owed)
 
     scheduler = BlockingScheduler(timezone=TZ)
     scheduler.add_job(
