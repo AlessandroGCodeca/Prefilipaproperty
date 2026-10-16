@@ -103,5 +103,21 @@ def test_a_slovak_only_database_looks_as_before(_isolated):
     assert not at.exception, [e.value for e in at.exception]
     md = _md(at)
     assert "CZ 0" not in md and "Kč" not in md
-    # No Czech status line until Czechia has portals or a run of its own.
-    assert not any(c.value.startswith(("ℹ️ CZ", "✅ CZ")) for c in at.caption)
+    # Czechia has portals, so it has a status line of its own; Slovakia's
+    # reads as before, tagged.
+    captions = [c.value for c in at.caption]
+    assert any(c.startswith("ℹ️ CZ · ") for c in captions)
+    assert any(c.endswith(" · SK") for c in captions)
+
+
+def test_no_czech_status_line_without_czech_portals(_isolated, monkeypatch):
+    import scheduler
+    monkeypatch.setitem(scheduler.SCRAPERS, "cz", ())
+    db = _isolated
+    now = datetime.now(timezone.utc).isoformat()
+    db.upsert_listing(make_listing("sk1", district="Žilina", last_seen_at=now, scraped_at=now))
+    at = run()
+    assert not at.exception, [e.value for e in at.exception]
+    captions = [c.value for c in at.caption]
+    assert not any(" CZ · " in c for c in captions)
+    assert not any(c.endswith(" · SK") for c in captions)

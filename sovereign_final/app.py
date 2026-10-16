@@ -316,12 +316,14 @@ with st.sidebar:
     with c2: do_bazos  = st.button("BAZOS",   width="stretch", disabled=_busy)
     with c3: do_topreal= st.button("TOPREAL", width="stretch", disabled=_busy)
     # Czech portals (scheduler.SCRAPERS["cz"]), one button each.
+    _CZ_BUTTONS = {"scraper.bezrealitky": "BEZREAL", "scraper.idnes": "IDNES",
+                   "scraper.bazos_cz": "BAZOS CZ", "scraper.sreality": "SREALITY"}
     _cz_clicks = []
     _cz_portals = _scheduler.SCRAPERS.get("cz") or ()
     if _cz_portals:
         st.markdown('<div class="muted">CZ portals</div>', unsafe_allow_html=True)
         for _col, (_name, _module) in zip(st.columns(len(_cz_portals)), _cz_portals):
-            _label = _name.split(".")[0].upper()[:8]
+            _label = _CZ_BUTTONS.get(_module) or _name.split(".")[0].upper()[:8]
             with _col:
                 _cz_clicks.append((st.button(_label, key=f"cz_{_module}", width="stretch",
                                              disabled=_busy), _label, _name, _module))
@@ -363,6 +365,10 @@ with st.sidebar:
                          help="Group the same flat listed on several portals.")
     do_stale = st.button("🧹 CLEAN STALE (21d)", width="stretch", disabled=_busy)
     do_test  = st.button("🔗 TEST SITES",      width="stretch")
+    do_test_cz = (st.button("🔗 TEST CZ SITES", width="stretch",
+                            help="robots.txt and HTTP status of each Czech portal — "
+                                 "the ones read and the ones left out.")
+                  if _cz_portals or _scheduler.BLOCKED.get("cz") else False)
 
     st.markdown("---")
     st.markdown("#### FILTERS")
@@ -815,6 +821,33 @@ if do_test:
             st.info(f"{icon} **{label}** → HTTP {_r.status_code} | `{snippet}`")
         except Exception as _e:
             st.error(f"❌ **{label}** → {_e}")
+
+if do_test_cz:
+    # Each Czech portal's robots.txt first (a disallowed one isn't fetched),
+    # then the page its scraper starts from.
+    from importlib import import_module as _imp
+    from scraper._http import get as _http_get
+    from scraper.cz_common import robots_allows as _robots_allows, _robots_cache
+    _robots_cache.clear()           # the live answer, not this process's memory
+    _cz_start = {"scraper.sreality": lambda m: m.SEARCH_API,
+                 "scraper.bezrealitky": lambda m: m.SITEMAP_INDEX,
+                 "scraper.idnes": lambda m: m.page_url(2),
+                 "scraper.bazos_cz": lambda m: m.page_url(m.PAGE_SIZE)}
+    _blocked = {mod: why for _n, mod, why in _scheduler.BLOCKED.get("cz", ())}
+    for _name, _module in (list(_scheduler.SCRAPERS.get("cz") or ())
+                           + [(n, mod) for n, mod, _w in _scheduler.BLOCKED.get("cz", ())]):
+        _tag = " (left out of the run)" if _module in _blocked else ""
+        try:
+            _url = _cz_start[_module](_imp(_module))
+            _ok, _why = _robots_allows(_url)
+            if not _ok:
+                st.warning(f"⛔ **{_name}**{_tag} → {_why}")
+                continue
+            _r = _http_get(_url, timeout=12)
+            _icon = "✅" if _r.status_code == 200 else "❌"
+            st.info(f"{_icon} **{_name}**{_tag} → robots.txt allows · HTTP {_r.status_code}")
+        except Exception as _e:
+            st.error(f"❌ **{_name}**{_tag} → {_e}")
 
 
 

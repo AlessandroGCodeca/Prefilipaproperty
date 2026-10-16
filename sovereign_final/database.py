@@ -12,6 +12,7 @@ is now ignored.
 
 import logging
 import os
+import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from config import SQLITE_PATH
@@ -308,15 +309,25 @@ _DEV_PROJECT_TITLE_MARKERS = (
 )
 
 
-def detect_dev_project(url: str, title: str) -> int:
+# A Czech project's title says "1. fáze" / "2. etapa" or quotes a starting
+# price in crowns ("Byty od 3 990 000 Kč"); the Slovak markers above apply too.
+_DEV_PROJECT_TITLE_MARKERS_CZ = ("1. fáze", "2. fáze", "3. fáze", "developerský projekt")
+_DEV_PROJECT_FROM_CZK_RE = re.compile(r"(?<!\w)od\s+\d[\d\s\xa0.]*\s*(?:kč|czk)")
+
+
+def detect_dev_project(url: str, title: str, market: str = "sk") -> int:
     """Return 1 if URL or title indicates this is a multi-unit dev project,
     else 0. Conservative: returns 0 on ambiguous input rather than risk
-    false-positives on real apartments."""
+    false-positives on real apartments. A Czech listing also matches the
+    Czech markers."""
     u = (url or "").lower()
     if any(marker in u for marker in _DEV_PROJECT_URL_MARKERS):
         return 1
     t = (title or "").lower()
     if any(marker in t for marker in _DEV_PROJECT_TITLE_MARKERS):
+        return 1
+    if market != "sk" and (any(m in t for m in _DEV_PROJECT_TITLE_MARKERS_CZ)
+                           or _DEV_PROJECT_FROM_CZK_RE.search(t)):
         return 1
     return 0
 
@@ -336,12 +347,13 @@ def backfill_dev_project_flags() -> int:
     conn = get_conn()
     try:
         _ensure_dev_project_column(conn)
+        _ensure_market_columns(conn)
         rows = conn.execute(
-            "SELECT id, url, title FROM listings WHERE is_dev_project=0"
+            "SELECT id, url, title, market FROM listings WHERE is_dev_project=0"
         ).fetchall()
         flagged = []
         for r in rows:
-            if detect_dev_project(r[1] or "", r[2] or ""):
+            if detect_dev_project(r[1] or "", r[2] or "", r[3] or "sk"):
                 flagged.append(r[0])
         if flagged:
             ph = ",".join("?" * len(flagged))
@@ -1620,7 +1632,7 @@ def upsert_listing(data: dict):
             data = {**data, "id": existing[0], "url_hash": existing[0]}
         # Auto-detect dev-project listings from URL + title at insert time.
         data = {**data, "is_dev_project": detect_dev_project(
-            data.get("url", ""), data.get("title", ""),
+            data.get("url", ""), data.get("title", ""), market,
         )}
         conn.execute("""
             INSERT INTO listings

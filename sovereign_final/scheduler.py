@@ -108,7 +108,18 @@ SCRAPERS = {
     "sk": (("Nehnutelnosti.sk", "scraper.nehnutelnosti"),
            ("Bazos.sk",         "scraper.bazos"),
            ("Topreality.sk",    "scraper.topreality")),
-    "cz": (),
+    # Sreality.cz is the largest Czech portal, but its robots.txt disallows
+    # the whole site (see BLOCKED), so it isn't read.
+    "cz": (("Bezrealitky.cz",   "scraper.bezrealitky"),
+           ("Reality.iDNES.cz", "scraper.idnes"),
+           ("Bazos.cz",         "scraper.bazos_cz")),
+}
+# Portals left out of a market's run, and why. 🔗 TEST CZ SITES re-checks
+# them live.
+BLOCKED = {
+    "cz": (("Sreality.cz", "scraper.sreality",
+            "robots.txt disallows the whole site to crawlers other than the named "
+            "search engines (User-agent: * / Disallow: /)"),),
 }
 STEP_COUNT = 14          # the Slovak pipeline's steps
 
