@@ -50,7 +50,7 @@ from database import (
 )
 from scraper._http import get, make_session
 from scraper.cz_common import (
-    PortalBlocked, require_robots, listing_record, sale_price, rooms_cz, layout_cz,
+    PortalBlocked, require_robots, robots_allows, listing_record, sale_price, rooms_cz, layout_cz,
     area_cz, energy_cz, is_excluded_cz, cleanup, fold,
 )
 from scraper.geo import pin_from_item
@@ -258,7 +258,9 @@ def run(max_pages: int = 10) -> int:
             if listing["url"] in fresh:
                 touched += touch_listings([listing["url"]])
                 continue
-            d_status, detail = _fetch_json(DETAIL_API.format(hash_id=estate["hash_id"]), session)
+            detail_url = DETAIL_API.format(hash_id=estate["hash_id"])
+            d_status, detail = ((_fetch_json(detail_url, session))
+                                if robots_allows(detail_url)[0] else (None, None))
             if d_status == 200 and detail:
                 apply_detail(listing, detail)
                 enriched.append(listing["id"])

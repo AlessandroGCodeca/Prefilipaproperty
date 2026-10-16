@@ -428,3 +428,18 @@ def test_the_czech_run_reads_only_portals_robots_allows():
     modules = [m for _, m in scheduler.SCRAPERS["cz"]]
     assert modules == ["scraper.bezrealitky", "scraper.idnes", "scraper.bazos_cz"]
     assert [m for _, m, _ in scheduler.BLOCKED["cz"]] == ["scraper.sreality"]
+
+
+def test_a_detail_page_robots_disallows_is_not_opened(monkeypatch, robots, full_db):
+    robots("https://reality.idnes.cz", "User-agent: *\nAllow: /s/\nDisallow: /detail/\n")
+    asked = _offline(monkeypatch, idnes, {idnes.page_url(1): FakeResponse(text=SEARCH_PAGE)})
+    assert idnes.run(max_pages=1) == 2                  # the cards are still stored
+    assert not any("/detail/" in u for u in asked)
+    robots("https://www.sreality.cz", "User-agent: *\nAllow: /api/v1/estates/search\n"
+                                      "Disallow: /api/v1/estates/\n")
+    from urllib.parse import urlencode
+    search = (sreality.SEARCH_API + "?" + urlencode(
+        {**sreality.SEARCH_PARAMS, "per_page": sreality.PER_PAGE, "offset": 0}))
+    asked = _offline(monkeypatch, sreality, {search: FakeResponse(payload={"results": [ESTATE]})})
+    assert sreality.run(max_pages=1) == 1
+    assert asked == [search]

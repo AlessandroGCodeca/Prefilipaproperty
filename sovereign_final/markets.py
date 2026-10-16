@@ -203,6 +203,12 @@ CZ_TAX_YEAR_RULES = {
         # the actual expenses or the flat-rate ones (výdajový paušál, § 9
         # odst. 4) — 30 % of the rent, at most 600 000 Kč, and all-inclusive
         # (no interest or depreciation on top). The engine takes the larger.
+        # The actual expenses modelled: mortgage interest, the SVJ payment,
+        # property tax, the repair reserve and management; depreciation
+        # (odpisy) is left out, which overstates the tax. Whether an SVJ
+        # fond oprav payment is deductible when paid or only when the fund
+        # spends it is UNVERIFIED — sources disagree; it is deducted when
+        # paid here (about 15 % of 20 Kč/m² a month).
         "rental_exemption":    0,
         "rental_flat_expense_rate": 0.30,
         "rental_flat_expense_cap":  600_000,

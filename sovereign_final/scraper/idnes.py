@@ -44,7 +44,7 @@ from database import (
 )
 from scraper._http import get, make_session
 from scraper.cz_common import (
-    PortalBlocked, require_robots, listing_record, sale_price, rooms_cz,
+    PortalBlocked, require_robots, robots_allows, listing_record, sale_price, rooms_cz,
     area_cz, energy_cz, is_excluded_cz, cleanup, fold, czk_amounts,
 )
 from scraper.geo import pin_from_meta
@@ -211,10 +211,11 @@ def run(max_pages: int = 10) -> int:
                 touched += touch_listings([listing["url"]])
                 continue
             try:
-                d = get(listing["url"], session=session, timeout=25)
-                if d.status_code == 200:
-                    apply_detail(listing, d.text)
-                    enriched.append(listing["id"])
+                if robots_allows(listing["url"])[0]:
+                    d = get(listing["url"], session=session, timeout=25)
+                    if d.status_code == 200:
+                        apply_detail(listing, d.text)
+                        enriched.append(listing["id"])
             except Exception as e:
                 log.warning(f"    detail {listing['url']}: {e}")
             try:
