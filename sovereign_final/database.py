@@ -289,6 +289,15 @@ CREATE TABLE IF NOT EXISTS pipeline_lock (
     acquired_at   TEXT NOT NULL,
     heartbeat_at  TEXT NOT NULL
 );
+
+-- The text of a flat's výpis z LV, pasted on its card (a Czech listing: the
+-- cadastre's free services don't give an LV's contents to a program — see
+-- modules/lv_cz). One per listing; the LV check screens it.
+CREATE TABLE IF NOT EXISTS lv_documents (
+    listing_id    TEXT PRIMARY KEY,
+    lv_text       TEXT NOT NULL,
+    added_at      TEXT NOT NULL
+);
 """
 
 # Detect dev-project listings (multi-unit projects, not individual buyable
@@ -1998,6 +2007,65 @@ def set_parcel_data(listing_id: str, cadastral_area: str, parcel_no: str,
         conn.commit()
     finally:
         conn.close()
+
+
+def _ensure_lv_documents_table(conn):
+    conn.execute("CREATE TABLE IF NOT EXISTS lv_documents ("
+                 "listing_id TEXT PRIMARY KEY, lv_text TEXT NOT NULL, "
+                 "added_at TEXT NOT NULL)")
+
+
+def set_lv_document(listing_id: str, lv_text: str) -> None:
+    """Store the pasted text of a flat's výpis z LV; blank removes it."""
+    text = (lv_text or "").strip()
+    conn = get_conn()
+    try:
+        _ensure_lv_documents_table(conn)
+        if text:
+            conn.execute(
+                "INSERT INTO lv_documents (listing_id, lv_text, added_at) VALUES (?,?,?) "
+                "ON CONFLICT(listing_id) DO UPDATE SET lv_text=excluded.lv_text, "
+                "added_at=excluded.added_at",
+                (listing_id, text, datetime.now(timezone.utc).isoformat()))
+        else:
+            conn.execute("DELETE FROM lv_documents WHERE listing_id=?", (listing_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_lv_documents(listing_ids=None) -> dict[str, str]:
+    """{listing id: pasted LV text} — for `listing_ids`, or every one."""
+    conn = get_conn()
+    try:
+        _ensure_lv_documents_table(conn)
+        if listing_ids is None:
+            rows = conn.execute("SELECT listing_id, lv_text FROM lv_documents").fetchall()
+        else:
+            ids = list(listing_ids)
+            rows = []
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                rows += conn.execute(
+                    f"SELECT listing_id, lv_text FROM lv_documents WHERE listing_id IN "
+                    f"({','.join('?' * len(chunk))})", chunk).fetchall()
+    finally:
+        conn.close()
+    return {r[0]: r[1] for r in rows}
+
+
+def get_lv_document(listing_id: str) -> str | None:
+    return get_lv_documents([listing_id]).get(listing_id)
+
+
+def get_listing_description(listing_id: str) -> str:
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT description FROM listings WHERE id=?",
+                           (listing_id,)).fetchone()
+    finally:
+        conn.close()
+    return (row[0] if row else "") or ""
 
 
 def set_flat_lv(listing_id: str, lv_number: str, cadastral_area: str = ""):

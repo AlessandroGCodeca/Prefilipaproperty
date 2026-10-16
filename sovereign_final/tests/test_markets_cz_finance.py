@@ -146,3 +146,21 @@ class TestCzechScore:
         monkeypatch.setitem(markets.MARKETS, "cz",
                             dataclasses.replace(CZ, mortgage_rate_pa=0.20))
         assert fin.analyse(150_000, 55, "Žilina") == before
+
+
+def test_a_czech_place_without_a_rent_figure_waits_unscored(full_db, caplog):
+    """No Czech rent table yet: a Czech listing is not scored, and the run
+    says why once — no per-listing crash, and Slovak listings score as ever."""
+    import logging
+    import database as db
+    from modules.cashflow_runner import run_scoring
+    from tests.conftest import make_listing
+    with pytest.raises(LookupError, match="rent figure for 'Praha 2'"):
+        fin.get_rent_estimate("Praha 2", 55, market="cz")
+    db.upsert_listing(make_listing("cz1", market="cz", currency="CZK", district="Praha 2",
+                                   price_eur=4_500_000.0, url="https://example.cz/1"))
+    db.upsert_listing(make_listing("sk1", district="Žilina"))
+    with caplog.at_level(logging.INFO):
+        assert run_scoring() == 1
+    assert "Score error" not in caplog.text
+    assert "1 CZ listing(s) not scored — Czechia: no rent figure for 'Praha 2'" in caplog.text

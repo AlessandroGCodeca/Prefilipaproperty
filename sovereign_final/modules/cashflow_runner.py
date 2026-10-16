@@ -56,6 +56,9 @@ def run_scoring(progress_callback=None, market: str | None = None) -> int:
 
     log.info(f"💰 Scoring {len(listings)} listings...")
     scored = 0
+    # A market figure that isn't in markets.py yet (a Czech place with no rent
+    # figure): those listings wait, counted and named once at the end.
+    waiting: dict[str, list] = {}
     emojis = {"GREEN": "🟢", "YELLOW": "🟡", "WHITE": "⚪"}
 
     for i, row in enumerate(listings):
@@ -94,9 +97,14 @@ def run_scoring(progress_callback=None, market: str | None = None) -> int:
                          f"{markets.format_money(result.price_eur, cur)} | s.r.o. surplus "
                          f"{markets.format_money(result.surplus_sro, cur, signed=True)}/mo | "
                          f"{row.get('district','?')}")
+        except LookupError as ex:
+            waiting.setdefault(markets.of_row(row), []).append(str(ex))
         except Exception as ex:
             log.warning(f"  ⚠️ Score error for {row['id']}: {ex}")
 
+    for m, why in waiting.items():
+        log.info(f"  ℹ️ {len(why)} {m.upper()} listing(s) not scored — {why[0]}"
+                 + (f" (and {len(set(why)) - 1} other reason(s))" if len(set(why)) > 1 else ""))
     log.info(f"✅ Cash-flow scoring done. {scored} scored.")
     return scored
 

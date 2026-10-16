@@ -121,3 +121,24 @@ def test_no_czech_status_line_without_czech_portals(_isolated, monkeypatch):
     captions = [c.value for c in at.caption]
     assert not any(" CZ · " in c for c in captions)
     assert not any(c.endswith(" · SK") for c in captions)
+
+
+def _score(lid, price, district, market, rent):
+    from database import upsert_cashflow
+    from engine import financial as fin
+    r = fin.analyse(price, 55.0, district, listing_id=lid, rent_override=rent,
+                    **({} if market == "sk" else {"market": market}))
+    row = fin.result_to_db_dict(r)
+    row.update(fin.deal_extras(r))
+    upsert_cashflow(row)
+
+
+def test_a_czech_card_takes_the_vypis_and_a_slovak_one_does_not(two_markets):
+    _score("sk1", 100_000.0, "Žilina", "sk", 650)
+    _score("cz1", 4_500_000.0, "Praha 2", "cz", 22_000)
+    two_markets.set_lv_document("cz1", "LIST VLASTNICTVÍ: 1234")
+    at = run(open_cards=("sk1", "cz1"))
+    assert not at.exception, [e.value for e in at.exception]
+    boxes = [t for t in at.text_area if t.key and t.key.startswith("lvdoc_")]
+    assert [t.key for t in boxes] == ["lvdoc_cz1"]
+    assert boxes[0].label == "Výpis z LV (text)" and boxes[0].value == "LIST VLASTNICTVÍ: 1234"

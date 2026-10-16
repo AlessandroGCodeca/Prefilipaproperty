@@ -872,6 +872,12 @@ rejected_rows = [] if using_demo else get_all_active(rejected=True)
 # The market picked at the top filters everything below.
 data = [_tag_market(l) for l in data if in_view(l)]
 rejected_rows = [_tag_market(l) for l in rejected_rows if in_view(l)]
+# The pasted výpis z LV of each Czech listing on the page (modules/lv_cz), in
+# one query.
+_LV_DOCS = {}
+if not using_demo and any(l.get("_market") == "cz" for l in data):
+    from database import get_lv_documents
+    _LV_DOCS = get_lv_documents([l["id"] for l in data if l.get("_market") == "cz"])
 if view_market and not data and raw_data and not using_demo:
     st.info(f"ℹ️ No {markets.get(view_market).name} listings yet"
             + (" — its portals are read by ▶ RUN EVERYTHING and the scheduler."
@@ -1214,6 +1220,7 @@ CZ_LABELS = {
     "SAVE STAGE": "ULOŽIT FÁZI", "VIEW LISTING": "INZERÁT", "MAPS": "MAPA",
     "CHECK LV": "NAHLÍŽENÍ DO KN", "RE-VERIFY LV": "OVĚŘIT LV",
     "Flat's own LV no.": "Číslo LV jednotky", "Katastrálne územie": "Katastrální území",
+    "LV extract (text)": "Výpis z LV (text)",
     "✅ Clear": "✅ V pořádku", "— unknown": "— neznámo",
     "⚠️ Site nearby": "⚠️ Stavba v okolí", "⚠️ ≥65 dB source": "⚠️ Zdroj ≥65 dB",
     "⚠️ In flood area": "⚠️ V záplavovém území", "✅ YES": "✅ ANO",
@@ -1609,9 +1616,21 @@ def render_card(l):
                 key=f"lvku_{lid}", placeholder="např. Vinohrady" if cz else "e.g. Petržalka",
                 help=("Název nebo kód katastrálního území." if cz else
                       "Name or numeric code of the cadastral unit."))
+        lv_doc = None
+        if cz:
+            lv_doc = st.text_area(
+                T("LV extract (text)"), value=_LV_DOCS.get(lid, ""), key=f"lvdoc_{lid}",
+                height=110, disabled=using_demo,
+                placeholder="Vložte text výpisu z listu vlastnictví…",
+                help="Text výpisu z LV této jednotky (CzechPOINT nebo dálkový přístup "
+                     "ČÚZK). Bezplatné služby katastru obsah LV programu nedávají; "
+                     "OVĚŘIT LV jej projde (části C a D).")
         if verify:
             try:
                 from modules.debt_bot import reverify
+                if cz and (lv_doc or "").strip() != _LV_DOCS.get(lid, "").strip():
+                    from database import set_lv_document
+                    set_lv_document(lid, lv_doc or "")
                 lv_in = flat_lv.strip()
                 ku_in = flat_ku.strip()
                 changed = (lv_in != (l.get("lv_number") or "")

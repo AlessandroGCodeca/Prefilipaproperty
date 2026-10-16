@@ -61,10 +61,11 @@ def _unverified(detail: str, **extra) -> dict:
 
 
 # ── The screen ────────────────────────────────────────────────────────────────
-def _parse_lv(lv_text) -> dict:
-    """Screen one LV text entry by entry (modules/lv_screen). REJECT when any
-    entry blocks; `raw` carries the text through to _decide_lv for Claude."""
-    entries = screen_lv(lv_text)
+def _parse_lv(lv_text, screen=screen_lv) -> dict:
+    """Screen one LV text entry by entry (modules/lv_screen — or a Czech LV
+    with modules/lv_screen_cz, `screen`). REJECT when any entry blocks; `raw`
+    carries the text through to _decide_lv for Claude."""
+    entries = screen(lv_text)
     blocking = [e for e in entries if e["blocking"]]
     soft = [describe(e) for e in entries if e.get("tier") == "soft" and not e["blocking"]]
     if blocking:
@@ -221,14 +222,19 @@ def _decide_lv(api_result: dict) -> dict:
     if not raw or api_result.get("status") == "UNVERIFIED":
         return api_result
 
-    analysis = claude_analyze_lv(str(raw))
+    # A Czech LV (modules/lv_cz) is read with the Czech prompt; a Slovak one
+    # exactly as before.
+    cz = api_result.get("market") == "cz"
+    analysis = (claude_analyze_lv(str(raw), market="cz") if cz
+                else claude_analyze_lv(str(raw)))
     if not analysis or analysis.get("risk_level") == "UNKNOWN":
         return api_result  # fall back to the screen's decision
 
     # Claude is sent parts A and B shortened and part C whole. When the text
     # may be missing some of part C (the cadastre report was cut at the
     # scraper's cap), its "safe" cannot overrule what the screen found.
-    saw_whole_lv = lv_text_for_claude(str(raw))[1]
+    saw_whole_lv = (lv_text_for_claude(str(raw), market="cz") if cz
+                    else lv_text_for_claude(str(raw)))[1]
     flags = analysis.get("flags") or []
     summary = (analysis.get("summary") or "").strip()
     level = analysis.get("risk_level")
@@ -249,7 +255,8 @@ def _decide_lv(api_result: dict) -> dict:
         })
     elif (api_result.get("status") == "REJECT"
           and not (api_result.get("claude_may_clear", True) and saw_whole_lv)):
-        why = ("exekúcia / konkurz / súdny spor still blocks"
+        why = (("exekuce / insolvence / soudní spor still blocks" if cz else
+                "exekúcia / konkurz / súdny spor still blocks")
                if not api_result.get("claude_may_clear", True) else
                "the LV report was cut short before it reached Claude, so it "
                "may not have seen all of part C, where the encumbrances are")

@@ -278,7 +278,29 @@ _LV_SYSTEM = (
 )
 
 
-def lv_text_for_claude(lv_text) -> tuple[str, bool]:
+_LV_SYSTEM_CZ = (
+    "You are a Czech real-estate legal analyst reviewing a výpis z listu "
+    "vlastnictví (LV) from the Czech katastr nemovitostí for someone buying the "
+    "flat to let it. Identify encumbrances and legal risks. Part C (věcná práva "
+    "zatěžující nemovitosti, formerly omezení vlastnického práva) and part D "
+    "(poznámky) are given in full; part B1 lists rights that BENEFIT this flat, "
+    "not burdens on it. A zástavní právo, or a zákaz zcizení nebo zatížení, in "
+    "favour of a recognised bank or stavební spořitelna is normal for a mortgaged "
+    "flat and is LOW risk. A zástavní právo in favour of a private person or "
+    "company, an exekuce, an insolvence / úpadek, a výkon rozhodnutí, or a "
+    "poznámka spornosti / soudní spor is HIGH risk. So is a věcné břemeno "
+    "(služebnost) giving someone a lifetime right to use or live in the flat "
+    "(doživotní užívání, výměnek), and a předkupní právo held by a private person "
+    "or company. A technical věcné břemeno (utility lines, pipes, access or right "
+    "of way) and a předkupní právo of the state, a kraj or a municipality are soft "
+    f"issues. {_SOFT_POLICY} A plomba (a change of rights pending in the cadastre) "
+    "is at least MEDIUM. List each concrete issue in 'flags'. Set "
+    "is_safe_to_proceed=false for any HIGH-risk encumbrance. Keep 'summary' concise "
+    "and factual."
+)
+
+
+def lv_text_for_claude(lv_text, market: str = "sk") -> tuple[str, bool]:
     """(the LV text analyze_lv sends, whether it holds all of part C).
 
     The report lists the encumbrances (ťarchy, part C) last, so the old
@@ -290,11 +312,14 @@ def lv_text_for_claude(lv_text) -> tuple[str, bool]:
     "safe" from Claude not overrule the screen (modules/debt_bot._decide_lv).
     """
     from kataster_scraper import LV_TEXT_MAX_CHARS
-    from modules.lv_screen import part_c_start
+    if market == "sk":
+        from modules.lv_screen import part_c_start
+    else:
+        from modules.lv_screen_cz import part_c_start
     raw = str(lv_text or "")
     # Judged before stripping: a report cut at the cap just after a space is
-    # still a cut report.
-    complete = len(raw) < LV_TEXT_MAX_CHARS
+    # still a cut report. A Czech výpis is pasted whole by hand: never cut.
+    complete = len(raw) < LV_TEXT_MAX_CHARS or market != "sk"
     text = raw.strip()
     start = part_c_start(text)
     if start is not None and start > LV_HEAD_CHARS:
@@ -302,7 +327,7 @@ def lv_text_for_claude(lv_text) -> tuple[str, bool]:
     return text, complete
 
 
-def analyze_lv(lv_text: str) -> dict | None:
+def analyze_lv(lv_text: str, market: str = "sk") -> dict | None:
     """Structured risk read of an LV title-deed document.
 
     Returns a dict matching _LV_SCHEMA, or None if disabled/failed. Intended as a
@@ -311,8 +336,9 @@ def analyze_lv(lv_text: str) -> dict | None:
     lv_text = (lv_text or "").strip()
     if not lv_text:
         return None
-    excerpt, _ = lv_text_for_claude(lv_text)
-    return _ask_json(_LV_SYSTEM, f"LV DATA:\n{excerpt}", _LV_SCHEMA,
+    excerpt, _ = lv_text_for_claude(lv_text, market)
+    return _ask_json(_LV_SYSTEM if market == "sk" else _LV_SYSTEM_CZ,
+                     f"LV DATA:\n{excerpt}", _LV_SCHEMA,
                      model=ANTHROPIC_MODEL_LV, effort="high", max_tokens=16000,
                      fallbacks=True)
 

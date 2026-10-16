@@ -59,10 +59,10 @@ def _mkw(market) -> dict:
     return {} if m == "sk" else {"market": m}
 
 
-def _need(value, what: str, market):
+def _need(value, what: str, market, where: str = "markets.py"):
     """A Czech figure the profile doesn't have yet is an error, not a guess."""
     if value is None:
-        raise LookupError(f"{markets.get(market).name}: no {what} in markets.py yet")
+        raise LookupError(f"{markets.get(market).name}: no {what} in {where} yet")
     return value
 
 # Bumped whenever a change to the model moves the figures of a listing that
@@ -531,7 +531,13 @@ def base_rent_rate(district: str, rates=None, market: str = "sk") -> tuple[float
     k = match_rent_key(district, **_mkw(market))
     if rates and rates.get(k):
         return float(rates[k]), k, "live"
-    return baseline_rent(k, **_mkw(market)), k, "baseline"
+    if _sk(market):
+        return baseline_rent(k), k, "baseline"
+    # A Czech place with no rent figure (engine/rent_cz) has no rent: an
+    # error the scorer reports, never a guess.
+    return _need(baseline_rent(k, market=market),
+                 f"rent figure for {district or 'a blank district'!r}", market,
+                 "engine/rent_cz.py"), k, "baseline"
 
 
 def _rent_premiums(market: str) -> tuple:
