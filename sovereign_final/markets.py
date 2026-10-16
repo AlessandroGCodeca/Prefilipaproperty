@@ -324,7 +324,13 @@ CZ = Market(
     sale_price_max=250_000_000,
     rent_min=3_000, rent_max=150_000,
     rent_per_m2_min=70.0, rent_per_m2_max=1_100.0,
-    blank_district_floor_m2=None, blank_district_ceiling_m2=None,
+    # With no median to judge against (every Czech listing until the price
+    # tables are filled), the floor and ceiling are these backstops. The
+    # floor is half the cheapest okres in ČSÚ's "Ceny nemovitostí 2022–2024"
+    # (Sokolov, 27 862 Kč/m²), as Slovakia's is half its cheapest kraj; the
+    # ceiling clears the dearest new builds (Deloitte Develop Index Q2 2026:
+    # Praha 2 at 265 100 Kč/m², via search) and still catches a 10× misread.
+    blank_district_floor_m2=13_900.0, blank_district_ceiling_m2=600_000.0,
     industrial_zones=(),
     # The Slovak description premiums, carried over: UNVERIFIED for Czechia.
     industrial_rent_premium=1.0,
