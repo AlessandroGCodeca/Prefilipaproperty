@@ -12,6 +12,7 @@ is now ignored.
 
 import logging
 import os
+import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from config import SQLITE_PATH
@@ -83,7 +84,9 @@ CREATE TABLE IF NOT EXISTS listings (
     lv_number         TEXT,
     lv_detail         TEXT,
     lv_checked_at     TEXT,
-    notes             TEXT
+    notes             TEXT,
+    market            TEXT NOT NULL DEFAULT 'sk',
+    currency          TEXT NOT NULL DEFAULT 'EUR'
 );
 
 CREATE TABLE IF NOT EXISTS cashflow_scores (
@@ -205,7 +208,8 @@ CREATE TABLE IF NOT EXISTS rent_comps (
     source          TEXT,
     updated_at      TEXT,
     eur_per_m2      REAL,
-    UNIQUE(district, size_band)
+    market          TEXT NOT NULL DEFAULT 'sk',
+    UNIQUE(market, district, size_band)
 );
 
 CREATE TABLE IF NOT EXISTS rental_listings (
@@ -222,7 +226,9 @@ CREATE TABLE IF NOT EXISTS rental_listings (
     furnished         TEXT,
     scraped_at        TEXT NOT NULL,
     last_seen_at      TEXT NOT NULL,
-    is_active         INTEGER DEFAULT 1
+    is_active         INTEGER DEFAULT 1,
+    market            TEXT NOT NULL DEFAULT 'sk',
+    currency          TEXT NOT NULL DEFAULT 'EUR'
 );
 
 CREATE TABLE IF NOT EXISTS price_history (
@@ -283,6 +289,15 @@ CREATE TABLE IF NOT EXISTS pipeline_lock (
     acquired_at   TEXT NOT NULL,
     heartbeat_at  TEXT NOT NULL
 );
+
+-- The text of a flat's výpis z LV, pasted on its card (a Czech listing: the
+-- cadastre's free services don't give an LV's contents to a program — see
+-- modules/lv_cz). One per listing; the LV check screens it.
+CREATE TABLE IF NOT EXISTS lv_documents (
+    listing_id    TEXT PRIMARY KEY,
+    lv_text       TEXT NOT NULL,
+    added_at      TEXT NOT NULL
+);
 """
 
 # Detect dev-project listings (multi-unit projects, not individual buyable
@@ -303,15 +318,25 @@ _DEV_PROJECT_TITLE_MARKERS = (
 )
 
 
-def detect_dev_project(url: str, title: str) -> int:
+# A Czech project's title says "1. fáze" / "2. etapa" or quotes a starting
+# price in crowns ("Byty od 3 990 000 Kč"); the Slovak markers above apply too.
+_DEV_PROJECT_TITLE_MARKERS_CZ = ("1. fáze", "2. fáze", "3. fáze", "developerský projekt")
+_DEV_PROJECT_FROM_CZK_RE = re.compile(r"(?<!\w)od\s+\d[\d\s\xa0.]*(?:,-)?\s*(?:kč|czk)")
+
+
+def detect_dev_project(url: str, title: str, market: str = "sk") -> int:
     """Return 1 if URL or title indicates this is a multi-unit dev project,
     else 0. Conservative: returns 0 on ambiguous input rather than risk
-    false-positives on real apartments."""
+    false-positives on real apartments. A Czech listing also matches the
+    Czech markers."""
     u = (url or "").lower()
     if any(marker in u for marker in _DEV_PROJECT_URL_MARKERS):
         return 1
     t = (title or "").lower()
     if any(marker in t for marker in _DEV_PROJECT_TITLE_MARKERS):
+        return 1
+    if market != "sk" and (any(m in t for m in _DEV_PROJECT_TITLE_MARKERS_CZ)
+                           or _DEV_PROJECT_FROM_CZK_RE.search(t)):
         return 1
     return 0
 
@@ -331,12 +356,13 @@ def backfill_dev_project_flags() -> int:
     conn = get_conn()
     try:
         _ensure_dev_project_column(conn)
+        _ensure_market_columns(conn)
         rows = conn.execute(
-            "SELECT id, url, title FROM listings WHERE is_dev_project=0"
+            "SELECT id, url, title, market FROM listings WHERE is_dev_project=0"
         ).fetchall()
         flagged = []
         for r in rows:
-            if detect_dev_project(r[1] or "", r[2] or ""):
+            if detect_dev_project(r[1] or "", r[2] or "", r[3] or "sk"):
                 flagged.append(r[0])
         if flagged:
             ph = ",".join("?" * len(flagged))
@@ -518,6 +544,92 @@ def _ensure_rent_comps_columns(conn):
     if "eur_per_m2" not in cols:
         conn.execute("ALTER TABLE rent_comps ADD COLUMN eur_per_m2 REAL")
     conn.commit()
+    if cols and "market" not in cols:
+        _rebuild_rent_comps_with_market(conn)
+
+
+_RENT_COMPS_COLS = ("id, district, city, size_band, avg_rent_eur, median_rent_eur, "
+                    "sample_count, source, updated_at, eur_per_m2")
+
+
+def _rebuild_rent_comps_with_market(conn):
+    """rent_comps was unique per (district, size band); with two markets it
+    is unique per (market, district, size band), and SQLite can't widen a
+    UNIQUE constraint in place. The table is recreated and every row copied
+    across as Slovak — every comp before the Czech market was one."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(rent_comps)")]
+        if "market" in cols:            # another process got here first
+            conn.rollback()
+            return
+        conn.execute("ALTER TABLE rent_comps RENAME TO rent_comps_pre_market")
+        conn.execute("""
+            CREATE TABLE rent_comps (
+                id              TEXT PRIMARY KEY,
+                district        TEXT NOT NULL,
+                city            TEXT,
+                size_band       TEXT NOT NULL,
+                avg_rent_eur    REAL,
+                median_rent_eur REAL,
+                sample_count    INTEGER,
+                source          TEXT,
+                updated_at      TEXT,
+                eur_per_m2      REAL,
+                market          TEXT NOT NULL DEFAULT 'sk',
+                UNIQUE(market, district, size_band)
+            )""")
+        conn.execute(f"INSERT INTO rent_comps ({_RENT_COMPS_COLS}, market) "
+                     f"SELECT {_RENT_COMPS_COLS}, 'sk' FROM rent_comps_pre_market")
+        conn.execute("DROP TABLE rent_comps_pre_market")
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+
+
+# ── Markets (markets.py) ──────────────────────────────────────────────────────
+# Every listing and rental belongs to one market. Rows from before the Czech
+# market have none, and the migration gives them 'sk' (and 'EUR'): they were
+# all Slovak, and nothing else about them changes.
+_MARKET_COLUMNS = {
+    "market":   "TEXT NOT NULL DEFAULT 'sk'",
+    "currency": "TEXT NOT NULL DEFAULT 'EUR'",
+}
+
+
+def _ensure_market_columns(conn):
+    """Add market / currency to listings and rental_listings on a database
+    that predates them. Idempotent; every existing row keeps its data and
+    reads as Slovak (EUR)."""
+    for table in ("listings", "rental_listings"):
+        if not _has_table(conn, table):
+            continue
+        cols = [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+        for name, sqltype in _MARKET_COLUMNS.items():
+            if name not in cols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sqltype}")
+    conn.commit()
+
+
+def _market_sql(conn, market, alias: str = "") -> tuple[str, tuple]:
+    """(" AND <alias>market = ?", (market,)) to keep a query to one market,
+    or ("", ()) for all of them (market None). A table without the column
+    holds only Slovak rows — the column is added when the filter needs it."""
+    if market is None:
+        return "", ()
+    _ensure_market_columns(conn)
+    import markets
+    return f" AND {alias}market = ?", (markets.normalize(market),)
+
+
+def _market_kw(market) -> dict:
+    """{"market": m} for an engine call about a row of another market than
+    Slovakia, {} for a Slovak one — the engine's own default — so a Slovak
+    row makes exactly the call it always did."""
+    import markets
+    m = markets.normalize(market)
+    return {} if m == "sk" else {"market": m}
 
 
 def _backfill_listing_coords(conn):
@@ -566,6 +678,9 @@ def init_db():
         _ensure_enrichment_columns(conn)
         _ensure_location_columns(conn)
         _ensure_rent_comps_columns(conn)
+        _ensure_market_columns(conn)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_listings_market "
+                     "ON listings(market, is_active)")
         _backfill_listing_coords(conn)
         _mark_legacy_lv_passes_unverified(conn)
         # rent_comps used to be seeded with hand-typed 'baseline_2026' rows
@@ -580,13 +695,15 @@ def init_db():
 
 
 # ── Query Helpers ─────────────────────────────────────────────────────────────
-def get_all_active(rejected: bool = False):
+def get_all_active(rejected: bool = False, market: str | None = None):
     """Active listings with their cashflow and location scores, best discount
     first. LV-rejected listings never reach the deal lists, so they are left
     out — or, with rejected=True, they are all that comes back (the
-    dashboard's Rejected tile counts them against the same filters)."""
+    dashboard's Rejected tile counts them against the same filters).
+    `market` keeps one market's listings; None (default) returns all."""
     conn = get_conn()
     try:
+        only, params = _market_sql(conn, market, "l.")
         rows = conn.execute(f"""
             SELECT l.*,
                    c.classification        AS cf_class,
@@ -624,9 +741,9 @@ def get_all_active(rejected: bool = False):
             FROM listings l
             LEFT JOIN cashflow_scores c  ON l.id = c.listing_id
             LEFT JOIN location_scores lc ON l.id = lc.listing_id
-            WHERE l.is_active = 1 AND l.lv_status {'=' if rejected else '!='} 'REJECTED'
+            WHERE l.is_active = 1 AND l.lv_status {'=' if rejected else '!='} 'REJECTED'{only}
             ORDER BY c.market_discount DESC NULLS LAST
-        """).fetchall()
+        """, params).fetchall()
     finally:
         conn.close()
     return [dict(r) for r in rows]
@@ -638,10 +755,12 @@ def get_rejected():
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
+        _ensure_market_columns(conn)
         rows = conn.execute("""
             SELECT l.id, l.title, l.district, l.address_raw, l.url, l.source,
                    l.price_eur, l.size_m2, l.scraped_at, l.is_active,
                    l.lv_status, l.lv_risk_level, l.lv_summary,
+                   l.market, l.currency,
                    r.reason, r.detail, r.module, r.flagged_at
             FROM listings l
             JOIN rejections_log r ON l.id = r.listing_id
@@ -653,11 +772,15 @@ def get_rejected():
 
 
 # ── Cross-portal duplicates ──────────────────────────────────────────────────
-def mark_duplicates() -> int:
+def mark_duplicates(market: str | None = None) -> int:
     """Group copies of the same flat across portals (engine.duplicates) and
     store each member's primary id in listings.dup_group. Re-run from scratch
     every time, so a copy that went inactive or changed price leaves its
     group. Returns the number of listings that are part of a group.
+
+    Copies are only ever matched within one market. `market` regroups that
+    market alone (its pipeline run), leaving the other's groups as they are;
+    None regroups every market.
 
     LV-rejected copies take part in the matching but never in a group: the
     dashboard hides them, so a group is only the copies it shows. What they
@@ -667,20 +790,23 @@ def mark_duplicates() -> int:
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
-        rows = [dict(r) for r in conn.execute("""
+        _ensure_market_columns(conn)
+        only, params = _market_sql(conn, market)
+        rows = [dict(r) for r in conn.execute(f"""
             SELECT id, url, source, district, size_m2, price_eur, rooms, floor,
-                   scraped_at, lv_status
+                   scraped_at, lv_status, market
             FROM listings
             WHERE is_active = 1
               AND price_eur > 0 AND size_m2 > 0
-              AND (is_dev_project IS NULL OR is_dev_project = 0)
-        """).fetchall()]
+              AND (is_dev_project IS NULL OR is_dev_project = 0){only}
+        """, params).fetchall()]
         rejected = {r["id"] for r in rows if r["lv_status"] == "REJECTED"}
         members: dict[str, list[str]] = {}
         for lid, primary in group_duplicates(rows).items():
             members.setdefault(primary, []).append(lid)
         conn.execute("UPDATE listings SET dup_group = NULL, dup_lv_failed = NULL "
-                     "WHERE dup_group IS NOT NULL OR dup_lv_failed IS NOT NULL")
+                     f"WHERE (dup_group IS NOT NULL OR dup_lv_failed IS NOT NULL){only}",
+                     params)
         grouped = 0
         for primary, ids in members.items():
             shown = [i for i in ids if i not in rejected]
@@ -758,9 +884,11 @@ def get_tracked_listings() -> list[dict]:
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
+        _ensure_market_columns(conn)
         rows = conn.execute("""
             SELECT l.id, l.title, l.district, l.url, l.source, l.price_eur,
                    l.size_m2, l.is_active, l.scraped_at, l.lv_status,
+                   l.market, l.currency,
                    c.classification AS cf_class, c.surplus_sro,
                    c.max_price_yellow, c.max_price_green,
                    d.stage, d.note, d.updated_at
@@ -821,16 +949,25 @@ def latest_vibes() -> dict:
 # ── Rental listings (live rent comps) ────────────────────────────────────────
 def upsert_rental(data: dict) -> None:
     """Store one prenájom listing for engine/rent_comps. Keyed on url; a
-    re-seen rental refreshes its rent and last_seen_at."""
+    re-seen rental refreshes its rent and last_seen_at. `rent_eur` is the
+    rent in the rental's own currency (`currency`: EUR for a Slovak one, CZK
+    for a Czech one); `market` defaults to 'sk'."""
+    import markets
+    market = markets.normalize(data.get("market"))
+    data = {**data, "market": market,
+            "currency": data.get("currency") or markets.get(market).currency}
     conn = get_conn()
     try:
+        _ensure_market_columns(conn)
         conn.execute("""
             INSERT INTO rental_listings
             (id, source, url, title, rent_eur, size_m2, rooms, district, rent_key,
-             energies_included, furnished, scraped_at, last_seen_at, is_active)
+             energies_included, furnished, scraped_at, last_seen_at, is_active,
+             market, currency)
             VALUES
             (:id,:source,:url,:title,:rent_eur,:size_m2,:rooms,:district,:rent_key,
-             :energies_included,:furnished,:scraped_at,:last_seen_at,1)
+             :energies_included,:furnished,:scraped_at,:last_seen_at,1,
+             :market,:currency)
             ON CONFLICT(url) DO UPDATE SET
                 rent_eur=excluded.rent_eur, size_m2=excluded.size_m2,
                 rooms=COALESCE(excluded.rooms, rooms),
@@ -845,13 +982,15 @@ def upsert_rental(data: dict) -> None:
         conn.close()
 
 
-def get_stats():
+def get_stats(market: str | None = None):
     """Active listings by class. An LV-rejected listing is counted as
     rejected only — it keeps the class it had (often PENDING), and counting
-    it there too made the classes add up to more than the total."""
+    it there too made the classes add up to more than the total. `market`
+    counts one market's listings; None counts all."""
     conn = get_conn()
     try:
-        r = conn.execute("""
+        only, params = _market_sql(conn, market)
+        r = conn.execute(f"""
             SELECT
                 COUNT(*)                                       AS total,
                 COALESCE(SUM(CASE WHEN NOT rej AND classification='GREEN'   THEN 1 ELSE 0 END), 0) AS green,
@@ -860,8 +999,8 @@ def get_stats():
                 COALESCE(SUM(CASE WHEN rej                                  THEN 1 ELSE 0 END), 0) AS rejected,
                 COALESCE(SUM(CASE WHEN NOT rej AND classification='PENDING' THEN 1 ELSE 0 END), 0) AS pending
             FROM (SELECT classification, COALESCE(lv_status, '') = 'REJECTED' AS rej
-                  FROM listings WHERE is_active=1)
-        """).fetchone()
+                  FROM listings WHERE is_active=1{only})
+        """, params).fetchone()
     finally:
         conn.close()
     return dict(r) if r else {"total":0,"green":0,"yellow":0,"white":0,"rejected":0,"pending":0}
@@ -882,7 +1021,7 @@ def get_active_sources() -> list[str]:
     return [r[0] for r in rows]
 
 
-def deactivate_stale_listings(days: int = 21) -> int:
+def deactivate_stale_listings(days: int = 21, market: str | None = None) -> int:
     """Mark listings as inactive when last_seen_at is older than `days` days.
 
     Each scraper run touches last_seen_at on every listing it sees, so any
@@ -890,15 +1029,20 @@ def deactivate_stale_listings(days: int = 21) -> int:
     site (sold, withdrawn, or expired). Keeping them active inflates GREEN
     counts and shows the user listings that no longer exist.
 
+    `market` limits it to one market — a pipeline run whose own portals
+    couldn't be read skips its market's check, not the other's. None (the
+    default) checks every market.
+
     Returns the number of rows deactivated.
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     conn = get_conn()
     try:
+        only, params = _market_sql(conn, market)
         n = conn.execute(
             "UPDATE listings SET is_active=0 "
-            "WHERE is_active=1 AND last_seen_at < ?",
-            (cutoff,),
+            f"WHERE is_active=1 AND last_seen_at < ?{only}",
+            (cutoff, *params),
         ).rowcount
         conn.commit()
     finally:
@@ -1173,13 +1317,15 @@ def requeue_scores_without_benchmark() -> int:
     from engine.regional_prices import regional_median_price
     conn = get_conn()
     try:
+        _ensure_market_columns(conn)
         rows = conn.execute("""
-            SELECT l.id, l.district FROM listings l
+            SELECT l.id, l.district, l.market FROM listings l
             JOIN cashflow_scores c ON c.listing_id = l.id
             WHERE c.regional_median_m2 IS NULL AND l.is_active = 1
         """).fetchall()
         n = sum(_drop_cashflow_score(conn, r["id"]) for r in rows
-                if regional_median_price(r["district"] or "") is not None)
+                if regional_median_price(r["district"] or "",
+                                         **_market_kw(r["market"])) is not None)
         conn.commit()
     finally:
         conn.close()
@@ -1200,8 +1346,9 @@ def requeue_scores_with_stale_class() -> int:
         if not _has_table(conn, "cashflow_scores"):
             return 0
         _ensure_cashflow_columns(conn)
+        _ensure_market_columns(conn)
         rows = conn.execute("""
-            SELECT l.id, l.price_eur, l.size_m2, l.district, l.rooms,
+            SELECT l.id, l.price_eur, l.size_m2, l.district, l.rooms, l.market,
                    c.classification, c.max_price_green, c.max_price_yellow
             FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
             -- Only what get_unscored_cashflow() would score again.
@@ -1211,11 +1358,14 @@ def requeue_scores_with_stale_class() -> int:
         stale = [
             r["id"] for r in rows
             if (class_at_price(r["price_eur"], r["size_m2"], r["district"] or "",
-                               r["rooms"]) != r["classification"]
+                               r["rooms"], **_market_kw(r["market"]))
+                != r["classification"]
                 or max_offer_price(r["size_m2"], r["district"] or "", "GREEN",
-                                   rooms=r["rooms"]) != r["max_price_green"]
+                                   rooms=r["rooms"], **_market_kw(r["market"]))
+                != r["max_price_green"]
                 or max_offer_price(r["size_m2"], r["district"] or "", "YELLOW",
-                                   rooms=r["rooms"]) != r["max_price_yellow"])
+                                   rooms=r["rooms"], **_market_kw(r["market"]))
+                != r["max_price_yellow"])
         ]
         n = sum(_drop_cashflow_score(conn, lid) for lid in stale)
         conn.commit()
@@ -1231,22 +1381,36 @@ def requeue_scores_from_older_model() -> int:
     scoring run redoes them. A new tax year's table, or a change to how the
     figures are worked out, would otherwise reach only listings scored after
     it. Returns the number of scores dropped."""
-    from config import tax_rules
+    import markets
     from engine.financial import SCORING_MODEL_VERSION
     conn = get_conn()
     try:
         if not _has_table(conn, "cashflow_scores"):
             return 0
         _ensure_cashflow_columns(conn)
+        _ensure_market_columns(conn)
         rows = conn.execute("""
-            SELECT l.id FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
+            SELECT l.id, l.market, c.model_version, c.tax_year
+            FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
             -- Only what get_unscored_cashflow() would score again.
             WHERE l.is_active = 1 AND l.price_eur > 0 AND l.size_m2 > 0
               AND l.lv_status != 'REJECTED'
-              AND (c.model_version IS NULL OR c.model_version != ?
-                   OR c.tax_year IS NULL OR c.tax_year != ?)
-        """, (SCORING_MODEL_VERSION, tax_rules()["year"])).fetchall()
-        n = sum(_drop_cashflow_score(conn, r["id"]) for r in rows)
+        """).fetchall()
+        # Each market has its own tax tables, so its own current year.
+        years: dict[str, int | None] = {}
+
+        def tax_year(market):
+            m = markets.normalize(market)
+            if m not in years:
+                try:
+                    years[m] = markets.tax_rules(market=m)["year"]
+                except LookupError:          # no table yet: nothing to compare
+                    years[m] = None
+            return years[m]
+        n = sum(_drop_cashflow_score(conn, r["id"]) for r in rows
+                if r["model_version"] is None
+                or r["model_version"] != SCORING_MODEL_VERSION
+                or r["tax_year"] is None or r["tax_year"] != tax_year(r["market"]))
         conn.commit()
     finally:
         conn.close()
@@ -1397,10 +1561,11 @@ def get_price_drops(days: int = 14, min_drop: float = 0.02,
         return []
     conn = get_conn()
     try:
+        _ensure_market_columns(conn)
         rows = conn.execute("""
             SELECT l.id, l.title, l.district, l.url, l.source, l.price_eur,
                    l.size_m2, l.rooms, l.scraped_at, c.classification AS cf_class,
-                   c.max_price_yellow, c.max_price_green
+                   c.max_price_yellow, c.max_price_green, l.market, l.currency
             FROM listings l LEFT JOIN cashflow_scores c ON c.listing_id = l.id
             WHERE l.is_active = 1 AND l.lv_status != 'REJECTED'
         """).fetchall()
@@ -1442,14 +1607,23 @@ def upsert_listing(data: dict):
     """Insert or refresh a scraped listing. `lat`/`lng`, when present, are the
     portal's own map pin; they outrank geocoded coordinates, and a new or
     moved pin sends an UNVERIFIED LV check back to PENDING so the debt filter
-    looks up the building parcel under it."""
+    looks up the building parcel under it.
+
+    `market` ('sk' when absent) and `currency` (the market's own when absent)
+    are set on insert and never changed after; `price_eur` is the asking price
+    in that currency — EUR for a Slovak listing, CZK for a Czech one."""
+    import markets
     lat, lng = data.get("lat"), data.get("lng")
     has_pin = lat is not None and lng is not None
+    market = markets.normalize(data.get("market"))
     data = {**data, "lat": lat if has_pin else None, "lng": lng if has_pin else None,
-            "coords_source": "listing" if has_pin else None}
+            "coords_source": "listing" if has_pin else None,
+            "market": market,
+            "currency": data.get("currency") or markets.get(market).currency}
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
+        _ensure_market_columns(conn)
         _ensure_price_history(conn)
         # If a row already exists with this URL (e.g. a prior slug-URL variant
         # that _dedupe_canonical_urls rewrote to the canonical form), reuse its
@@ -1467,19 +1641,19 @@ def upsert_listing(data: dict):
             data = {**data, "id": existing[0], "url_hash": existing[0]}
         # Auto-detect dev-project listings from URL + title at insert time.
         data = {**data, "is_dev_project": detect_dev_project(
-            data.get("url", ""), data.get("title", ""),
+            data.get("url", ""), data.get("title", ""), market,
         )}
         conn.execute("""
             INSERT INTO listings
             (id, source, url, url_hash, title, description, price_eur, size_m2,
              rooms, floor, year_built, energy_class, address_raw, district, city,
              primary_image_url, image_urls, classification, lv_status, scraped_at,
-             last_seen_at, is_dev_project, lat, lng, coords_source)
+             last_seen_at, is_dev_project, lat, lng, coords_source, market, currency)
             VALUES
             (:id,:source,:url,:url_hash,:title,:description,:price_eur,:size_m2,
              :rooms,:floor,:year_built,:energy_class,:address_raw,:district,:city,
              :primary_image_url,:image_urls,:classification,:lv_status,:scraped_at,
-             :last_seen_at,:is_dev_project,:lat,:lng,:coords_source)
+             :last_seen_at,:is_dev_project,:lat,:lng,:coords_source,:market,:currency)
             ON CONFLICT(id) DO UPDATE SET
                 last_seen_at=excluded.last_seen_at,
                 title=CASE WHEN excluded.title != '' THEN excluded.title ELSE title END,
@@ -1650,11 +1824,13 @@ def get_location_rows_missing_risk(limit: int = 100) -> list[dict]:
     try:
         _ensure_location_columns(conn)
         _ensure_enrichment_columns(conn)
+        _ensure_market_columns(conn)
         rows = conn.execute("""
             SELECT lc.listing_id, lc.lat, lc.lng,
                    lc.nearest_transit_m, lc.amenity_count,
                    l.address_raw, l.district, l.energy_class,
-                   l.lat AS listing_lat, l.lng AS listing_lng, l.coords_source
+                   l.lat AS listing_lat, l.lng AS listing_lng, l.coords_source,
+                   l.market
             FROM location_scores lc JOIN listings l ON l.id = lc.listing_id
             WHERE lc.risk_checked_at IS NULL AND l.is_active = 1
               AND l.lv_status IN ('PASS', 'UNVERIFIED')
@@ -1771,19 +1947,22 @@ def set_lv_analysis(listing_id: str, risk_level: str, summary: str = ""):
 _LV_ROW_COLUMNS = """
     id, address_raw, district, lat, lng, coords_source,
     cadastral_area, cadastral_number, cadastral_unit_code,
-    plot_lv_number, lv_number
+    plot_lv_number, lv_number, market
 """
 
 
-def get_pending_lv(recheck_days: int = 7):
+def get_pending_lv(recheck_days: int = 7, market: str | None = None):
     """Listings the LV debt filter should (re)check: every PENDING one, and an
     UNVERIFIED one that has something new to check with — a portal map pin or
     a flat LV number — once its last check is `recheck_days` old (a portal
-    outage or a pin off the building shouldn't park it forever)."""
+    outage or a pin off the building shouldn't park it forever). `market`
+    keeps one market's; None returns all, each row carrying its market."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=recheck_days)).isoformat()
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
+        _ensure_market_columns(conn)
+        only, params = _market_sql(conn, market)
         rows = conn.execute(f"""
             SELECT {_LV_ROW_COLUMNS}
             FROM listings
@@ -1792,8 +1971,8 @@ def get_pending_lv(recheck_days: int = 7):
                 OR (lv_status='UNVERIFIED'
                     AND (coords_source='listing' OR COALESCE(lv_number, '') != '')
                     AND (lv_checked_at IS NULL OR lv_checked_at < ?))
-            )
-        """, (cutoff,)).fetchall()
+            ){only}
+        """, (cutoff, *params)).fetchall()
     finally:
         conn.close()
     return [dict(r) for r in rows]
@@ -1804,6 +1983,7 @@ def get_lv_row(listing_id: str) -> dict | None:
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
+        _ensure_market_columns(conn)
         row = conn.execute(
             f"SELECT {_LV_ROW_COLUMNS} FROM listings WHERE id=?", (listing_id,)
         ).fetchone()
@@ -1827,6 +2007,67 @@ def set_parcel_data(listing_id: str, cadastral_area: str, parcel_no: str,
         conn.commit()
     finally:
         conn.close()
+
+
+def _ensure_lv_documents_table(conn):
+    conn.execute("CREATE TABLE IF NOT EXISTS lv_documents ("
+                 "listing_id TEXT PRIMARY KEY, lv_text TEXT NOT NULL, "
+                 "added_at TEXT NOT NULL)")
+
+
+def set_lv_document(listing_id: str, lv_text: str) -> None:
+    """Store the pasted text of a flat's výpis z LV; blank removes it. Kept
+    composed (NFC): text copied from a PDF may come decomposed."""
+    import unicodedata
+    text = unicodedata.normalize("NFC", lv_text or "").strip()
+    conn = get_conn()
+    try:
+        _ensure_lv_documents_table(conn)
+        if text:
+            conn.execute(
+                "INSERT INTO lv_documents (listing_id, lv_text, added_at) VALUES (?,?,?) "
+                "ON CONFLICT(listing_id) DO UPDATE SET lv_text=excluded.lv_text, "
+                "added_at=excluded.added_at",
+                (listing_id, text, datetime.now(timezone.utc).isoformat()))
+        else:
+            conn.execute("DELETE FROM lv_documents WHERE listing_id=?", (listing_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_lv_documents(listing_ids=None) -> dict[str, str]:
+    """{listing id: pasted LV text} — for `listing_ids`, or every one."""
+    conn = get_conn()
+    try:
+        _ensure_lv_documents_table(conn)
+        if listing_ids is None:
+            rows = conn.execute("SELECT listing_id, lv_text FROM lv_documents").fetchall()
+        else:
+            ids = list(listing_ids)
+            rows = []
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                rows += conn.execute(
+                    f"SELECT listing_id, lv_text FROM lv_documents WHERE listing_id IN "
+                    f"({','.join('?' * len(chunk))})", chunk).fetchall()
+    finally:
+        conn.close()
+    return {r[0]: r[1] for r in rows}
+
+
+def get_lv_document(listing_id: str) -> str | None:
+    return get_lv_documents([listing_id]).get(listing_id)
+
+
+def get_listing_description(listing_id: str) -> str:
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT description FROM listings WHERE id=?",
+                           (listing_id,)).fetchone()
+    finally:
+        conn.close()
+    return (row[0] if row else "") or ""
 
 
 def set_flat_lv(listing_id: str, lv_number: str, cadastral_area: str = ""):
@@ -1863,9 +2104,11 @@ def get_lv_todo() -> list[dict]:
         _ensure_enrichment_columns(conn)
         if not _has_table(conn, "cashflow_scores"):
             return []
+        _ensure_market_columns(conn)
         rows = conn.execute("""
             SELECT l.id, l.title, l.district, l.address_raw, l.url, l.source,
                    l.price_eur, l.size_m2, l.lv_status, l.lv_number,
+                   l.market, l.currency,
                    l.cadastral_area, l.cadastral_unit_code, l.cadastral_number,
                    l.plot_lv_number, l.lv_detail, l.lv_checked_at,
                    c.classification AS cf_class, c.market_discount
@@ -1894,40 +2137,45 @@ def queue_lv_check(listing_id: str) -> None:
         conn.close()
 
 
-def get_unscored_cashflow():
+def get_unscored_cashflow(market: str | None = None):
     # SELECT l.* (not an explicit column list) so optional enrichment columns
     # like has_parking / furnished flow through to the scorer when present,
-    # without a column-list edit each time the schema grows.
+    # without a column-list edit each time the schema grows. Each row carries
+    # its market; `market` keeps one market's (None: all).
     conn = get_conn()
     try:
-        rows = conn.execute("""
+        only, params = _market_sql(conn, market, "l.")
+        rows = conn.execute(f"""
             SELECT l.*
             FROM listings l
             LEFT JOIN cashflow_scores c ON l.id = c.listing_id
             WHERE l.lv_status != 'REJECTED' AND c.listing_id IS NULL
-              AND l.price_eur > 0 AND l.size_m2 > 0 AND l.is_active=1
-        """).fetchall()
+              AND l.price_eur > 0 AND l.size_m2 > 0 AND l.is_active=1{only}
+        """, params).fetchall()
     finally:
         conn.close()
     return [dict(r) for r in rows]
 
 
-def get_unparsed_descriptions(limit: int = 200):
+def get_unparsed_descriptions(limit: int = 200, market: str | None = None):
     """Active listings with a stored free-text description that hasn't been
     parsed into structured features yet. desc_parsed stays 0 until a successful
-    parse, so transient enrichment failures get retried on a later run."""
+    parse, so transient enrichment failures get retried on a later run.
+    `market` keeps one market's (None: all)."""
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
-        rows = conn.execute("""
-            SELECT id, description
+        _ensure_market_columns(conn)
+        only, params = _market_sql(conn, market)
+        rows = conn.execute(f"""
+            SELECT id, description, market
             FROM listings
             WHERE is_active=1
               AND description IS NOT NULL AND description != ''
-              AND (desc_parsed IS NULL OR desc_parsed = 0)
+              AND (desc_parsed IS NULL OR desc_parsed = 0){only}
             ORDER BY scraped_at DESC
             LIMIT ?
-        """, (limit,)).fetchall()
+        """, (*params, limit)).fetchall()
     finally:
         conn.close()
     return [dict(r) for r in rows]
@@ -1992,7 +2240,7 @@ def requeue_descriptions_missing_extras() -> int:
     return n
 
 
-def get_unnormalized_addresses(limit: int = 200):
+def get_unnormalized_addresses(limit: int = 200, market: str | None = None):
     """Active listings that have a raw address but a blank district (so the rent
     estimate falls to the €6.50/m² default) and haven't been normalized yet.
     addr_normalized stays 0 until a normalize_address() call returns (success or
@@ -2000,16 +2248,18 @@ def get_unnormalized_addresses(limit: int = 200):
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
-        rows = conn.execute("""
-            SELECT id, address_raw
+        _ensure_market_columns(conn)
+        only, params = _market_sql(conn, market)
+        rows = conn.execute(f"""
+            SELECT id, address_raw, market
             FROM listings
             WHERE is_active=1
               AND address_raw IS NOT NULL AND address_raw != ''
               AND (district IS NULL OR district = '')
-              AND (addr_normalized IS NULL OR addr_normalized = 0)
+              AND (addr_normalized IS NULL OR addr_normalized = 0){only}
             ORDER BY scraped_at DESC
             LIMIT ?
-        """, (limit,)).fetchall()
+        """, (*params, limit)).fetchall()
     finally:
         conn.close()
     return [dict(r) for r in rows]
@@ -2046,9 +2296,10 @@ def get_unscored_location():
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
+        _ensure_market_columns(conn)
         rows = conn.execute("""
             SELECT l.id, l.address_raw, l.energy_class, l.district,
-                   l.lat, l.lng, l.coords_source
+                   l.lat, l.lng, l.coords_source, l.market
             FROM listings l
             LEFT JOIN location_scores lc ON l.id = lc.listing_id
             WHERE l.lv_status IN ('PASS', 'UNVERIFIED')

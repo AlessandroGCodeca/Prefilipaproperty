@@ -9,6 +9,7 @@ stores the grouping so the dashboard can show one row with "listed on 3
 portals" and links to every copy.
 
 Two listings are the same flat when all of these hold:
+  - they are in the same market (a Slovak and a Czech listing never match);
   - the district resolves to the same rent key (engine.financial.match_rent_key),
     with a Bratislava city part counted as its administrative district —
     or, when that key is only the "default" fallback, the raw district
@@ -66,14 +67,24 @@ _BA_PART_TO_DISTRICT = {
 
 
 def _location_key(row: dict) -> str:
+    """Where a listing is, for matching: its market, then its rent key (a
+    Bratislava city part as its administrative district) or, with only the
+    default key, its raw district. "" when it has no district."""
+    import markets
     from engine.financial import match_rent_key
     district = (row.get("district") or "").strip()
     if not district:
         return ""
-    key = match_rent_key(district)
+    market = markets.of_row(row)
+    if market == "sk":
+        key = match_rent_key(district)
+        if key != "default":
+            key = _BA_PART_TO_DISTRICT.get(key, key)
+    else:
+        key = match_rent_key(district, market=market)
     if key == "default":
-        return "raw:" + district.lower()
-    return _BA_PART_TO_DISTRICT.get(key, key)
+        key = "raw:" + district.lower()
+    return f"{market}:{key}"
 
 
 def is_same_flat(a: dict, b: dict) -> bool:

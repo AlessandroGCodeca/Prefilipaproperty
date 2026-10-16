@@ -160,28 +160,40 @@ def rates_from_comps(comps: dict[str, dict]) -> dict[str, float]:
 
 
 # ── DB side ───────────────────────────────────────────────────────────────────
+def _sk_rows(conn, table: str) -> str:
+    """" AND market = 'sk'" when `table` has a market column — another
+    market's rentals, comps and listings are its own (engine.rent_comps_cz) —
+    else "" (a database from before markets: every row is Slovak)."""
+    cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    return " AND market = 'sk'" if "market" in cols else ""
+
+
 def _active_rentals(conn, max_age_days: int) -> list[dict]:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         SELECT rent_eur, size_m2, rooms, furnished, energies_included, rent_key
         FROM rental_listings
-        WHERE is_active = 1 AND last_seen_at >= ?
+        WHERE is_active = 1 AND last_seen_at >= ?{_sk_rows(conn, "rental_listings")}
     """, (cutoff,)).fetchall()
     return [dict(r) for r in rows]
 
 
 def _stored_comps(conn) -> dict[str, dict]:
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         SELECT district, sample_count, eur_per_m2 FROM rent_comps
-        WHERE source = 'live_prenajom' AND size_band = 'all'
+        WHERE source = 'live_prenajom' AND size_band = 'all'{_sk_rows(conn, "rent_comps")}
     """).fetchall()
     return {r["district"]: {"n": r["sample_count"] or 0,
                             "median_eur_per_m2": r["eur_per_m2"] or 0} for r in rows}
 
 
-def load_live_rates() -> dict[str, float]:
+def load_live_rates(market: str = "sk") -> dict[str, float]:
     """The live rates scoring should use right now. Empty (→ baseline
-    everywhere) when no comps have been built or the tables don't exist yet."""
+    everywhere) when no comps have been built or the tables don't exist yet.
+    (Another market's comps: engine.rent_comps_cz.)"""
+    if market != "sk":
+        from engine import rent_comps_cz
+        return rent_comps_cz.load_live_rates()
     from database import get_conn
     conn = get_conn()
     try:
@@ -207,7 +219,8 @@ def rebuild_rent_comps(max_age_days: int = RENT_COMP_MAX_AGE_DAYS) -> dict:
         old_rates = rates_from_comps(_stored_comps(conn))
         comps = aggregate(_active_rentals(conn, max_age_days))
         now = datetime.now(timezone.utc).isoformat()
-        conn.execute("DELETE FROM rent_comps WHERE source = 'live_prenajom'")
+        conn.execute("DELETE FROM rent_comps WHERE source = 'live_prenajom'"
+                     + _sk_rows(conn, "rent_comps"))
         for key, c in comps.items():
             conn.execute("""
                 INSERT INTO rent_comps
@@ -229,7 +242,8 @@ def rebuild_rent_comps(max_age_days: int = RENT_COMP_MAX_AGE_DAYS) -> dict:
         if changed:
             wanted = set(changed)
             for r in conn.execute(
-                    "SELECT id, district FROM listings WHERE is_active = 1").fetchall():
+                    "SELECT id, district FROM listings WHERE is_active = 1"
+                    + _sk_rows(conn, "listings")).fetchall():
                 if match_rent_key(r["district"] or "") in wanted:
                     rescored += _drop_cashflow_score(conn, r["id"])
         conn.commit()

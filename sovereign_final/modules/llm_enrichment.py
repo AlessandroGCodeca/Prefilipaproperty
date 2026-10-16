@@ -152,15 +152,32 @@ _DESCRIPTION_SYSTEM = (
 )
 
 
-def parse_description(description: str) -> dict | None:
-    """Extract structured features from a free-text (Slovak) description.
+# A Czech listing (market "cz") is described in Czech, with Czech terms for
+# the same facts.
+_DESCRIPTION_SYSTEM_CZ = (
+    "You extract structured facts from Czech real-estate listing descriptions. "
+    "Only report what the text states or clearly implies; never invent details. "
+    "Use 'unknown' / -1 / 0 when a field is not mentioned. "
+    "parking is true for any garage (garáž) or dedicated parking space "
+    "(parkovací stání, parkovací místo). rooms is the number before '+' in a "
+    "Czech layout (2+kk and 2+1 are both 2). "
+    "condition maps Czech terms: novostavba=new, po rekonstrukci=renovated, "
+    "původní stav=original, velmi dobrý/dobrý stav/částečná rekonstrukce=good, "
+    "před rekonstrukcí/špatný stav=poor."
+)
+
+
+def parse_description(description: str, market: str = "sk") -> dict | None:
+    """Extract structured features from a free-text (Slovak, or for market
+    "cz" Czech) description.
 
     Returns a dict matching _DESCRIPTION_SCHEMA, or None if disabled/failed.
     """
     description = (description or "").strip()
     if not description:
         return None
-    return _ask_json(_DESCRIPTION_SYSTEM, f"DESCRIPTION:\n{description[:4000]}",
+    system = _DESCRIPTION_SYSTEM if market == "sk" else _DESCRIPTION_SYSTEM_CZ
+    return _ask_json(system, f"DESCRIPTION:\n{description[:4000]}",
                      _DESCRIPTION_SCHEMA)
 
 
@@ -188,14 +205,37 @@ _ADDRESS_SYSTEM = (
 )
 
 
-def normalize_address(address_raw: str) -> dict | None:
-    """Resolve a raw address string into {city, district, kraj}.
+def _address_schema_cz() -> dict:
+    from engine.regional_prices_cz import KRAJ_NAMES
+    return {**_ADDRESS_SCHEMA, "properties": {
+        **_ADDRESS_SCHEMA["properties"],
+        "kraj": {"type": "string", "enum": [*KRAJ_NAMES, ""]}}}
+
+
+def _address_system_cz() -> str:
+    from engine.regional_prices_cz import KRAJ_NAMES
+    return (
+        "You normalise messy Czech property addresses into structured location data. "
+        "Given a raw address string, return the municipality (obec), the city part or "
+        "district (e.g. 'Praha 2', 'Brno-střed', 'Ostrava-Poruba', or '' if none), and "
+        "the Czech kraj (region) as a code: "
+        + ", ".join(f"{code}={name}" for code, name in KRAJ_NAMES.items())
+        + ". Use '' for any field you cannot determine. Never guess a kraj from a "
+          "postcode you are unsure about.")
+
+
+def normalize_address(address_raw: str, market: str = "sk") -> dict | None:
+    """Resolve a raw address string into {city, district, kraj} — a Slovak
+    one, or for market "cz" a Czech one (Czech kraj codes).
 
     Returns a dict matching _ADDRESS_SCHEMA, or None if disabled/failed.
     """
     address_raw = (address_raw or "").strip()
     if not address_raw:
         return None
+    if market != "sk":
+        return _ask_json(_address_system_cz(), f"RAW ADDRESS:\n{address_raw[:500]}",
+                         _address_schema_cz(), max_tokens=2048)
     return _ask_json(_ADDRESS_SYSTEM, f"RAW ADDRESS:\n{address_raw[:500]}",
                      _ADDRESS_SCHEMA, max_tokens=2048)
 
@@ -238,7 +278,29 @@ _LV_SYSTEM = (
 )
 
 
-def lv_text_for_claude(lv_text) -> tuple[str, bool]:
+_LV_SYSTEM_CZ = (
+    "You are a Czech real-estate legal analyst reviewing a výpis z listu "
+    "vlastnictví (LV) from the Czech katastr nemovitostí for someone buying the "
+    "flat to let it. Identify encumbrances and legal risks. Part C (věcná práva "
+    "zatěžující nemovitosti, formerly omezení vlastnického práva) and part D "
+    "(poznámky) are given in full; part B1 lists rights that BENEFIT this flat, "
+    "not burdens on it. A zástavní právo, or a zákaz zcizení nebo zatížení, in "
+    "favour of a recognised bank or stavební spořitelna is normal for a mortgaged "
+    "flat and is LOW risk. A zástavní právo in favour of a private person or "
+    "company, an exekuce, an insolvence / úpadek, a výkon rozhodnutí, or a "
+    "poznámka spornosti / soudní spor is HIGH risk. So is a věcné břemeno "
+    "(služebnost) giving someone a lifetime right to use or live in the flat "
+    "(doživotní užívání, výměnek), and a předkupní právo held by a private person "
+    "or company. A technical věcné břemeno (utility lines, pipes, access or right "
+    "of way) and a předkupní právo of the state, a kraj or a municipality are soft "
+    f"issues. {_SOFT_POLICY} A plomba (a change of rights pending in the cadastre) "
+    "is at least MEDIUM. List each concrete issue in 'flags'. Set "
+    "is_safe_to_proceed=false for any HIGH-risk encumbrance. Keep 'summary' concise "
+    "and factual."
+)
+
+
+def lv_text_for_claude(lv_text, market: str = "sk") -> tuple[str, bool]:
     """(the LV text analyze_lv sends, whether it holds all of part C).
 
     The report lists the encumbrances (ťarchy, part C) last, so the old
@@ -250,11 +312,17 @@ def lv_text_for_claude(lv_text) -> tuple[str, bool]:
     "safe" from Claude not overrule the screen (modules/debt_bot._decide_lv).
     """
     from kataster_scraper import LV_TEXT_MAX_CHARS
-    from modules.lv_screen import part_c_start
-    raw = str(lv_text or "")
+    if market == "sk":
+        from modules.lv_screen import part_c_start
+        raw = str(lv_text or "")
+    else:
+        from modules.lv_screen_cz import part_c_start, _norm
+        raw = _norm(lv_text)
     # Judged before stripping: a report cut at the cap just after a space is
-    # still a cut report.
-    complete = len(raw) < LV_TEXT_MAX_CHARS
+    # still a cut report. A Czech výpis is pasted by hand, never cut — but
+    # holds part C only if its heading is there (page 1 of 2 does not).
+    complete = (len(raw) < LV_TEXT_MAX_CHARS if market == "sk"
+                else part_c_start(raw) is not None)
     text = raw.strip()
     start = part_c_start(text)
     if start is not None and start > LV_HEAD_CHARS:
@@ -262,7 +330,7 @@ def lv_text_for_claude(lv_text) -> tuple[str, bool]:
     return text, complete
 
 
-def analyze_lv(lv_text: str) -> dict | None:
+def analyze_lv(lv_text: str, market: str = "sk") -> dict | None:
     """Structured risk read of an LV title-deed document.
 
     Returns a dict matching _LV_SCHEMA, or None if disabled/failed. Intended as a
@@ -271,8 +339,9 @@ def analyze_lv(lv_text: str) -> dict | None:
     lv_text = (lv_text or "").strip()
     if not lv_text:
         return None
-    excerpt, _ = lv_text_for_claude(lv_text)
-    return _ask_json(_LV_SYSTEM, f"LV DATA:\n{excerpt}", _LV_SCHEMA,
+    excerpt, _ = lv_text_for_claude(lv_text, market)
+    return _ask_json(_LV_SYSTEM if market == "sk" else _LV_SYSTEM_CZ,
+                     f"LV DATA:\n{excerpt}", _LV_SCHEMA,
                      model=ANTHROPIC_MODEL_LV, effort="high", max_tokens=16000,
                      fallbacks=True)
 

@@ -33,6 +33,7 @@ cannot be read counts as blocking.
 
 import re
 import unicodedata
+from dataclasses import dataclass
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -136,33 +137,61 @@ _NAME_END = re.compile(
 )
 
 
-def _creditor_name(span: str) -> str:
-    cut = _NAME_END.search(fold(span))
+def _creditor_name(span: str, name_end: re.Pattern = _NAME_END) -> str:
+    cut = name_end.search(fold(span))
     name = span[:cut.start()] if cut else span
     return re.sub(r"\s+", " ", name).strip(" :.-")
 
 
-def is_bank(creditor: str) -> bool:
-    return bool(_BANK_RE.search(fold(creditor)))
+def is_bank(creditor: str, bank_re: re.Pattern = _BANK_RE) -> bool:
+    return bool(bank_re.search(fold(creditor)))
 
 
 def _excerpt(text: str, start: int, length: int = 160) -> str:
     return re.sub(r"\s+", " ", text[start:start + length]).strip()
 
 
-def screen_lv(lv_text) -> list[dict]:
-    """Every encumbrance in the LV text, in document order.
+@dataclass(frozen=True)
+class Vocabulary:
+    """One register's words for the screen below: the Slovak one here, the
+    Czech one in modules/lv_screen_cz. The reading is the same for both."""
+    rules: tuple                 # (label, kind, compiled pattern) on folded text
+    creditor_markers: tuple      # what precedes a lien's creditor, most usual first
+    holder_markers: tuple        # what precedes an easement's / a right's holder
+    reference_before: re.Pattern  # a lien phrase after this only refers back
+    bank_re: re.Pattern
+    name_end: re.Pattern
+    tier: object                 # (label, folded entry text, holder) -> (tier, why)
+    entry_no_re: re.Pattern
+    distress_lien_prefix: str    # "exekučné záložné právo": the distress's own lien
+    # A back-reference stays in its own entry: a lien phrase with an entry
+    # separator (entry_no_re) since the last lien is a new lien (Czech).
+    reference_needs_same_entry: bool = False
+
+
+SK_VOCABULARY = Vocabulary(
+    rules=tuple(_COMPILED), creditor_markers=_CREDITOR_MARKERS,
+    holder_markers=_CREDITOR_MARKERS[:1], reference_before=_REFERENCE_BEFORE,
+    bank_re=_BANK_RE, name_end=_NAME_END, tier=_tier, entry_no_re=_ENTRY_NO_RE,
+    distress_lien_prefix="exeku",
+)
+
+
+def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
+    """Every encumbrance in the LV text, in document order — read with the
+    Slovak register's words unless `vocabulary` gives another's.
 
     Each entry: {flag, kind, blocking, creditor, excerpt}. `blocking` is False
     only for a lien whose own creditor is a bank; `creditor` is the text read
     after the creditor marker (None when no lien creditor applies).
     """
+    v = vocabulary or SK_VOCABULARY
     text = str(lv_text or "")
     low = fold(text)
 
     hits = sorted(
         (m.start(), m.end(), label, kind)
-        for label, kind, rx in _COMPILED
+        for label, kind, rx in v.rules
         for m in rx.finditer(low)
     )
     entries: list[dict] = []
@@ -178,7 +207,7 @@ def screen_lv(lv_text) -> list[dict]:
                 gap = start - last_seen[label]
                 if (gap <= 120 if kind == "distress" else
                         gap <= _ENTRY_SPAN
-                        and not _ENTRY_NO_RE.search(low, last_seen[label], start)):
+                        and not v.entry_no_re.search(low, last_seen[label], start)):
                     continue
             last_seen[label] = start
             entry = {"flag": label, "kind": kind, "blocking": True, "tier": "hard",
@@ -188,31 +217,33 @@ def screen_lv(lv_text) -> list[dict]:
                 # of hit, so another entry's wording can't soften this one.
                 nxt = next((h[0] for h in hits[i + 1:] if h[2] != label), len(low))
                 entry_end = min(nxt, end + _ENTRY_SPAN)
-                nxt_entry = _ENTRY_NO_RE.search(low, end, entry_end)
+                nxt_entry = v.entry_no_re.search(low, end, entry_end)
                 if nxt_entry:
                     entry_end = nxt_entry.start()
-                holder = _holder(text, low, end, entry_end)
-                entry["tier"], entry["note"] = _tier(label, low[start:entry_end], holder)
+                holder = _holder(text, low, end, entry_end, v)
+                entry["tier"], entry["note"] = v.tier(label, low[start:entry_end], holder)
                 entry["creditor"] = holder or None
                 entry["blocking"] = entry["tier"] == "hard" or LV_SOFT_FLAGS_REJECT
             entries.append(entry)
             continue
         # "exekučné záložné právo" is the exekúcia's own lien — the distress
         # hit right before it already blocks.
-        if "exeku" in low[max(0, start - 25):start]:
+        if v.distress_lien_prefix in low[max(0, start - 25):start]:
             continue
         nxt = hits[i + 1][0] if i + 1 < len(hits) else len(low)
         window_end = min(nxt, end + _MARKER_SPAN)
         window = low[end:window_end]
-        is_reference = bool(_REFERENCE_BEFORE.search(low[max(0, start - 40):start]))
-        markers = _CREDITOR_MARKERS[:1] if is_reference else _CREDITOR_MARKERS
+        is_reference = bool(v.reference_before.search(low[max(0, start - 40):start]))
+        markers = v.creditor_markers[:1] if is_reference else v.creditor_markers
         marker = None
         for rx in markers:
             marker = rx.search(window)
             if marker:
                 break
         if marker is None and is_reference and last_lien_at is not None \
-                and start - last_lien_at <= _ENTRY_SPAN:
+                and start - last_lien_at <= _ENTRY_SPAN \
+                and not (v.reference_needs_same_entry
+                         and v.entry_no_re.search(low, last_lien_at, start)):
             continue
         if marker is not None:
             c_start = end + marker.end()
@@ -221,24 +252,31 @@ def screen_lv(lv_text) -> list[dict]:
             # No marker: the name may simply follow ("Záložné právo: Tatra
             # banka, a.s."). Anything else is a lien we can't attribute.
             creditor = text[end:window_end]
-        creditor = _creditor_name(creditor)
+        creditor = _creditor_name(creditor, v.name_end)
+        bank = is_bank(creditor, v.bank_re)
         last_lien_at = start
         entries.append({"flag": label, "kind": kind,
-                         "blocking": not is_bank(creditor),
-                         "tier": "hard" if not is_bank(creditor) else None,
+                         "blocking": not bank,
+                         "tier": "hard" if not bank else None,
                          "creditor": creditor or None, "note": None,
                          "excerpt": _excerpt(text, start)})
     return entries
 
 
-def _holder(text: str, low: str, end: int, entry_end: int) -> str:
+def _holder(text: str, low: str, end: int, entry_end: int,
+            vocabulary: Vocabulary | None = None) -> str:
     """Whom an easement or a pre-emption right is in favour of, read like a
     lien's creditor: the name after "v prospech" in the same entry."""
-    m = _CREDITOR_MARKERS[0].search(low[end:entry_end])
+    v = vocabulary or SK_VOCABULARY
+    m = None
+    for rx in v.holder_markers:
+        m = rx.search(low[end:entry_end])
+        if m:
+            break
     if not m:
         return ""
     start = end + m.end()
-    return _creditor_name(text[start:min(entry_end, start + _CREDITOR_SPAN)])
+    return _creditor_name(text[start:min(entry_end, start + _CREDITOR_SPAN)], v.name_end)
 
 
 # Where part C (ťarchy — the encumbrances) starts in the report's text:
