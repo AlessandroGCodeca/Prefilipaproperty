@@ -560,7 +560,9 @@ def get_rent_estimate(district: str, size_m2: float, rooms=None,
     # only the published baseline needs the industrial premium on top.
     if source == "baseline" and any(z in key for z in zones):
         rate *= industrial
-    rate *= _rooms_multiplier(rooms)
+    # Slovakia's table is a 2-izb flat's, so the rooms multiplier applies; a
+    # Czech figure is an average over every size (engine/rent_cz): none.
+    rate *= _rooms_multiplier(rooms) if _sk(market) else 1.0
     # Description-derived premiums (only when the description was parsed; a
     # falsy parking/balcony flag and unfurnished/unknown furnishing leave rate
     # untouched).

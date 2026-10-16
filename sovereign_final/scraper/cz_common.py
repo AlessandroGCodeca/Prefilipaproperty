@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import unicodedata
 from datetime import datetime, timezone
@@ -288,3 +289,97 @@ def cleanup(source: str) -> None:
     from engine.regional_prices import zero_above_regional_ceiling, zero_below_regional_floor
     zero_below_regional_floor(source, market=MARKET)
     zero_above_regional_ceiling(source, market=MARKET)
+
+
+# ── Places ────────────────────────────────────────────────────────────────────
+# The places a Czech listing's text is matched against: the towns that name
+# the okresy (RÚIAN's okres names, engine/regional_prices_cz), Prague and its
+# 22 numbered districts, Brno's city districts — and, when the file exists,
+# every municipality in data/cz_obce.csv (a RÚIAN export of the obce: one
+# name per row, column "nazev" or the first column).
+CZ_OBCE_CSV = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "cz_obce.csv")
+_RURAL_OKRES_RE = re.compile(r"-(?:venkov|vychod|zapad|jih|sever)$")
+_places: dict[str, tuple[str, int]] | None = None
+
+
+def _load_obce() -> list[str]:
+    import csv
+    if not os.path.exists(CZ_OBCE_CSV):
+        return []
+    with open(CZ_OBCE_CSV, encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.reader(f))
+    if not rows:
+        return []
+    head = [h.strip().lower() for h in rows[0]]
+    col = head.index("nazev") if "nazev" in head else (head.index("name") if "name" in head else 0)
+    body = rows[1:] if head and not head[0][:1].isupper() else rows
+    return [r[col].strip() for r in body if len(r) > col and r[col].strip()]
+
+
+def _place_table() -> dict[str, tuple[str, int]]:
+    """{folded phrase: (district to store, rank)} — rank 0 is the most
+    specific (a city district), 2 a town."""
+    global _places
+    if _places is not None:
+        return _places
+    from engine.regional_prices_cz import OKRES_KRAJ, BRNO_DISTRICTS
+    from scraper.czech_cases import locative_phrases
+    from modules.lv_screen import fold as pfold
+    entries: list[tuple[str, str, int]] = []      # (name, district, rank)
+    for n in range(1, 23):
+        entries.append((f"Praha {n}", f"Praha {n}", 0))
+    for part in BRNO_DISTRICTS:
+        entries.append((part, part if part.lower().startswith("brno") else f"Brno - {part}", 1))
+    towns = {"Praha"}
+    for okres in OKRES_KRAJ:
+        if okres.startswith("Hlavní město") or _RURAL_OKRES_RE.search(fold(okres)):
+            continue
+        towns.add(re.sub(r"-město$", "", okres))
+    towns.update(_load_obce())
+    entries += [(t, t, 2) for t in sorted(towns)]
+    table: dict[str, tuple[str, int]] = {}
+    for name, district, rank in entries:
+        nom = "N:" + pfold(name).replace("-", " ")
+        if nom not in table or table[nom][1] > rank:
+            table[nom] = (district, rank)
+        for phrase in locative_phrases(name):
+            loc = "L:" + pfold(phrase).replace("-", " ")
+            if loc not in table or table[loc][1] > rank:
+                table[loc] = (district, rank)
+    _places = table
+    return table
+
+
+_TOKEN_RE = re.compile(r"\w+")          # "Ostrava-Poruba" is two words
+_LOC_PREP = {"v", "ve", "na"}
+
+
+def place_from_text(text: str) -> str:
+    """The Czech place a listing's text names, as a district string ("Praha
+    2", "Brno - Žabovřesky", "Kladno"), or "". A name counts in the
+    nominative (capitalised, so "most" — a bridge — is not Most) or in the
+    locative after "v" / "ve" / "na" ("v Praze 2", "ve Zlíně", "na
+    Vinohradech"). The longest name wins, then the most specific."""
+    from modules.lv_screen import fold as pfold
+    snippet = (text or "")[:4000]
+    if not snippet:
+        return ""
+    table = _place_table()
+    low = pfold(snippet)
+    tokens = [(m.start(), m.end()) for m in _TOKEN_RE.finditer(low)]
+    best = None                                   # (-words, rank, start, district)
+    for i, (start, _) in enumerate(tokens):
+        prev = low[tokens[i - 1][0]:tokens[i - 1][1]] if i else ""
+        for n in range(min(4, len(tokens) - i), 0, -1):
+            phrase = " ".join(low[s:e] for s, e in tokens[i:i + n])
+            hit = None
+            if prev in _LOC_PREP and ("L:" + phrase) in table:
+                hit = table["L:" + phrase]
+            elif ("N:" + phrase) in table and snippet[start].isupper():
+                hit = table["N:" + phrase]
+            if hit:
+                cand = (-n, hit[1], start, hit[0])
+                if best is None or cand < best:
+                    best = cand
+                break
+    return best[3] if best else ""

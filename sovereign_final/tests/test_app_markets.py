@@ -142,3 +142,25 @@ def test_a_czech_card_takes_the_vypis_and_a_slovak_one_does_not(two_markets):
     boxes = [t for t in at.text_area if t.key and t.key.startswith("lvdoc_")]
     assert [t.key for t in boxes] == ["lvdoc_cz1"]
     assert boxes[0].label == "Výpis z LV (text)" and boxes[0].value == "LIST VLASTNICTVÍ: 1234"
+
+
+def test_one_click_close_drafts_a_czech_contract_for_a_czech_flat(two_markets):
+    _score("cz1", 4_500_000.0, "Praha 2", "cz", 22_000)
+    at = _pick(run(), "🇨🇿 Czechia")
+    assert any(n.label == "Agreed Price Kč" for n in at.number_input)
+    assert not any(n.label == "Agreed Price €" for n in at.number_input)
+    next(t for t in at.text_input if t.label == "Full Name / s.r.o. Name").set_value("Test")
+    next(b for b in at.button if b.label == "GENERATE CONTRACT DRAFT").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    draft = next(t for t in at.text_area if t.label == "CONTRACT DRAFT").value
+    assert "KUPNÍ SMLOUVA" in draft and f"4{NB}500{NB}000{NB}Kč" in draft and "€" not in draft
+
+
+def test_the_comps_tab_follows_the_market(two_markets):
+    at = _pick(run(), "🇨🇿 Czechia")
+    md = _md(at)
+    assert "LIVE RENT COMPS — Kč/m²" in md and "PRENÁJOM LISTINGS" not in md
+    assert any("Deloitte" in c.value for c in at.caption)
+    at = _pick(at, "🇸🇰 Slovakia")
+    md = _md(at)
+    assert "PRENÁJOM LISTINGS" in md and "Kč/m²" not in md

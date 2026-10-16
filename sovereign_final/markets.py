@@ -352,6 +352,31 @@ CZ = Market(
     exit_cost_rate=_env_float("CZ_EXIT_COST_RATE", config.EXIT_COST_RATE),
     hold_assumptions={"source": "UNVERIFIED — the Slovak profile's assumptions",
                       "checked": None},
+    # Rents: engine/rent_cz (Deloitte Rent Index Q2 2026 for the places it
+    # names) and live rental comps (engine/rent_comps_cz).
+    rent_source={"source": "see engine/rent_cz.RENT_SOURCE",
+                 "checked": "2026-10-16 (web search)"},
+    # Flood: the Q100 flood areas (and active zone) the water authorities
+    # publish through VÚV T. G. M., in the national ÚAP map service of ÚÚR —
+    # "indicative only", VÚV's metadata says. Layer 82 "T0601 Záplavová
+    # území Q100 a QA" (found via search; not reachable from here:
+    # UNVERIFIED).
+    flood={"url": os.getenv("CZ_FLOOD_IDENTIFY_URL",
+                            "https://egis.uur.cz/arcgis/rest/services/UAP/UAP_CR/"
+                            "MapServer/identify"),
+           "layers": os.getenv("CZ_FLOOD_LAYER_IDS", "82"),
+           "name": "ÚÚR / VÚV flood areas (Q100 and active zone)",
+           "checked": "2026-10-16 (web search) — UNVERIFIED live"},
+    # Noise: the OpenStreetMap proxy (as in Slovakia), plus the 2022 strategic
+    # noise map of main roads (MZ ČR / Zdravotní ústav Ostrava, Ldvn in 5 dB
+    # bands) where it gives a reading. The REST path beside its published
+    # WMS is UNVERIFIED.
+    noise={"kind": "osm_proxy+shm2022",
+           "url": os.getenv("CZ_NOISE_IDENTIFY_URL",
+                            "https://geoportal.mzcr.cz/server/rest/services/SHM2022/"
+                            "Silnice_Ldvn/ImageServer/identify"),
+           "name": "Strategická hluková mapa 2022 — hlavní silnice (Ldvn)",
+           "checked": "2026-10-16 (web search) — UNVERIFIED live"},
     # Creditors a lien may be in favour of as ordinary housing finance. The
     # words "banka" and "spořitelna" already count; these are names that
     # don't contain them, and the state housing fund (SFPI, formerly SFRB).

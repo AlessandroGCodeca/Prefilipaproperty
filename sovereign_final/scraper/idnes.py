@@ -45,7 +45,7 @@ from database import (
 from scraper._http import get, make_session
 from scraper.cz_common import (
     PortalBlocked, require_robots, robots_allows, listing_record, sale_price, rooms_cz,
-    area_cz, energy_cz, is_excluded_cz, cleanup, fold, czk_amounts,
+    area_cz, energy_cz, is_excluded_cz, cleanup, fold, czk_amounts, place_from_text,
 )
 from scraper.geo import pin_from_meta
 
@@ -97,6 +97,8 @@ def listing_from_card(card, now: str | None = None) -> dict | None:
     if is_excluded_cz(title, href):
         return None
     district, address = split_place(_text(card.select_one(".c-products__info")))
+    if not district:
+        district = place_from_text(title)
     size = area_cz(title)
     price_el = card.select_one(".c-products__price strong") or card.select_one(".c-products__price")
     price = sale_price(_text(price_el), size, district)

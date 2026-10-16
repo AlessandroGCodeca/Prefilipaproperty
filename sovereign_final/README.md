@@ -110,6 +110,65 @@ week with upgrades, and CI tests them before they land.
 
 ---
 
+## Markets: Slovakia and Czechia
+
+Both markets run in the same app, side by side. Slovakia works exactly as
+before; Czechia is added next to it.
+
+- **Market selector** at the top of the page: *All markets* (default),
+  🇸🇰 Slovakia or 🇨🇿 Czechia. It filters every tab. Cards and tables carry
+  a market badge.
+- **Currency**: a listing keeps its own currency (EUR or CZK) on its card and
+  in its own market's view. The combined view and the *Max Price €* filter
+  convert CZK at one rate, `CZK_PER_EUR`, labelled with its date
+  (`FX_RATE_DATE`). Czech cards use Czech labels and Czech number formatting
+  (`4 500 000 Kč`).
+- **Pipelines**: each market has its own steps, status line, success record
+  and retries. Both run one after the other under the one pipeline lock, and
+  a failure in one never stops the other (`scheduler.run_all_markets`).
+
+### Czech sources
+
+| What | Source | State |
+|---|---|---|
+| Listings | Bezrealitky.cz (website sitemap + listing pages; never api.bezrealitky.cz, which robots.txt closes), Reality.iDNES.cz, Bazoš (reality.bazos.cz) | read when robots.txt allows; each fails soft |
+| Listings | **Sreality.cz — left out**: its robots.txt gives every crawler but the named search engines `Disallow: /` | parser kept (`scraper/sreality.py`); 🔗 TEST CZ SITES re-checks |
+| Rentals (comps) | Bazoš `/pronajmu/byt/`, Bezrealitky rental pages | `scraper/rentals_cz.py` → `engine/rent_comps_cz.py` |
+| Rent baseline | Deloitte Rent Index Q2 2026: Praha 462, Praha 7 493, Brno 390, Hradec Králové 318, Pardubice 314, Jihlava 257, Ostrava 254, Ústí nad Labem 221 Kč/m² | other towns: live comps only, or not scored |
+| Sale-price medians | none could be read whole — **the table is empty**, so every Czech listing is WHITE; `data/cz_regional_prices.csv` fills it (format in `engine/regional_prices_cz.py`) | gap |
+| Title deed (LV) | the flat's **výpis z LV, pasted on its card**, screened with Czech vocabulary — PASS / REJECTED / UNVERIFIED as in Slovakia | ČÚZK's free services give no LV contents to a program; nahlížení is CAPTCHA-guarded |
+| Cadastre lookups | ČÚZK API KN (free key: `CZ_CUZK_API_KEY`) + RÚIAN address points: the building under the pin, its LV and pending proceedings | never PASS on its own |
+| Flood | ÚÚR national map, VÚV T. G. M. Q100 flood areas (indicative) | `modules/risk_data_cz.py` |
+| Noise | OpenStreetMap proxy + 2022 strategic noise map of main roads (MZ ČR) | ≥65 dB flags the flat |
+| Place names | RÚIAN okres names, Prague 1–22, Brno's districts; Czech locatives ("v Praze 2", "ve Zlíně"); every obec when `data/cz_obce.csv` (a RÚIAN export) is present | `scraper/czech_cases.py` |
+| Tax, mortgage, costs | ZDP 2026, ČNB limits (LTV 80 % / 70 % for investment mortgages from 1 Apr 2026), Swiss Life Hypoindex rate, SVJ fond oprav, daň z nemovitých věcí, katastr fee | `markets.py`, each with its source and date |
+| Contract | a Czech **kupní smlouva NÁVRH** for a Czech advokát or notář to review — not legal advice | `modules/contract_draft_cz.py` |
+
+No Czech host could be reached from the container this was built in. Every
+endpoint, page shape and figure above came from published documentation, open-source
+collectors and web search, and each scraper checks robots.txt live before it
+reads anything.
+
+### UNVERIFIED — figures and endpoints that could not be confirmed
+
+Each is marked `UNVERIFIED` in its own source / checked field. The env settings
+named here override them.
+
+1. Czech sale-price medians: none (table empty); the rooms multiplier for them is 1.0.
+2. Deloitte Rent Index: whether its figures are asking or achieved rents.
+3. Property tax: each municipality's local coefficient (1.0, `CZ_PROPERTY_TAX_LOCAL_COEF`) and the size coefficient outside Prague (3.5, the upper bound).
+4. Personal tax: whether an SVJ fond oprav payment is deductible when paid (modelled) or only when spent; the 40 mil. Kč cap on an exempt sale (not modelled).
+5. Lending: a ČNB stress add-on (the engine's +2 pp is used).
+6. SVJ správa fee per flat (0, `CZ_SVJ_SPRAVA_PER_UNIT`); fond oprav 20 Kč/m² (`CZ_SVJ_FOND_OPRAV_PER_M2`).
+7. Legal fees on a purchase: 1 % of the price, carried over from Slovakia (`CZ_ACQUISITION_COST_RATE`).
+8. s.r.o. setup and running costs: Slovak estimates converted (`CZ_SRO_SETUP_COST`, `CZ_SRO_ANNUAL_RUNNING_COST`).
+9. Parking, furnished and balcony rent premiums, and the hold assumptions (price and rent growth, cost inflation, exit costs): carried over from Slovakia.
+10. ČÚZK API KN paths and fields (from its OpenAPI document as copied in January 2025) and the RÚIAN address layer (layer 1, field `kod`).
+11. The ÚÚR flood layer (82) and the noise map's REST path and value encoding.
+12. The výpis z LV layout the Czech screen reads (part headings, "Oprávnění pro"); without headings it reads the whole text.
+13. Portal page shapes: Sreality's v1 API, Bezrealitky's sitemap and `__NEXT_DATA__` advert, iDNES's country-wide search and parameter list, Bazoš CZ's cards (taken as the Slovak site's).
+14. Each portal's robots.txt, as captured by an open-source collector on 2026-09-15 — the scrapers re-read it live every run.
+
 ## Files
 
 ```
@@ -117,6 +176,7 @@ sovereign_final/
 ├── app.py                    ← Streamlit dashboard (9 tabs)
 ├── scheduler.py              ← Daily 06:00 CET automation, retries a failed run
 ├── config.py                 ← All 2026 Slovak tax rates
+├── markets.py                ← Market registry: the SK and CZ profiles
 ├── database.py               ← SQLite storage
 ├── enrich_pending.py         ← Re-read listings missing a price, size or district
 │                               (🔎 FILL MISSING DETAILS)
@@ -136,16 +196,32 @@ sovereign_final/
 │   ├── topreality.py         ← Topreality.sk scraper
 │   ├── geo.py                ← A listing's own map pin (JSON-LD / API / meta)
 │   ├── slovak_cases.py       ← Locative place names ("v Nitre", "v Košiciach")
-│   └── rentals.py            ← Prenájom (to-let) listings for live rent comps
+│   ├── rentals.py            ← Prenájom (to-let) listings for live rent comps
+│   ├── cz_common.py          ← Czech scrapers' shared parts: robots.txt, Kč, places
+│   ├── bezrealitky.py        ← Bezrealitky.cz (sitemap + listing pages)
+│   ├── idnes.py              ← Reality.iDNES.cz
+│   ├── bazos_cz.py           ← Bazoš (reality.bazos.cz)
+│   ├── sreality.py           ← Sreality.cz parser — not run: robots.txt disallows
+│   ├── czech_cases.py        ← Czech locatives ("v Praze", "ve Zlíně")
+│   └── rentals_cz.py         ← Pronájem listings for Czech rent comps
 ├── engine/
 │   ├── financial.py          ← 2026 Slovak tax + cashflow engine, max offer,
 │   │                           rate shock, hold-period IRR
 │   ├── regional_prices.py    ← Sale-price medians, floor + ceiling filters
 │   ├── rent_comps.py         ← Live €/m² rents from scraped rentals
+│   ├── regional_prices_cz.py ← Czech kraj / okres / Prague / Brno lookup (medians empty)
+│   ├── rent_cz.py            ← Czech rent baseline (Deloitte Rent Index Q2 2026)
+│   ├── rent_comps_cz.py      ← Live Kč/m² rents from Czech rentals
+│   ├── property_tax_cz.py    ← Daň z nemovitých věcí on a flat
 │   └── duplicates.py         ← Same flat listed on several portals
 ├── modules/
 │   ├── debt_bot.py           ← LV title deed checker (PASS / UNVERIFIED / REJECTED)
 │   ├── lv_screen.py          ← Entry-by-entry LV encumbrance screen
+│   ├── lv_cz.py              ← Czech LV check (pasted výpis; ČÚZK API KN)
+│   ├── lv_screen_cz.py       ← The screen in the Czech register's words
+│   ├── cuzk_cz.py            ← ČÚZK API KN + RÚIAN client
+│   ├── risk_data_cz.py       ← Czech flood and noise maps
+│   ├── contract_draft_cz.py  ← Czech kupní smlouva draft (for a Czech advokát)
 │   ├── cashflow_runner.py    ← Financial scoring runner
 │   ├── location_iq.py        ← Location scorer (Google, or OpenStreetMap)
 │   ├── risk_data.py          ← Real noise / flood / construction data
@@ -436,6 +512,7 @@ threshold (€41,445) is the 2023 figure carried over — it is 176.8 × the
 | Key | Where | Enables |
 |-----|-------|---------|
 | GOOGLE_PLACES_API_KEY | console.cloud.google.com | Google geocoding/places + inline satellite view (OpenStreetMap is used without it) |
+| CZ_CUZK_API_KEY | registrace.cuzk.gov.cz (free) | Czech LV check: the building under a listing's pin, its LV and pending proceedings |
 
 > LV debt checking needs **no key**: ÚGKK SR has no public API, so
 > `kataster_scraper.py` scrapes kataster.skgeodesy.sk directly (unofficial —

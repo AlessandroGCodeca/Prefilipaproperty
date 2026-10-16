@@ -39,7 +39,7 @@ from database import (
 from scraper._http import get, make_session
 from scraper.cz_common import (
     PortalBlocked, require_robots, listing_record, sale_price, rooms_cz,
-    area_cz, energy_cz, is_excluded_cz, cleanup,
+    area_cz, energy_cz, is_excluded_cz, cleanup, place_from_text,
 )
 
 log = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ def listing_from_card(card, link, now: str | None = None) -> dict | None:
         return None
     size = area_cz(title) or area_cz(card_text)
     loc = card.select_one("div.inzeratylok, .lokalita, [class*='lokalita']")
-    district = place(_text(loc))
+    district = place(_text(loc)) or place_from_text(f"{title} {card_text}")
     price_el = card.select_one("div.inzeratycena, .cena, [class*='cena']")
     price = sale_price(_text(price_el), size, district) if price_el else 0.0
     if not price:

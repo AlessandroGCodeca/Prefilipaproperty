@@ -68,15 +68,21 @@ _DISPOSITION_RE = re.compile(r"(\d)\s*[+_\-]?\s*(kk|\d)\b", re.I)
 OWNERSHIP = {"OSOBNI": "osobní", "DRUZSTEVNI": "družstevní", "OBECNI": "obecní"}
 
 
-def sale_flat_url(url: str) -> str | None:
-    """The advert id of a sale-flat listing URL, else None."""
+def flat_url(url: str, offer: str = "prodej") -> str | None:
+    """The advert id of a flat listing URL for `offer` ("prodej" for sale,
+    "pronajem" to let), else None."""
     m = _SLUG_RE.search(url or "")
     if not m:
         return None
     parts = m.group(2).lower().split("-")
-    if "prodej" not in parts or not ({"bytu", "byt"} & set(parts)):
+    if offer not in parts or not ({"bytu", "byt"} & set(parts)):
         return None
     return m.group(1)
+
+
+def sale_flat_url(url: str) -> str | None:
+    """The advert id of a sale-flat listing URL, else None."""
+    return flat_url(url, "prodej")
 
 
 def sitemap_locs(xml: str) -> list[str]:
@@ -92,9 +98,9 @@ def _xml(body: bytes) -> str:
     return body.decode("utf-8", errors="replace")
 
 
-def walk_sitemap(session, fetch=None) -> list[tuple[int, str]]:
-    """(id, url) of every sale-flat listing the sitemap names, newest first.
-    `fetch(url)` returns (status, bytes); the default uses scraper._http."""
+def walk_sitemap(session, fetch=None, offer: str = "prodej") -> list[tuple[int, str]]:
+    """(id, url) of every flat listing for `offer` the sitemap names, newest
+    first. `fetch(url)` returns (status, bytes); the default uses scraper._http."""
     if fetch is None:
         def fetch(u):
             r = get(u, session=session, timeout=30)
@@ -107,7 +113,7 @@ def walk_sitemap(session, fetch=None) -> list[tuple[int, str]]:
 
     def collect(xml):
         for loc in sitemap_locs(xml):
-            key = sale_flat_url(loc)
+            key = flat_url(loc, offer)
             if key:
                 found[int(key)] = loc
     collect(index)
