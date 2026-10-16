@@ -27,6 +27,7 @@ rate in config (CZK_PER_EUR) for ranking and the combined view.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 import config
@@ -176,15 +177,175 @@ SK = Market(
 
 
 # ── Czechia ───────────────────────────────────────────────────────────────────
-# Filled in step by step (tax / lending / costs, regional prices, rents). A
-# figure left None has no confirmed value yet; the engine says so instead of
-# using one.
+# Every figure below was checked on 2026-10-16 through web search. The
+# container this was built in could not reach any .cz host (cnb.cz,
+# financnisprava.gov.cz, cuzk.gov.cz, czso.cz), so each was read from search
+# results quoting those sites or the press — "checked" says so. A figure that
+# could not be confirmed, or is an assumption carried over from the Slovak
+# profile, says UNVERIFIED and can be set in .env.
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, "") or default)
+    except ValueError:
+        return default
+
+
+CZ_TAX_YEAR_RULES = {
+    2026: {
+        # Fyzická osoba, příjmy z nájmu (§ 9 ZDP).
+        "personal_rate_low":   0.15,
+        "personal_rate_high":  0.23,
+        # 36 × the average wage used for 2026 (48 967 Kč) = 1 762 812 Kč. Only
+        # these two bands are modelled; the rental stacks on your salary.
+        "personal_threshold":  1_762_812,
+        # No Slovak-style exempt slice: the whole rent is income, less either
+        # the actual expenses or the flat-rate ones (výdajový paušál, § 9
+        # odst. 4) — 30 % of the rent, at most 600 000 Kč, and all-inclusive
+        # (no interest or depreciation on top). The engine takes the larger.
+        "rental_exemption":    0,
+        "rental_flat_expense_rate": 0.30,
+        "rental_flat_expense_cap":  600_000,
+        # Rental income outside a živnost carries no social or health
+        # insurance.
+        "health_levy_personal": 0.00,
+        # § 4 odst. 1 písm. b): a flat bought from 2021 is exempt when sold
+        # after 10 years (5 years if bought before 2021); the 2-year own-
+        # residence route does not apply to a let flat. A cap on exempt sale
+        # income reported for 2025+ (40 mil. Kč) is UNVERIFIED and not modelled.
+        "personal_cgt_exempt_years": 10,
+        # s.r.o.: 21 % corporate tax since 2024 (zákon 349/2023 Sb.), no
+        # reduced small-company rate; 15 % withholding on dividends (§ 36).
+        "sro_rate":            0.21,
+        "sro_rate_reduced":    0.21,
+        "sro_reduced_revenue_limit": 0,
+        "dividend_tax":        0.15,
+        "summary": ("Personal: § 9 rental income, the larger of actual expenses (incl. "
+                    "mortgage interest) and the 30 % flat rate (max 600 000 Kč), 15 % / "
+                    "23 % above 1 762 812 Kč, no social or health insurance; a sale is "
+                    "exempt after 10 years. s.r.o.: 21 % corporate tax, interest and "
+                    "running cost deductible, 15 % dividend withholding; the sale is taxed "
+                    "whenever it happens."),
+        "source": ("ZDP (zákon 586/1992 Sb.) as reported by TPA Czech Republic, taxomat.cz "
+                   "(threshold), finzi.cz / idealninajemce.cz / ucetnidasa.cz (§ 9, flat "
+                   "rate), portal.gov.cz (21 % CIT, page checked by MF 11 Feb 2026), "
+                   "rulecalc.com (§ 36 15 %), muj-pravnik.cz / portal.pohoda.cz (10-year "
+                   "test) — read via web search, not fetched"),
+        "checked": "2026-10-16 (web search)",
+    },
+}
+
 CZ = Market(
     code="cz", name="Czechia", local_name="Česko", country_code="cz",
     currency="CZK", currency_symbol="Kč",
-    mortgage_rate_pa=None, loan_term_years=None, ltv_ratio=None,
-    ltv_ratio_investor=None, investor_ltv_from=None, rate_shock_pp=None,
-    lv_bank_names=(),
+    # Swiss Life Hypoindex, September 2026: average offered mortgage rate
+    # 5.51 % (press release 9 Sep 2026). Loans to buy to let are priced
+    # above it (banky.cz lists investment mortgages from 5.19 % at 60 % LTV
+    # to 5.69 % at 75 %), so this sits at the ~70 % LTV such a loan gets.
+    mortgage_rate_pa=_env_float("CZ_MORTGAGE_RATE_PA", 0.0551),
+    loan_term_years=25,          # the Hypoindex model mortgage's term
+    ltv_ratio=0.80,              # ČNB: 80 % (90 % under 36) for own housing
+    ltv_ratio_investor=0.70,     # ČNB: 70 % for an investment mortgage
+    investor_ltv_from="2026-04-01",
+    # The engine's +2 pp rate shock. ČNB's own stress add-on (if any) could
+    # not be confirmed: UNVERIFIED as a ČNB figure; kept as the same test.
+    rate_shock_pp=0.02,
+    lending_rules={
+        "regulator": "ČNB",
+        "ltv": 0.80, "ltv_under_36": 0.90, "ltv_investor": 0.70,
+        "investor_from": "2026-04-01", "dti_investor": 7,
+        "dti": None, "dsti": None,          # deactivated for own housing
+        # An investment mortgage is one for a 3rd+ residential property OR
+        # a property bought to let — so every purchase this tool scores.
+        "rental_is_investment": True,
+        "investor_note": ("From 1 Apr 2026 ČNB recommends LTV ≤ 70 % and DTI ≤ 7 for an "
+                          "investment mortgage — a 3rd+ residential property or one bought "
+                          "to let. A recommendation, not a law."),
+        "stress_pp_source": "UNVERIFIED — no ČNB stress add-on confirmed; the engine's +2 pp",
+        "rate_source": ("Swiss Life Hypoindex 09/2026 (swisslifeselect.cz press release, "
+                        "9 Sep 2026): 5.51 %; banky.cz investment-mortgage comparison"),
+        "source": ("ČNB press release 'ČNB doporučuje přísnější limity pro investiční "
+                   "hypotéky. Kapitálové rezervy se nemění' (2026): LTV 70 % / DTI 7 for "
+                   "investment mortgages from 1 Apr 2026, DTI and DSTI otherwise "
+                   "deactivated, LTV 80 % / 90 % under 36 — read via web search "
+                   "(cnb.cz not reachable)"),
+        "checked": "2026-10-16 (web search)",
+    },
+    tax_year_rules=CZ_TAX_YEAR_RULES,
+    property_tax={"kind": "per_m2", "module": "engine.property_tax_cz",
+                  "source": "see engine/property_tax_cz.SOURCE",
+                  "checked": "2026-10-16 (web search)"},
+    # SVJ: fond oprav per m² plus the správa (management) fee per flat. The
+    # tenant pays the services (water, heating, lift) through zálohy; the
+    # owner pays these two. No national statistic exists: sources give a
+    # typical 15–35 Kč/m² (realfree.cz), 15–50 (flatio.cz), an average of
+    # 15–20 (rulecalc.com) and ~17 across one manager's buildings
+    # (svjpredseda.cz). 20 Kč/m² is inside all of them. The správa fee per
+    # flat could not be confirmed: UNVERIFIED, 0 unless set in .env.
+    hoa={"kind": "per_m2",
+         "per_m2": _env_float("CZ_SVJ_FOND_OPRAV_PER_M2", 20.0),
+         "per_unit": _env_float("CZ_SVJ_SPRAVA_PER_UNIT", 0.0),
+         "label": "SVJ (fond oprav + správa)",
+         "source": ("fond oprav 20 Kč/m²/month: within the ranges reported by realfree.cz, "
+                    "flatio.cz, rulecalc.com, svjpredseda.cz (web search). správa per "
+                    "flat: UNVERIFIED (CZ_SVJ_SPRAVA_PER_UNIT, default 0)"),
+         "checked": "2026-10-16 (web search)"},
+    # No transfer tax: daň z nabytí nemovitých věcí was abolished (zákon
+    # 386/2020 Sb.). The katastr filing fee (návrh na vklad, položka 120 of
+    # zákon 634/2004 Sb.) is 2 000 Kč (cuzk.gov.cz sazebník, via search). Legal,
+    # escrow (advokátní / notářská úschova), valuation and mortgage fees could
+    # not be confirmed: UNVERIFIED — the Slovak profile's 1 % of the price is
+    # carried over for them.
+    acquisition_cost_rate=_env_float("CZ_ACQUISITION_COST_RATE", 0.01),
+    acquisition_cost_fixed=2_000.0,
+    acquisition_costs={
+        "katastr_fee": 2_000, "transfer_tax": 0,
+        "legal_fees": "UNVERIFIED — 1 % of the price carried over from the SK profile",
+        "source": ("zákon 386/2020 Sb. (transfer tax abolished; bezrealitky.cz, epravo.cz); "
+                   "ČÚZK sazebník: 2 000 Kč per návrh na vklad (cuzk.gov.cz, via search)"),
+        "checked": "2026-10-16 (web search)"},
+    # The s.r.o. figures are the Slovak estimates converted at the dated rate
+    # (setup €2,500, running €1,200/yr, +1 pp on the loan, 70 % LTV): no Czech
+    # quote could be confirmed. UNVERIFIED — set them in .env from an účetní's
+    # and a bank's quote.
+    sro_setup_cost=_env_float("CZ_SRO_SETUP_COST", round(2_500 * config.CZK_PER_EUR, -3)),
+    sro_annual_running_cost=_env_float("CZ_SRO_ANNUAL_RUNNING_COST",
+                                       round(1_200 * config.CZK_PER_EUR, -3)),
+    sro_rate_premium_pp=_env_float("CZ_SRO_RATE_PREMIUM_PP", 0.01),
+    sro_ltv_ratio=_env_float("CZ_SRO_LTV_RATIO", 0.70),
+    sro_costs={"source": ("UNVERIFIED — Slovak estimates converted at "
+                          f"{config.CZK_PER_EUR} Kč/€; no Czech quote confirmed"),
+               "checked": None},
+    cashflow_min_surplus=_env_float("CZ_CASHFLOW_MIN_SURPLUS", 0.0),
+    # Plausibility bounds, not market figures: a Kč amount on a sale listing
+    # below 200 000 is a deposit, a rent or a fee; a rent outside
+    # 3 000–150 000 Kč a month is a sale price, a nightly rate or a typo.
+    sale_price_min=_env_float("CZ_SALE_PRICE_MIN", 200_000),
+    sale_price_max=250_000_000,
+    rent_min=3_000, rent_max=150_000,
+    rent_per_m2_min=70.0, rent_per_m2_max=1_100.0,
+    blank_district_floor_m2=None, blank_district_ceiling_m2=None,
+    industrial_zones=(),
+    # The Slovak description premiums, carried over: UNVERIFIED for Czechia.
+    industrial_rent_premium=1.0,
+    parking_rent_premium=config.PARKING_RENT_PREMIUM,
+    furnished_rent_premium=config.FURNISHED_RENT_PREMIUM,
+    semi_furnished_premium=config.SEMI_FURNISHED_PREMIUM,
+    balcony_rent_premium=config.BALCONY_RENT_PREMIUM,
+    # Hold-period assumptions, carried over from the Slovak profile: model
+    # inputs, not a Czech forecast. UNVERIFIED for Czechia.
+    appreciation_rate=_env_float("CZ_APPRECIATION_RATE", config.APPRECIATION_RATE),
+    rent_growth_rate=_env_float("CZ_RENT_GROWTH_RATE", config.RENT_GROWTH_RATE),
+    cost_inflation_rate=_env_float("CZ_COST_INFLATION_RATE", config.COST_INFLATION_RATE),
+    exit_cost_rate=_env_float("CZ_EXIT_COST_RATE", config.EXIT_COST_RATE),
+    hold_assumptions={"source": "UNVERIFIED — the Slovak profile's assumptions",
+                      "checked": None},
+    # Creditors a lien may be in favour of as ordinary housing finance. The
+    # words "banka" and "spořitelna" already count; these are names that
+    # don't contain them, and the state housing fund (SFPI, formerly SFRB).
+    lv_bank_names=("čsob", "raiffeisen", "unicredit", "moneta", "mbank", "oberbank",
+                   "wüstenrot", "hypoteční banka", "státní fond podpory investic",
+                   "sfpi", "státní fond rozvoje bydlení", "sfrb"),
 )
 
 MARKETS = {"sk": SK, "cz": CZ}

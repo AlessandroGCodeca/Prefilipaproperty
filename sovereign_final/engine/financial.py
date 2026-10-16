@@ -577,9 +577,13 @@ def default_ltv(properties_owned: Optional[int] = None,
 
     NBS caps a 3rd-and-subsequent residential property at 70% from
     INVESTOR_LTV_FROM (1 Oct 2026). Owning 2+ already makes the next one a 3rd.
-    Czechia: ČNB's investment-mortgage limit (markets.py), applied the same
-    way. `on` is an ISO date (default today) so tests can sit either side of it.
+    Czechia: ČNB's investment-mortgage limit (markets.py) applies to a 3rd+
+    property and to any property bought to let — every purchase this tool
+    scores — from 1 Apr 2026. `on` is an ISO date (default today) so tests
+    can sit either side of it.
     """
+    owned = PROPERTIES_OWNED if properties_owned is None else properties_owned
+    investor = owned >= 2
     if _sk(market):
         ltv, ltv_investor, investor_from = LTV_RATIO, LTV_RATIO_INVESTOR, INVESTOR_LTV_FROM
     else:
@@ -587,9 +591,9 @@ def default_ltv(properties_owned: Optional[int] = None,
         ltv = _need(m.ltv_ratio, "LTV limit", market)
         ltv_investor = _need(m.ltv_ratio_investor, "investor LTV limit", market)
         investor_from = _need(m.investor_ltv_from, "investor LTV start date", market)
-    owned = PROPERTIES_OWNED if properties_owned is None else properties_owned
+        investor = investor or bool(m.lending_rules.get("rental_is_investment"))
     today = on or datetime.now(timezone.utc).date().isoformat()
-    if owned >= 2 and today >= investor_from:
+    if investor and today >= investor_from:
         return ltv_investor
     return ltv
 

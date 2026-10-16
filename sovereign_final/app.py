@@ -451,6 +451,24 @@ with st.sidebar:
         st.warning(f"No tax table for {_tr['requested']} yet — scoring uses the "
                    f"{_tr['year']} rules. Add {_tr['requested']} to TAX_YEAR_RULES "
                    f"in config.py.")
+    # Each other market's financing and tax table, the same way.
+    for _m in markets.MARKET_CODES:
+        if _m == "sk":
+            continue
+        _p = markets.get(_m)
+        try:
+            _trm = markets.tax_rules(market=_m)
+        except LookupError:
+            continue
+        _reg = _p.lending_rules.get("regulator", "")
+        st.markdown(f'<div class="muted">{_m.upper()} · scoring LTV '
+                    f'{_default_ltv(market=_m)*100:.0f}% ({esc(_reg)} investment mortgage) · '
+                    f'rate {_p.mortgage_rate_pa*100:.2f}% · tax rules {_trm["year"]} · '
+                    f'checked {esc(_trm["checked"])}</div>', unsafe_allow_html=True)
+        if _trm["stale"]:
+            st.warning(f"No {_p.name} tax table for {_trm['requested']} yet — scoring uses "
+                       f"the {_trm['year']} rules. Add {_trm['requested']} to "
+                       f"{_m.upper()}_TAX_YEAR_RULES in markets.py.")
 
     st.markdown("---")
     st.markdown('<div class="muted">Private use. Verify all data.<br>Notárska úschova always.</div>', unsafe_allow_html=True)
