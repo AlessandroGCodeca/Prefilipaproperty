@@ -23,6 +23,11 @@ centroid is not a flat. location_iq stores None as "unknown", never as a flag.
 One Overpass query per flat also returns the nearest public-transport stop
 and nearby groceries/pharmacies/schools, which location_iq uses when there is
 no Google key. Nominatim geocodes in that case too.
+
+Markets: geocoding is limited to the listing's country (countrycodes=sk /
+cz), OpenStreetMap answers construction and noise the same way in both, and
+the flood answer comes from each country's own map — SVP's for Slovakia,
+the Czech one in modules/risk_data_cz.
 """
 
 from __future__ import annotations
@@ -78,16 +83,19 @@ def nominatim_precision(result: dict) -> str:
 _last_nominatim = 0.0
 
 
-def geocode_nominatim(address: str) -> tuple[float | None, float | None, str]:
-    """(lat, lng, precision) for a Slovak address, or (None, None, "") when
-    Nominatim finds nothing. Throttled to Nominatim's 1 request/second."""
+def geocode_nominatim(address: str, market: str = "sk") -> tuple[float | None, float | None, str]:
+    """(lat, lng, precision) for an address in the market's country (Slovakia
+    by default), or (None, None, "") when Nominatim finds nothing. Throttled
+    to Nominatim's 1 request/second."""
     global _last_nominatim
     if not (address or "").strip():
         return None, None, ""
     wait = 1.1 - (time.monotonic() - _last_nominatim)
     if wait > 0:
         time.sleep(wait)
-    params = {"q": address, "format": "jsonv2", "countrycodes": "sk", "limit": 1}
+    import markets
+    params = {"q": address, "format": "jsonv2",
+              "countrycodes": markets.get(market).country_code, "limit": 1}
     if NOMINATIM_EMAIL:
         params["email"] = NOMINATIM_EMAIL
     try:
@@ -333,12 +341,13 @@ def check_flood(lat: float, lng: float) -> tuple[bool | None, str]:
 
 # ── All together ─────────────────────────────────────────────────────────────
 def assess(lat: float, lng: float, precision: str = "address",
-           osm_elements: list[dict] | None = None) -> dict:
+           osm_elements: list[dict] | None = None, market: str = "sk") -> dict:
     """Construction, noise and flood for one point.
 
     With an area-level geocode every risk answer is None ("too vague"), but
     the OSM transit/amenity facts are still returned for the area. Pass
-    osm_elements to reuse a response already fetched.
+    osm_elements to reuse a response already fetched. `market` picks the
+    flood map (and, in Czechia, the noise map consulted beside OSM).
     """
     elements = osm_elements if osm_elements is not None else fetch_osm(lat, lng)
     osm = classify_osm(elements, lat, lng) if elements is not None else None
@@ -362,6 +371,11 @@ def assess(lat: float, lng: float, precision: str = "address",
     else:
         out.update(construction=None, construction_detail="OSM unreachable",
                    noise=None, noise_detail="OSM unreachable")
-    flood, flood_detail = check_flood(lat, lng)
+    if market == "sk":
+        flood, flood_detail = check_flood(lat, lng)
+    else:
+        from modules import risk_data_cz
+        flood, flood_detail = risk_data_cz.check_flood(lat, lng)
+        out.update(risk_data_cz.refine_noise(lat, lng, out))
     out.update(flood=flood, flood_detail=flood_detail)
     return out

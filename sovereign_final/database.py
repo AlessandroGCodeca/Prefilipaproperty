@@ -2075,23 +2075,25 @@ def get_unscored_cashflow(market: str | None = None):
     return [dict(r) for r in rows]
 
 
-def get_unparsed_descriptions(limit: int = 200):
+def get_unparsed_descriptions(limit: int = 200, market: str | None = None):
     """Active listings with a stored free-text description that hasn't been
     parsed into structured features yet. desc_parsed stays 0 until a successful
-    parse, so transient enrichment failures get retried on a later run."""
+    parse, so transient enrichment failures get retried on a later run.
+    `market` keeps one market's (None: all)."""
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
         _ensure_market_columns(conn)
-        rows = conn.execute("""
+        only, params = _market_sql(conn, market)
+        rows = conn.execute(f"""
             SELECT id, description, market
             FROM listings
             WHERE is_active=1
               AND description IS NOT NULL AND description != ''
-              AND (desc_parsed IS NULL OR desc_parsed = 0)
+              AND (desc_parsed IS NULL OR desc_parsed = 0){only}
             ORDER BY scraped_at DESC
             LIMIT ?
-        """, (limit,)).fetchall()
+        """, (*params, limit)).fetchall()
     finally:
         conn.close()
     return [dict(r) for r in rows]
@@ -2156,7 +2158,7 @@ def requeue_descriptions_missing_extras() -> int:
     return n
 
 
-def get_unnormalized_addresses(limit: int = 200):
+def get_unnormalized_addresses(limit: int = 200, market: str | None = None):
     """Active listings that have a raw address but a blank district (so the rent
     estimate falls to the €6.50/m² default) and haven't been normalized yet.
     addr_normalized stays 0 until a normalize_address() call returns (success or
@@ -2165,16 +2167,17 @@ def get_unnormalized_addresses(limit: int = 200):
     try:
         _ensure_enrichment_columns(conn)
         _ensure_market_columns(conn)
-        rows = conn.execute("""
+        only, params = _market_sql(conn, market)
+        rows = conn.execute(f"""
             SELECT id, address_raw, market
             FROM listings
             WHERE is_active=1
               AND address_raw IS NOT NULL AND address_raw != ''
               AND (district IS NULL OR district = '')
-              AND (addr_normalized IS NULL OR addr_normalized = 0)
+              AND (addr_normalized IS NULL OR addr_normalized = 0){only}
             ORDER BY scraped_at DESC
             LIMIT ?
-        """, (limit,)).fetchall()
+        """, (*params, limit)).fetchall()
     finally:
         conn.close()
     return [dict(r) for r in rows]

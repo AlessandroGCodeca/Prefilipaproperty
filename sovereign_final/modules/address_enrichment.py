@@ -44,8 +44,10 @@ def _compose_district(norm: dict) -> str:
     return ", ".join(seen)
 
 
-def run_address_enrichment(limit: int = 200, progress_callback=None) -> int:
-    """Resolve blank districts for up to `limit` listings via normalize_address.
+def run_address_enrichment(limit: int = 200, progress_callback=None,
+                           market: str | None = None) -> int:
+    """Resolve blank districts for up to `limit` listings via normalize_address
+    — `market`'s only, or every market's (None), each in its own language.
 
     Returns the number of listings for which a non-empty district was resolved.
     """
@@ -53,7 +55,8 @@ def run_address_enrichment(limit: int = 200, progress_callback=None) -> int:
         log.info("ℹ️  Address normalization skipped — no ANTHROPIC_API_KEY set.")
         return 0
 
-    pending = get_unnormalized_addresses(limit)
+    pending = (get_unnormalized_addresses(limit) if market is None
+               else get_unnormalized_addresses(limit, market=market))
     if not pending:
         log.info("✅ No addresses to normalize.")
         return 0
@@ -64,7 +67,9 @@ def run_address_enrichment(limit: int = 200, progress_callback=None) -> int:
         if progress_callback:
             progress_callback(i, len(pending))
 
-        norm = normalize_address(row["address_raw"])
+        row_market = row.get("market") or "sk"
+        norm = (normalize_address(row["address_raw"]) if row_market == "sk"
+                else normalize_address(row["address_raw"], market=row_market))
         if norm is None:
             # Transient failure — leave addr_normalized=0 to retry; `limit` caps cost.
             continue

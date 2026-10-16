@@ -179,9 +179,13 @@ def _stored_comps(conn) -> dict[str, dict]:
                             "median_eur_per_m2": r["eur_per_m2"] or 0} for r in rows}
 
 
-def load_live_rates() -> dict[str, float]:
+def load_live_rates(market: str = "sk") -> dict[str, float]:
     """The live rates scoring should use right now. Empty (→ baseline
-    everywhere) when no comps have been built or the tables don't exist yet."""
+    everywhere) when no comps have been built or the tables don't exist yet.
+    (Another market's comps: engine.rent_comps_cz.)"""
+    if market != "sk":
+        from engine import rent_comps_cz
+        return rent_comps_cz.load_live_rates()
     from database import get_conn
     conn = get_conn()
     try:

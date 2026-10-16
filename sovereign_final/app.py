@@ -1,7 +1,12 @@
 """
 app.py — Sovereign Investor Dashboard
-Slovakia 2026 | Private Use Only
+Slovakia + Czechia 2026 | Private Use Only
 Run: streamlit run app.py
+
+Two markets (markets.py) share the page. The selector at the top of the main
+area filters every tab; "All markets" ranks both together with Czech prices
+converted to EUR at the one dated rate in config. A card always shows its own
+currency, and a Czech card is labelled in Czech.
 """
 
 import logging
@@ -174,6 +179,7 @@ def _require_password() -> None:
 _require_password()
 
 # ── Init ──────────────────────────────────────────────────────────────────────
+import markets
 from database import init_db, get_all_active, backfill_dev_project_flags
 init_db()
 
@@ -247,9 +253,20 @@ DEMO = [
 from modules import jobs
 from modules.pipeline_state import read_status as _read_run_status, summarize as _summarize_run
 from database import get_pipeline_lock
+import scheduler as _scheduler
 
-_run_level, _run_text = _summarize_run(_read_run_status(), get_pipeline_lock())
+_lock_now = get_pipeline_lock()
+_run_level, _run_text = _summarize_run(_read_run_status(), _lock_now)
+# Every other market with portals (or a run on record) gets its own line.
+_OTHER_RUNS = {}
+for _m in markets.MARKET_CODES:
+    if _m == "sk":
+        continue
+    _st_m = _read_run_status(_m)
+    if _scheduler.SCRAPERS.get(_m) or _st_m:
+        _OTHER_RUNS[_m] = _summarize_run(_st_m, _lock_now)
 _SHOW = {"success": st.success, "info": st.info, "warning": st.warning, "error": st.error}
+_RUN_ICON = {"ok": "✅", "running": "⏳", "warning": "⚠️", "error": "❌", "none": "ℹ️"}
 
 
 @st.fragment(run_every=2 if jobs.running() else None)
@@ -276,12 +293,17 @@ def _job_panel():
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown('<div class="wordmark">SOVEREIGN</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub">Investor Dashboard · Slovakia 2026</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub">Investor Dashboard · Slovakia · Czechia 2026</div>',
+                unsafe_allow_html=True)
     st.markdown("---")
 
     st.markdown("#### PIPELINE")
-    st.caption({"ok": "✅", "running": "⏳", "warning": "⚠️", "error": "❌", "none": "ℹ️"}[_run_level]
-               + " " + _run_text)
+    # One status line per market: Slovakia's as it always read (tagged only
+    # when another market has a line of its own), then the others'.
+    st.caption(_RUN_ICON[_run_level] + " " + _run_text
+               + (" · SK" if _OTHER_RUNS else ""))
+    for _m, (_lvl, _txt) in _OTHER_RUNS.items():
+        st.caption(f"{_RUN_ICON[_lvl]} {_m.upper()} · {_txt}")
     _job_panel()
     _busy = jobs.running()
     do_all   = st.button("▶ RUN EVERYTHING", type="primary", width="stretch", disabled=_busy,
@@ -293,6 +315,16 @@ with st.sidebar:
     with c1: do_nehnut = st.button("NEHNUT",  width="stretch", disabled=_busy)
     with c2: do_bazos  = st.button("BAZOS",   width="stretch", disabled=_busy)
     with c3: do_topreal= st.button("TOPREAL", width="stretch", disabled=_busy)
+    # Czech portals (scheduler.SCRAPERS["cz"]), one button each.
+    _cz_clicks = []
+    _cz_portals = _scheduler.SCRAPERS.get("cz") or ()
+    if _cz_portals:
+        st.markdown('<div class="muted">CZ portals</div>', unsafe_allow_html=True)
+        for _col, (_name, _module) in zip(st.columns(len(_cz_portals)), _cz_portals):
+            _label = _name.split(".")[0].upper()[:8]
+            with _col:
+                _cz_clicks.append((st.button(_label, key=f"cz_{_module}", width="stretch",
+                                             disabled=_busy), _label, _name, _module))
     do_fill  = st.button("🔎 FILL MISSING DETAILS", width="stretch", disabled=_busy,
                          help="Re-read nehnutelnosti listings saved without a price, "
                               "size or district (one with no price or size can't be "
@@ -345,7 +377,8 @@ with st.sidebar:
     # rows seed_market_data.py writes. A fixed list hid those rows behind a
     # filter that had no option to show them.
     from database import get_active_sources
-    _portals = ["nehnutelnosti", "bazos", "topreality"]
+    _portals = (["nehnutelnosti", "bazos", "topreality"]
+                + [mod.split(".", 1)[1] for _, mod in _cz_portals])
     _source_opts = _portals + [s for s in get_active_sources() if s not in _portals]
     sources    = st.multiselect(
         "Source",
@@ -423,6 +456,69 @@ with st.sidebar:
     st.markdown('<div class="muted">Private use. Verify all data.<br>Notárska úschova always.</div>', unsafe_allow_html=True)
 
 
+# ── Market selector ───────────────────────────────────────────────────────────
+# At the top of the page, above every tab: "All markets" (the default) ranks
+# Slovak and Czech listings together, money converted to EUR at the dated
+# rate in config; a single market shows its own listings in its own currency.
+MARKET_VIEWS = {"All markets": None, "🇸🇰 Slovakia": "sk", "🇨🇿 Czechia": "cz"}
+view_market = MARKET_VIEWS[st.radio("Market", list(MARKET_VIEWS), horizontal=True,
+                                    key="market_view", label_visibility="collapsed")]
+# The currency money columns and totals are shown in: the market's own when
+# one is picked, EUR for all of them together.
+VIEW_CUR = markets.get(view_market).currency if view_market else "EUR"
+
+
+def in_view(l) -> bool:
+    """The listing belongs to the market picked at the top."""
+    return view_market is None or markets.of_row(l) == view_market
+
+
+def _tag_market(l: dict) -> dict:
+    """Mark a row with its market, its currency and its price in EUR."""
+    l["_market"] = markets.of_row(l)
+    l["_cur"] = l.get("currency") or markets.get(l["_market"]).currency
+    l["_price_eur"] = markets.to_eur(l.get("price_eur") or 0, l["_cur"])
+    return l
+
+
+_CZ_SUFFIX = {"/mo": "/měs.", "/yr": "/rok"}
+
+
+def money(l, v, suffix: str = "", decimals: int = 0, signed=None) -> str:
+    """An amount of listing `l` in its own currency, written the way its
+    market writes it: -€41/mo for a Slovak flat (as always), -1 200 Kč/měs.
+    for a Czech one."""
+    cur = ((l or {}).get("_cur") or (l or {}).get("currency") or "EUR").upper()
+    if cur != "EUR":
+        suffix = _CZ_SUFFIX.get(suffix, suffix)
+    return markets.format_money(v, cur, decimals, suffix=suffix, signed=signed)
+
+
+def mkw(l) -> dict:
+    """{"market": m} for an engine call about a non-Slovak row, {} for a
+    Slovak one — the engine's default, so a Slovak row's call is unchanged."""
+    m = markets.of_row(l)
+    return {} if m == "sk" else {"market": m}
+
+
+def money_col(name: str, help=None):
+    """A money column in the view's currency: EUR (the euro format) for
+    Slovakia and for all markets together, Kč for Czechia alone."""
+    if VIEW_CUR == "EUR":
+        return st.column_config.NumberColumn(format="euro", step=1, help=help)
+    return st.column_config.NumberColumn(f"{name} ({markets.get(view_market).currency_symbol})",
+                                         format="localized", step=1, help=help)
+
+
+def in_view_cur(l, v):
+    """An amount of row `l` in the view's currency (VIEW_CUR): as stored
+    when they match, else converted to EUR. None stays None."""
+    if v is None:
+        return None
+    cur = l.get("_cur") or "EUR"
+    return v if cur == VIEW_CUR else markets.to_eur(v, cur)
+
+
 # ── Pipeline actions ──────────────────────────────────────────────────────────
 # Each button's step runs on a worker thread (modules/jobs) under the lock the
 # scheduler also takes. A step gets progress(i, n, note) and returns
@@ -493,15 +589,8 @@ def _call_in_subprocess(module: str, func: str, **kwargs):
 RUN_ALL = "RUN EVERYTHING"
 
 
-def _all_step(progress):
-    """The whole pipeline — the scheduler's run_pipeline, so a dashboard run
-    and a 06:00 run do the same steps and record the same status."""
-    import scheduler
-    from modules.pipeline_state import read_status
-    # jobs.start() holds the pipeline lock as "dashboard: <label>" already.
-    ok = scheduler.run_pipeline(trigger="dashboard", holder=f"dashboard: {RUN_ALL}",
-                                call=_call_in_subprocess, progress=progress)
-    status = read_status() or {}
+def _run_outcome(ok: bool, status: dict) -> tuple[str, str]:
+    """(level, message) for one market's full run."""
     if not ok:
         return "error", f"❌ Full run failed: {status.get('error') or 'unknown error'}."
     done = f"✅ Full run done: {status.get('summary') or 'see the tiles above'}."
@@ -509,6 +598,25 @@ def _all_step(progress):
     if failed:
         return "warning", f"{done} ⚠ {len(failed)} step(s) failed — {', '.join(failed)}."
     return "success", done
+
+
+def _all_step(progress):
+    """The whole pipeline — the scheduler's run_all_markets, so a dashboard
+    run and a 06:00 run do the same steps and record the same status. Each
+    market runs on its own: one failing doesn't stop the other."""
+    import scheduler
+    from modules.pipeline_state import read_status
+    # jobs.start() holds the pipeline lock as "dashboard: <label>" already.
+    results = scheduler.run_all_markets(trigger="dashboard",
+                                        holder=f"dashboard: {RUN_ALL}",
+                                        call=_call_in_subprocess, progress=progress)
+    outcomes = {m: _run_outcome(ok, read_status(m) or {}) for m, ok in results.items()}
+    if list(outcomes) == ["sk"]:
+        return outcomes["sk"]
+    levels = {lvl for lvl, _ in outcomes.values()}
+    level = ("success" if levels == {"success"} else
+             "error" if levels == {"error"} else "warning")
+    return level, " | ".join(f"{m.upper()} — {msg}" for m, (_, msg) in outcomes.items())
 
 
 def _fill_step(progress):
@@ -529,20 +637,25 @@ def _fill_step(progress):
                        f"{counts['gone']} taken down. Scored {scored}.")
 
 
-def _scrape_step(module: str, name: str, button: str):
+def _scrape_step(module: str, name: str, button: str, market: str | None = None):
+    """A portal's button. `market` (a Czech portal's "cz") keeps the
+    follow-up steps to that market's listings; a Slovak button runs them as
+    it always did."""
+    kw = {} if market is None else {"market": market}
+
     def step(progress):
         n, err, timed_out = _run_scraper_subprocess(module)
         if err:
             return "error", f"❌ {name}: {err}"
         # Stopped or not, what was stored gets the usual follow-up steps.
         from modules.address_enrichment import run_address_enrichment
-        run_address_enrichment()
+        run_address_enrichment(**kw)
         from modules.description_enrichment import run_description_enrichment
-        run_description_enrichment()
+        run_description_enrichment(**kw)
         from modules.cashflow_runner import run_scoring
-        scored = run_scoring()
+        scored = run_scoring(**kw)
         from database import mark_duplicates
-        mark_duplicates()
+        mark_duplicates(**kw)
         if timed_out:
             from config import DETAIL_REFRESH_DAYS
             return "warning", (
@@ -651,6 +764,9 @@ for _clicked, _label, _step in (
     (do_rent,    "RENT COMPS",             _rent_step),
     (do_dupes,   "MERGE PORTAL COPIES",    _dupes_step),
     (do_stale,   "CLEAN STALE",            _stale_step),
+    *((_clicked_cz, _label_cz, _scrape_step(_module_cz.split(".", 1)[1], _name_cz,
+                                            _label_cz, market="cz"))
+      for _clicked_cz, _label_cz, _name_cz, _module_cz in _cz_clicks),
 ):
     if _clicked:
         _why = jobs.start(_label, _step)
@@ -702,6 +818,13 @@ else:
     data = raw_data
 # LV-rejected listings never reach the lists; the Rejected tile counts them.
 rejected_rows = [] if using_demo else get_all_active(rejected=True)
+# The market picked at the top filters everything below.
+data = [_tag_market(l) for l in data if in_view(l)]
+rejected_rows = [_tag_market(l) for l in rejected_rows if in_view(l)]
+if view_market and not data and raw_data and not using_demo:
+    st.info(f"ℹ️ No {markets.get(view_market).name} listings yet"
+            + (" — its portals are read by ▶ RUN EVERYTHING and the scheduler."
+               if _scheduler.SCRAPERS.get(view_market) else "."))
 
 # Per-listing context that lives outside the main query: price history, deal
 # stage, latest vibe note, the other portals' copies of the same flat.
@@ -743,7 +866,8 @@ district_needle = (district_q or "").strip().lower()
 def passes_filters(l, by_class=True):
     """The sidebar filters. A rejected listing is checked without the
     Classification one: being rejected is all its tile counts."""
-    return ((l.get("price_eur") or 0) <= max_price
+    # Max Price € is in EUR whatever the listing's currency.
+    return ((l.get("_price_eur") or 0) <= max_price
             and (l.get("size_m2")  or 0) >= min_size
             and (not by_class or not classes or (l.get("classification") or "PENDING") in classes)
             and (not sources or (l.get("source") or "") in sources)
@@ -823,6 +947,9 @@ def unscored_note():
 # phone), and everything below is as old as the last run that worked.
 if _run_level == "error":
     st.error(_run_text)
+for _m, (_lvl, _txt) in _OTHER_RUNS.items():
+    if _lvl == "error" and (view_market in (None, _m)):
+        st.error(f"{_m.upper()} — {_txt}")
 
 
 # ── Stats bar ─────────────────────────────────────────────────────────────────
@@ -848,6 +975,14 @@ st.markdown(f"""
   <div class="sc a"><div class="sn">{shown['pending']}</div><div class="sl">Pending</div></div>
 </div>
 """, unsafe_allow_html=True)
+# With both markets on the page, how the tiles split between them.
+_per_market = {m: sum(1 for l in data if l.get("_market") == m) for m in markets.MARKET_CODES}
+if view_market is None and sum(1 for n in _per_market.values() if n) > 1:
+    st.markdown('<div class="muted" style="margin:-10px 0 14px">'
+                + " · ".join(f'{"🇸🇰" if m == "sk" else "🇨🇿"} {m.upper()} {n}'
+                             for m, n in _per_market.items())
+                + f" · tables compare in EUR at {esc(markets.fx_note())}; each card "
+                  f"keeps its own currency</div>", unsafe_allow_html=True)
 if n_hidden:
     st.markdown(f'<div class="muted" style="margin:-10px 0 14px">Showing {len(data)} of '
                 f'{n_loaded} listings · {n_hidden} hidden by the sidebar filters</div>',
@@ -855,7 +990,8 @@ if n_hidden:
 
 
 # ── Price-cut alerts ──────────────────────────────────────────────────────────
-_drops = [] if using_demo else get_price_drops(days=14)
+_drops = [] if using_demo else [_tag_market(d) for d in get_price_drops(days=14)
+                                 if in_view(d)]
 if _drops:
     from engine.financial import below_sanity_floor, class_at_price, discount_to_median
     with st.expander(f"🔻 {len(_drops)} price cut(s) in the last 14 days", expanded=False):
@@ -865,19 +1001,19 @@ if _drops:
             # floor (a misread, not a bargain) a deal.
             my = d.get("max_price_yellow")
             size, district = d.get("size_m2") or 0, d.get("district") or ""
-            now_cls = class_at_price(d["price_eur"], size, district, d.get("rooms"))
+            now_cls = class_at_price(d["price_eur"], size, district, d.get("rooms"), **mkw(d))
             if now_cls in ("GREEN", "YELLOW"):
                 reach = f" · now {now_cls}"
             elif below_sanity_floor(discount_to_median(d["price_eur"], size, district,
-                                                       d.get("rooms"))):
+                                                       d.get("rooms"), **mkw(d))):
                 reach = " · below the sanity floor — check the price"
             elif my:
-                reach = f" · {d['price_eur'] / my - 1:+.1%} above max YELLOW €{my:,.0f}"
+                reach = f" · {d['price_eur'] / my - 1:+.1%} above max YELLOW {money(d, my)}"
             else:
                 reach = ""
             st.markdown(
                 f'<div class="brow"><span class="l">{esc((d.get("title") or d.get("district") or "—")[:60])}</span>'
-                f'<span class="v">€{d["price_eur"]:,.0f} ({d["last_change_pct"]:+.1%}, '
+                f'<span class="v">{money(d, d["price_eur"])} ({d["last_change_pct"]:+.1%}, '
                 f'{str(d["last_change_at"])[:10]}){reach} · '
                 f'<a href="{esc(d["url"])}" target="_blank">open ↗</a></span></div>',
                 unsafe_allow_html=True)
@@ -931,11 +1067,17 @@ def _floor_label(l):
     return f"{int(fl)}/{int(bf)}" if bf else f"{int(fl)}"
 
 
-def _risk_label(v, yes, no="✅ Clear"):
+def _risk_label(v, yes, no="✅ Clear", T=None):
     """A risk flag from modules/risk_data: NULL means nobody could tell."""
     if v is None:
-        return "— unknown"
+        return T("— unknown") if T else "— unknown"
     return yes if v else no
+
+
+def market_badge(l) -> str:
+    """The market a card or row belongs to."""
+    return ('<span class="badge bp">🇨🇿 CZ</span>' if l.get("_market") == "cz"
+            else '<span class="badge bs">🇸🇰 SK</span>')
 
 
 def _rent_fallback(l):
@@ -946,7 +1088,7 @@ def _rent_fallback(l):
     if not key:
         return None
     from engine.financial import rent_fallback_kind
-    return rent_fallback_kind(key)
+    return rent_fallback_kind(key, **mkw(l))
 
 
 def _pct_or_dash(v, digits=1, signed=False):
@@ -971,7 +1113,11 @@ def _lv_state(l):
 
 def _lv_link(l):
     """The official LV report when the flat's (or failing that, the plot's)
-    LV and cadastral unit code are known; otherwise the cadastre portal."""
+    LV and cadastral unit code are known; otherwise the cadastre portal. A
+    Czech listing links to ČÚZK's nahlížení do katastru."""
+    if l.get("_market") == "cz":
+        from modules.lv_cz import lv_link
+        return lv_link(l)
     ku = l.get("cadastral_unit_code")
     lv_no = l.get("lv_number") or l.get("plot_lv_number")
     if ku and lv_no:
@@ -989,7 +1135,88 @@ def _save_stage(lid):
     st.session_state[f"card_{lid}"] = True
 
 
+# Czech labels for a Czech card (a Slovak card keeps its English ones).
+CZ_LABELS = {
+    "Price": "Cena", "Size": "Plocha", "Est. Rent": "Odhad nájmu",
+    "Total Costs": "Náklady celkem", "Surplus/mo": "Přebytek/měs.",
+    "Self-Fund": "Samofinancování", "Cap Rate": "Míra kapitalizace",
+    "CoC Return": "Výnos vl. kapitálu", "IRR 10y": "IRR 10 let",
+    "Max offer 🟡": "Max. nabídka 🟡", "Max offer 🟢": "Max. nabídka 🟢",
+    "vs Market": "vs trh", "Below market": "Pod trhem", "Above market": "Nad trhem",
+    "Days tracked": "Sledováno dní", "Location": "Lokalita",
+    "s.r.o.": "s.r.o.", "Personal": "Fyzická osoba", "PERSONAL": "FYZICKÁ OSOBA",
+    "COST BREAKDOWN": "ROZPAD NÁKLADŮ", "Mortgage": "Hypotéka",
+    "HOA (incl. fond opráv)": "SVJ (fond oprav + správa)",
+    "Property Tax": "Daň z nemovitosti", "Vacancy 5%": "Neobsazenost 5 %",
+    "Owner reserve": "Rezerva vlastníka", "Management": "Správa nájmu",
+    "Income Tax": "Daň z příjmů", "Health Levy": "Zdravotní pojištění",
+    "s.r.o. running cost": "Provoz s.r.o.", "TOTAL COSTS": "NÁKLADY CELKEM",
+    "NET SURPLUS": "ČISTÝ PŘEBYTEK", "FINANCING STRESS (s.r.o.)": "STRESOVÝ TEST (s.r.o.)",
+    "Rate +2 pp": "Sazba +2 p. b.", "70% LTV (3rd+ flat)": "LTV 70 % (investiční)",
+    "self-funding": "samofinancování", "cash in": "vlastní zdroje",
+    "LOCATION IQ": "LOKALITA", "Transit": "MHD", "Amenities": "Vybavenost",
+    "Walkability": "Pěší dostupnost", "Industrial": "Průmyslová zóna",
+    "Construction": "Stavba v okolí", "Noise": "Hluk", "Flood (Q100)": "Povodeň (Q100)",
+    "Geocode": "Geokódování", "Energy Class": "PENB", "Floor": "Podlaží",
+    "Building": "Dům", "LV Status": "Stav LV",
+    "Deal stage": "Fáze obchodu", "Stage note": "Poznámka k fázi",
+    "SAVE STAGE": "ULOŽIT FÁZI", "VIEW LISTING": "INZERÁT", "MAPS": "MAPA",
+    "CHECK LV": "NAHLÍŽENÍ DO KN", "RE-VERIFY LV": "OVĚŘIT LV",
+    "Flat's own LV no.": "Číslo LV jednotky", "Katastrálne územie": "Katastrální území",
+    "✅ Clear": "✅ V pořádku", "— unknown": "— neznámo",
+    "⚠️ Site nearby": "⚠️ Stavba v okolí", "⚠️ ≥65 dB source": "⚠️ Zdroj ≥65 dB",
+    "⚠️ In flood area": "⚠️ V záplavovém území", "✅ YES": "✅ ANO",
+    "🛗 elevator": "🛗 výtah", "📦 cellar": "📦 sklep", "🌿 terrace": "🌿 terasa",
+    "🌿 loggia": "🌿 lodžie",
+}
+
+
+def _labels(l):
+    """The card's label function: English for a Slovak card, Czech for a
+    Czech one."""
+    if l.get("_market") == "cz":
+        return lambda s: CZ_LABELS.get(s, s)
+    return lambda s: s
+
+
+def amt(l, v, suffix: str = "") -> str:
+    """An unsigned amount as a Slovak card always wrote it (€1,234/mo); a
+    Czech card's in Kč (1 234 Kč/měs.)."""
+    if (l.get("_cur") or "EUR") == "EUR":
+        return f"€{v:,.0f}{suffix}"
+    return money(l, v, suffix, signed=False)
+
+
+def sgn(l, v, suffix: str = "/mo") -> str:
+    """A signed amount: fe() on a Slovak card, Kč on a Czech one."""
+    if (l.get("_cur") or "EUR") == "EUR":
+        return fe(v, suffix=suffix)
+    return money(l, v, suffix)
+
+
+def _lv_state_t(l):
+    """_lv_state, in Czech on a Czech card."""
+    label, css = _lv_state(l)
+    if l.get("_market") != "cz":
+        return label, css
+    for en, cz in (("LV CLEAN", "LV ČISTÝ"), ("LV REJECTED", "LV ZAMÍTNUT"),
+                   ("LV UNVERIFIED", "LV NEOVĚŘEN"), ("LV PENDING", "LV ČEKÁ")):
+        label = label.replace(en, cz)
+    return label, css
+
+
+def _quick_cadastre(l):
+    """A short-patience cadastre context for the listing's market."""
+    if l.get("_market") == "cz":
+        from modules.lv_cz import quick_requests
+    else:
+        from kataster_scraper import quick_requests
+    return quick_requests()
+
+
 def render_card(l):
+    T        = _labels(l)
+    cz       = l.get("_market") == "cz"
     cls      = (l.get("cf_class") or l.get("classification") or "PENDING").upper()
     css_cls  = {"GREEN":"g","YELLOW":"y","WHITE":"w","PENDING":"w"}.get(cls,"w")
     emoji    = {"GREEN":"🟢","YELLOW":"🟡","WHITE":"⚪"}.get(cls,"")
@@ -997,7 +1224,7 @@ def render_card(l):
     surplus  = l.get("surplus_sro") if show_sro else l.get("surplus_personal")
     ratio    = l.get("ratio_sro")   if show_sro else l.get("ratio_personal")
     total_c  = l.get("total_costs_sro") if show_sro else l.get("total_costs_personal")
-    struct   = "s.r.o." if show_sro else "Personal"
+    struct   = "s.r.o." if show_sro else T("Personal")
     rent     = l.get("estimated_rent_eur", 0) or 0
     price    = l.get("price_eur", 0) or 0
     size     = l.get("size_m2", 0) or 0
@@ -1013,12 +1240,16 @@ def render_card(l):
     stage    = l.get("_stage")
 
     disc     = l.get("market_discount")
-    below    = (f"{abs(disc)*100:.0f}% {'below' if disc >= 0 else 'above'} market"
-                if disc is not None else "no benchmark")
+    if cz:
+        below = (f"{abs(disc)*100:.0f} % {'pod' if disc >= 0 else 'nad'} trhem"
+                 if disc is not None else "bez srovnání")
+    else:
+        below = (f"{abs(disc)*100:.0f}% {'below' if disc >= 0 else 'above'} market"
+                 if disc is not None else "no benchmark")
     cut = f"   ·   🔻{ph['change_pct']:+.0%}" if ph and (ph.get("change_pct") or 0) < 0 else ""
     stage_tag = f"   ·   [{stage['stage']}]" if stage else ""
-    header = (f"{emoji}  {title[:60]}   ·   €{price:,.0f}   ·   {below}   ·   "
-              f"{fe(surplus, suffix='/mo')}{cut}{stage_tag}")
+    header = (f"{emoji}  {title[:60]}   ·   {amt(l, price)}   ·   {below}   ·   "
+              f"{sgn(l, surplus)}{cut}{stage_tag}" + ("   ·   🇨🇿 CZ" if cz else ""))
 
     # Only an open card builds its body. Every click reruns the whole script,
     # and a collapsed expander still ran its ~40 widgets, so the page slowed
@@ -1030,50 +1261,64 @@ def render_card(l):
         # Row 1: key metrics
         c1,c2,c3,c4,c5,c6 = st.columns(6)
         with c1:
-            st.metric("Price",    f"€{price:,.0f}")
-            st.metric("Size",     f"{size:.0f} m²")
+            st.metric(T("Price"),    amt(l, price),
+                      help=(f"≈ {markets.format_money(l.get('_price_eur'))} "
+                            f"({markets.fx_note()})" if cz else None))
+            st.metric(T("Size"),     f"{size:.0f} m²")
         with c2:
-            st.metric("Est. Rent",  f"€{rent:,.0f}/mo",
-                      help=("Live prenájom comps" if l.get("rent_source") == "live"
-                            else "Published baseline €/m² (config.RENT_PER_M2)")
-                      + (f" for '{l['rent_key']}'" if l.get("rent_key") else ""))
-            st.metric("Total Costs",f"€{total_c:,.0f}/mo" if total_c else "—")
+            if cz:
+                rent_help = (("Živé srovnání z pronájmů" if l.get("rent_source") == "live"
+                              else "Výchozí Kč/m² (engine.rent_cz)")
+                             + (f" pro '{l['rent_key']}'" if l.get("rent_key") else ""))
+            else:
+                rent_help = (("Live prenájom comps" if l.get("rent_source") == "live"
+                              else "Published baseline €/m² (config.RENT_PER_M2)")
+                             + (f" for '{l['rent_key']}'" if l.get("rent_key") else ""))
+            st.metric(T("Est. Rent"),  amt(l, rent, "/mo"), help=rent_help)
+            st.metric(T("Total Costs"), amt(l, total_c, "/mo") if total_c else "—")
         with c3:
-            surplus_str = fe(surplus, suffix="/mo")
-            st.metric("Surplus/mo",   surplus_str)
-            st.metric("Self-Fund",    fp(ratio))
+            surplus_str = sgn(l, surplus)
+            st.metric(T("Surplus/mo"),   surplus_str)
+            st.metric(T("Self-Fund"),    fp(ratio))
         with c4:
-            st.metric("Cap Rate",   fp(l.get("cap_rate")))
-            st.metric("CoC Return", fp(l.get("cash_on_cash")))
-            st.metric("IRR 10y",    _pct_or_dash(l.get("irr_sro") if show_sro else l.get("irr_personal")),
-                      help="Hold-period IRR with appreciation, exit costs and tax on the "
-                           "gain — see the WHAT-IF tab.")
+            st.metric(T("Cap Rate"),   fp(l.get("cap_rate")))
+            st.metric(T("CoC Return"), fp(l.get("cash_on_cash")))
+            st.metric(T("IRR 10y"),    _pct_or_dash(l.get("irr_sro") if show_sro else l.get("irr_personal")),
+                      help=("IRR za dobu držení se zhodnocením, náklady prodeje a daní ze "
+                            "zisku — viz záložka WHAT-IF." if cz else
+                            "Hold-period IRR with appreciation, exit costs and tax on the "
+                            "gain — see the WHAT-IF tab."))
         with c5:
             my, mg = l.get("max_price_yellow"), l.get("max_price_green")
-            st.metric("Max offer 🟡", f"€{my:,.0f}" if my else "—",
+            st.metric(T("Max offer 🟡"), amt(l, my) if my else "—",
                       delta=(f"{my / price - 1:+.1%} vs ask" if my and price else None),
-                      help="Highest price at which this is still YELLOW "
-                           "(≥10% below the regional median €/m²).")
-            st.metric("Max offer 🟢", f"€{mg:,.0f}" if mg else "—",
-                      help="Highest price at which this is GREEN "
-                           "(≥20% below the regional median €/m²).")
+                      help=("Nejvyšší cena, při které je byt stále YELLOW (≥10 % pod "
+                            "regionálním mediánem Kč/m²)." if cz else
+                            "Highest price at which this is still YELLOW "
+                            "(≥10% below the regional median €/m²)."))
+            st.metric(T("Max offer 🟢"), amt(l, mg) if mg else "—",
+                      help=("Nejvyšší cena, při které je byt GREEN (≥20 % pod regionálním "
+                            "mediánem Kč/m²)." if cz else
+                            "Highest price at which this is GREEN "
+                            "(≥20% below the regional median €/m²)."))
         with c6:
             median_m2 = l.get("regional_median_m2")
             from engine.regional_prices import benchmark_note
             # Direction in the label, number in the value: "45% below market"
             # doesn't fit a 6-column metric and was cut to "45% b…".
-            st.metric("vs Market" if disc is None else
-                      ("Below market" if disc >= 0 else "Above market"),
+            unit = "Kč/m²" if cz else "€/m²"
+            st.metric(T("vs Market") if disc is None else
+                      (T("Below market") if disc >= 0 else T("Above market")),
                       "—" if disc is None else f"{abs(disc) * 100:.0f}%",
-                      help=(f"Asking €/m² vs €{median_m2:,.0f}/m² "
-                            f"(≈ €{median_m2 * size:,.0f} for {size:.0f} m²) — "
-                            f"{benchmark_note(district or '', l.get('rooms'))}")
+                      help=(f"Asking {unit} vs {amt(l, median_m2)}/m² "
+                            f"(≈ {amt(l, median_m2 * size)} for {size:.0f} m²) — "
+                            f"{benchmark_note(district or '', l.get('rooms'), **mkw(l))}")
                       if median_m2 and size else "No regional median for this district.")
-            st.metric("Days tracked", "—" if l.get("_dom") is None else f"{l['_dom']}",
+            st.metric(T("Days tracked"), "—" if l.get("_dom") is None else f"{l['_dom']}",
                       help="Days since this dashboard first saw the flat on any "
                            "portal — not the portal's posting date, so a listing "
                            "that was up long before the first scrape reads young.")
-            st.metric("Location",   f"{l.get('location_score','—')}/100")
+            st.metric(T("Location"),   f"{l.get('location_score','—')}/100")
 
         # Composite deal grade (financial + location + energy + risk)
         from engine.financial import compute_deal_score
@@ -1083,12 +1328,13 @@ def render_card(l):
         # Badges
         lv_risk = (l.get("lv_risk_level") or "").upper()
         lv_css  = {"LOW": "bg", "MEDIUM": "by", "HIGH": "br"}.get(lv_risk, "bw")
-        lv_label, lv_badge_css = _lv_state(l)
+        lv_label, lv_badge_css = _lv_state_t(l)
         badges = (
+            market_badge(l) + " " +
             badge(css_cls, cls) + " " +
             (f'<span class="badge {grade_css}">GRADE {deal_grade} · {deal_score}</span> '
              if deal_grade != "—" else "") +
-            f'<span class="badge bo">{"s.r.o." if opt=="SRO" else "PERSONAL"}</span>' + " " +
+            f'<span class="badge bo">{"s.r.o." if opt=="SRO" else T("PERSONAL")}</span>' + " " +
             tier_badge(loc_tier) +
             (' <span class="badge bg">⚙️ INDUSTRIAL</span>' if ind else "") +
             f' <span class="badge {lv_badge_css}">{lv_label}</span>' +
@@ -1120,21 +1366,30 @@ def render_card(l):
                 )
         fallback = _rent_fallback(l)
         if fallback:
-            from config import RENT_PER_M2 as _RENT
-            why = (f"the national default €{_RENT['default']:.2f}/m² — this town is in no rent table"
-                   if fallback == "default" else
-                   f"the {esc(l['rent_key'].title())} median of its towns — no figure for this town")
+            if cz:
+                from engine.financial import baseline_rent as _baseline
+                _d = _baseline("default", market="cz")
+                why = (f"the national default {amt(l, _d)}/m² — this town is in no rent table"
+                       if fallback == "default" and _d else
+                       "no Czech rent figure for this town"
+                       if fallback == "default" else
+                       f"the {esc(l['rent_key'].title())} median of its towns — no figure for this town")
+            else:
+                from config import RENT_PER_M2 as _RENT
+                why = (f"the national default €{_RENT['default']:.2f}/m² — this town is in no rent table"
+                       if fallback == "default" else
+                       f"the {esc(l['rent_key'].title())} median of its towns — no figure for this town")
             st.markdown(f'<div class="muted" style="margin-top:6px;color:#ffd740">⚠ Rent uses '
                         f'{why}. Check local rents before trusting the surplus.</div>',
                         unsafe_allow_html=True)
         if ph:
-            steps = " → ".join(f"€{p:,.0f} ({str(w)[:10]})" for w, p in ph["history"])
+            steps = " → ".join(f"{amt(l, p)} ({str(w)[:10]})" for w, p in ph["history"])
             st.markdown(f'<div class="muted" style="margin-top:6px">📉 Price: {steps} '
                         f'[{ph["change_pct"]:+.1%}]</div>', unsafe_allow_html=True)
         if len(l.get("_copies") or []) > 1:
             links = " · ".join(
                 f'<a href="{esc(c.get("url"))}" target="_blank">{esc((c.get("source") or "").upper())} '
-                f'€{(c.get("price_eur") or 0):,.0f}</a>'
+                f'{amt(l, c.get("price_eur") or 0)}</a>'
                 for c in sorted(l["_copies"], key=lambda c: c.get("price_eur") or 0))
             st.markdown(f'<div class="muted" style="margin-top:6px">📡 Same flat on: {links}</div>',
                         unsafe_allow_html=True)
@@ -1145,84 +1400,91 @@ def render_card(l):
         bc1, bc2 = st.columns(2)
 
         with bc1:
-            st.markdown(f'<div class="muted">COST BREAKDOWN — {struct}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="muted">{T("COST BREAKDOWN")} — {struct}</div>',
+                        unsafe_allow_html=True)
             mortgage = (l.get("mortgage_monthly_sro") if show_sro
                         and l.get("mortgage_monthly_sro") is not None
                         else l.get("mortgage_monthly"))
             rows = [
-                ("Mortgage",        mortgage),
-                ("HOA (incl. fond opráv)", l.get("hoa_monthly")),
-                ("Property Tax",    l.get("property_tax_monthly")),
-                ("Vacancy 5%",      l.get("vacancy_cost")),
-                ("Owner reserve",   l.get("maintenance_monthly")),
-                ("Management",      l.get("management_monthly")),
-                ("Income Tax",      l.get("income_tax_sro") if show_sro else l.get("income_tax_personal")),
-                ("Health Levy",     l.get("health_levy_sro") if show_sro else l.get("health_levy_personal")),
+                (T("Mortgage"),        mortgage),
+                (T("HOA (incl. fond opráv)"), l.get("hoa_monthly")),
+                (T("Property Tax"),    l.get("property_tax_monthly")),
+                (T("Vacancy 5%"),      l.get("vacancy_cost")),
+                (T("Owner reserve"),   l.get("maintenance_monthly")),
+                (T("Management"),      l.get("management_monthly")),
+                (T("Income Tax"),      l.get("income_tax_sro") if show_sro else l.get("income_tax_personal")),
+                (T("Health Levy"),     l.get("health_levy_sro") if show_sro else l.get("health_levy_personal")),
             ]
             if show_sro:
-                rows.insert(6, ("s.r.o. running cost", l.get("sro_running_cost_monthly")))
+                rows.insert(6, (T("s.r.o. running cost"), l.get("sro_running_cost_monthly")))
             html = ""
             for lbl, val in rows:
-                html += f'<div class="brow"><span class="l">{lbl}</span><span class="v">€{val:,.0f}/mo</span></div>' if val is not None else ""
-            html += f'<div class="brow tot"><span class="l">TOTAL COSTS</span><span class="v">€{total_c:,.0f}/mo</span></div>' if total_c else ""
+                html += f'<div class="brow"><span class="l">{lbl}</span><span class="v">{amt(l, val, "/mo")}</span></div>' if val is not None else ""
+            html += f'<div class="brow tot"><span class="l">{T("TOTAL COSTS")}</span><span class="v">{amt(l, total_c, "/mo")}</span></div>' if total_c else ""
             surplus_cls = "pos" if (surplus or 0) >= 0 else "neg"
-            html += f'<div class="brow tot {surplus_cls}"><span class="l">NET SURPLUS</span><span class="v">{fe(surplus, suffix="/mo")}</span></div>' if surplus is not None else ""
+            html += f'<div class="brow tot {surplus_cls}"><span class="l">{T("NET SURPLUS")}</span><span class="v">{sgn(l, surplus)}</span></div>' if surplus is not None else ""
             st.markdown(html, unsafe_allow_html=True)
 
             if saving and saving > 0:
                 verdict = "" if opt == "SRO" else " — too little to repay its setup cost; personal is better"
-                st.markdown(f'<div class="muted" style="margin-top:8px">s.r.o. nets €{saving:,.0f}/yr more '
+                st.markdown(f'<div class="muted" style="margin-top:8px">s.r.o. nets {amt(l, saving, "/yr")} more '
                             f'than personal after its running cost{f" · break-even {bev}mo" if bev else ""}'
                             f'{verdict}</div>', unsafe_allow_html=True)
             elif saving is not None and l.get("sro_running_cost_monthly") is not None:
-                st.markdown(f'<div class="muted" style="margin-top:8px">s.r.o. comes out €{-saving:,.0f}/yr '
+                st.markdown(f'<div class="muted" style="margin-top:8px">s.r.o. comes out {amt(l, -saving, "/yr")} '
                             f'worse than personal after its running cost and company-loan terms</div>',
                             unsafe_allow_html=True)
             if show_sro and l.get("sro_rate_used") is not None:
                 st.markdown(f'<div class="muted">s.r.o. loan: {l["sro_ltv_used"] * 100:.0f}% LTV at '
                             f'{l["sro_rate_used"] * 100:.2f}% · cash in '
-                            f'€{(l.get("total_cash_invested_sro") or 0):,.0f}</div>',
+                            f'{amt(l, l.get("total_cash_invested_sro") or 0)}</div>',
                             unsafe_allow_html=True)
 
             # Financing stress: +2 pp rate, and the 70% investor LTV cap.
             if price and size and rent:
                 from engine.financial import analyse as _an
-                from config import LTV_RATIO_INVESTOR, MORTGAGE_RATE_PA, LOAN_TERM_YEARS
+                if cz:
+                    _prof = markets.get("cz")
+                    inv_ltv, base_rate, base_term = (_prof.ltv_ratio_investor,
+                                                     _prof.mortgage_rate_pa, _prof.loan_term_years)
+                else:
+                    from config import LTV_RATIO_INVESTOR, MORTGAGE_RATE_PA, LOAN_TERM_YEARS
+                    inv_ltv, base_rate, base_term = LTV_RATIO_INVESTOR, MORTGAGE_RATE_PA, LOAN_TERM_YEARS
                 inv = _an(price, size, district or "", rent_override=rent,
-                          ltv=LTV_RATIO_INVESTOR,
-                          rate=l.get("mortgage_rate_used") or MORTGAGE_RATE_PA,
-                          term_years=int(l.get("loan_term_years") or LOAN_TERM_YEARS))
+                          ltv=inv_ltv,
+                          rate=l.get("mortgage_rate_used") or base_rate,
+                          term_years=int(l.get("loan_term_years") or base_term), **mkw(l))
                 sts = l.get("stress_surplus_sro")
-                html = '<div class="muted" style="margin-top:10px">FINANCING STRESS (s.r.o.)</div>'
+                html = f'<div class="muted" style="margin-top:10px">{T("FINANCING STRESS (s.r.o.)")}</div>'
                 if sts is not None:
-                    html += (f'<div class="brow {"pos" if sts >= 0 else "neg"}"><span class="l">Rate +2 pp</span>'
-                             f'<span class="v">{fe(sts, suffix="/mo")} · self-funding '
+                    html += (f'<div class="brow {"pos" if sts >= 0 else "neg"}"><span class="l">{T("Rate +2 pp")}</span>'
+                             f'<span class="v">{sgn(l, sts)} · {T("self-funding")} '
                              f'{fp(l.get("stress_ratio_sro"))}</span></div>')
-                html += (f'<div class="brow {"pos" if inv.surplus_sro >= 0 else "neg"}"><span class="l">70% LTV (3rd+ flat)</span>'
-                         f'<span class="v">{fe(inv.surplus_sro, suffix="/mo")} · self-funding {fp(inv.ratio_sro)} · '
-                         f'cash in €{inv.total_cash_invested:,.0f}</span></div>')
+                html += (f'<div class="brow {"pos" if inv.surplus_sro >= 0 else "neg"}"><span class="l">{T("70% LTV (3rd+ flat)")}</span>'
+                         f'<span class="v">{sgn(l, inv.surplus_sro)} · {T("self-funding")} {fp(inv.ratio_sro)} · '
+                         f'{T("cash in")} {amt(l, inv.total_cash_invested)}</span></div>')
                 st.markdown(html, unsafe_allow_html=True)
 
         with bc2:
-            st.markdown('<div class="muted">LOCATION IQ</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="muted">{T("LOCATION IQ")}</div>', unsafe_allow_html=True)
             precision = l.get("geo_precision")
             loc_rows = [
-                ("Transit",        f"{transit:.0f}m {'✅' if (transit or 9999) <= 560 else '⚠️'}" if transit else "—"),
-                ("Amenities",      f"{l.get('amenity_count','—')} {'✅' if (l.get('amenity_count') or 0) >= 3 else '⚠️'}"),
-                ("Walkability",    f"{l.get('walkability_score','—')}/100"),
-                ("Industrial",     "✅ YES" if ind else "—"),
-                ("Construction",   _risk_label(l.get("construction_risk"), "⚠️ Site nearby")),
-                ("Noise",          _risk_label(l.get("noise_flag"), "⚠️ ≥65 dB source")),
-                ("Flood (Q100)",   _risk_label(l.get("flood_zone"), "⚠️ In flood area")),
-                ("Geocode",        precision or "—"),
-                ("Energy Class",   l.get("energy_class","?")),
-                ("Floor",          _floor_label(l) or "—"),
-                ("Building",       " ".join(x for x, c in (("🛗 elevator", "has_elevator"),
-                                                           ("📦 cellar", "has_cellar"),
-                                                           ("🌿 terrace", "has_terrace"),
-                                                           ("🌿 loggia", "has_loggia"))
-                                            if l.get(c)) or "—"),
-                ("LV Status",      _lv_state(l)[0]),
+                (T("Transit"),        f"{transit:.0f}m {'✅' if (transit or 9999) <= 560 else '⚠️'}" if transit else "—"),
+                (T("Amenities"),      f"{l.get('amenity_count','—')} {'✅' if (l.get('amenity_count') or 0) >= 3 else '⚠️'}"),
+                (T("Walkability"),    f"{l.get('walkability_score','—')}/100"),
+                (T("Industrial"),     T("✅ YES") if ind else "—"),
+                (T("Construction"),   _risk_label(l.get("construction_risk"), T("⚠️ Site nearby"), T("✅ Clear"), T)),
+                (T("Noise"),          _risk_label(l.get("noise_flag"), T("⚠️ ≥65 dB source"), T("✅ Clear"), T)),
+                (T("Flood (Q100)"),   _risk_label(l.get("flood_zone"), T("⚠️ In flood area"), T("✅ Clear"), T)),
+                (T("Geocode"),        precision or "—"),
+                (T("Energy Class"),   l.get("energy_class","?")),
+                (T("Floor"),          _floor_label(l) or "—"),
+                (T("Building"),       " ".join(T(x) for x, c in (("🛗 elevator", "has_elevator"),
+                                                              ("📦 cellar", "has_cellar"),
+                                                              ("🌿 terrace", "has_terrace"),
+                                                              ("🌿 loggia", "has_loggia"))
+                                               if l.get(c)) or "—"),
+                (T("LV Status"),      _lv_state_t(l)[0]),
             ]
             html = ""
             for lbl, val in loc_rows:
@@ -1241,14 +1503,15 @@ def render_card(l):
         lid = l.get("id", "")
         with s1:
             cur = (stage or {}).get("stage", "NEW")
-            st.selectbox("Deal stage", DEAL_STAGES,
+            st.selectbox(T("Deal stage"), DEAL_STAGES,
                          index=DEAL_STAGES.index(cur) if cur in DEAL_STAGES else 0,
                          key=f"stg_{lid}")
-            st.text_input("Stage note", value=(stage or {}).get("note") or "",
-                          key=f"stgn_{lid}", placeholder="e.g. viewing Sat 10:00")
+            st.text_input(T("Stage note"), value=(stage or {}).get("note") or "",
+                          key=f"stgn_{lid}",
+                          placeholder="např. prohlídka so 10:00" if cz else "e.g. viewing Sat 10:00")
             # Demo rows aren't in the database: writing their ids would leave
             # deal stages (and LV checks, notes) for listings that don't exist.
-            st.button("SAVE STAGE", key=f"stgb_{lid}", width="stretch",
+            st.button(T("SAVE STAGE"), key=f"stgb_{lid}", width="stretch",
                       disabled=using_demo, on_click=_save_stage, args=(lid,))
         with s2:
             v = l.get("_vibe")
@@ -1265,15 +1528,15 @@ def render_card(l):
 
         # Action buttons
         a1,a2,a3,a4,a5 = st.columns(5)
-        with a1: st.link_button("VIEW LISTING", l.get("url","#"), width="stretch")
+        with a1: st.link_button(T("VIEW LISTING"), l.get("url","#"), width="stretch")
         with a2:
             lat, lng = l.get("lat"), l.get("lng")
             if lat and lng:
-                st.link_button("MAPS", f"https://www.google.com/maps?q={lat},{lng}&z=15", width="stretch")
+                st.link_button(T("MAPS"), f"https://www.google.com/maps?q={lat},{lng}&z=15", width="stretch")
         with a3:
-            st.link_button("CHECK LV", _lv_link(l), width="stretch")
+            st.link_button(T("CHECK LV"), _lv_link(l), width="stretch")
         with a4:
-            verify = st.button("RE-VERIFY LV", key=f"rv_{lid}", width="stretch",
+            verify = st.button(T("RE-VERIFY LV"), key=f"rv_{lid}", width="stretch",
                                disabled=using_demo)
         with a5:
             render_memo_button(l, key=f"memo_{lid}")
@@ -1283,24 +1546,26 @@ def render_card(l):
         v1, v2 = st.columns(2)
         with v1:
             flat_lv = st.text_input(
-                "Flat's own LV no.", value=l.get("lv_number") or "",
+                T("Flat's own LV no."), value=l.get("lv_number") or "",
                 key=f"lvno_{lid}", placeholder="e.g. 4321",
-                help="From the seller's papers or the agent. The building "
-                     "plot's LV is not the flat's.")
+                help=("Z dokladů prodávajícího nebo od makléře. LV pozemku pod domem "
+                      "není LV bytové jednotky." if cz else
+                      "From the seller's papers or the agent. The building "
+                      "plot's LV is not the flat's."))
         with v2:
             flat_ku = st.text_input(
-                "Katastrálne územie", value=l.get("cadastral_area") or "",
-                key=f"lvku_{lid}", placeholder="e.g. Petržalka",
-                help="Name or numeric code of the cadastral unit.")
+                T("Katastrálne územie"), value=l.get("cadastral_area") or "",
+                key=f"lvku_{lid}", placeholder="např. Vinohrady" if cz else "e.g. Petržalka",
+                help=("Název nebo kód katastrálního území." if cz else
+                      "Name or numeric code of the cadastral unit."))
         if verify:
             try:
                 from modules.debt_bot import reverify
-                from kataster_scraper import quick_requests
                 lv_in = flat_lv.strip()
                 ku_in = flat_ku.strip()
                 changed = (lv_in != (l.get("lv_number") or "")
                            or ku_in != (l.get("cadastral_area") or ""))
-                with st.spinner("Checking the cadastre..."), quick_requests():
+                with st.spinner("Checking the cadastre..."), _quick_cadastre(l):
                     r = reverify(lid, lv_number=lv_in if changed else None,
                                  cadastral_area=ku_in if changed else "")
                 from database import mark_duplicates
@@ -1316,7 +1581,10 @@ def render_card(l):
             except Exception as e:
                 st.warning(f"Re-verify: {e}")
 
-        st.markdown(f'<div class="muted">Source: {esc((l.get("source") or "").upper())} · First seen by this dashboard: {esc((l.get("scraped_at") or "")[:10])}</div>', unsafe_allow_html=True)
+        if cz:
+            st.markdown(f'<div class="muted">Zdroj: {esc((l.get("source") or "").upper())} · Tento přehled jej poprvé viděl: {esc((l.get("scraped_at") or "")[:10])}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="muted">Source: {esc((l.get("source") or "").upper())} · First seen by this dashboard: {esc((l.get("scraped_at") or "")[:10])}</div>', unsafe_allow_html=True)
 
 
 def render_memo_button(l, key):
@@ -1400,6 +1668,7 @@ with t0:
             score, grade = compute_deal_score(l)
             price = l.get("price_eur") or 0
             my = l.get("max_price_yellow")
+            v = lambda x, _l=l: in_view_cur(_l, x)     # noqa: E731 — the view's currency
             irr_v = l.get("irr_sro") if show_sro else l.get("irr_personal")
             ph = l.get("_ph") or {}
             vibe = l.get("_vibe")
@@ -1411,19 +1680,21 @@ with t0:
                 "Title":    (l.get("title") or l.get("district") or "—")[:50],
                 "District": l.get("district") or "—",
                 "Stage":    (l.get("_stage") or {}).get("stage", ""),
-                "Price":    price,
-                "Max 🟡":   my,
-                "Max 🟢":   l.get("max_price_green"),
+                "Mkt":      "🇨🇿 CZ" if l.get("_market") == "cz" else "🇸🇰 SK",
+                "Price":    v(price),
+                "Native":   money(l, price),
+                "Max 🟡":   v(my),
+                "Max 🟢":   v(l.get("max_price_green")),
                 # The card's "Max offer 🟡 … vs ask" figure: the move from the
                 # asking price to the max YELLOW price.
                 "To 🟡":    (my / price - 1) * 100 if my and price else None,
                 # Blank without a benchmark: 0% would read as "at market".
                 "Below%":   disc * 100 if disc is not None else None,
                 "Size":     l.get("size_m2")              or 0,
-                "Rent":     l.get("estimated_rent_eur")   or 0,
-                "Surplus":  surplus if surplus is not None else 0,
+                "Rent":     v(l.get("estimated_rent_eur")   or 0),
+                "Surplus":  v(surplus if surplus is not None else 0),
                 "CF":       "⛔" if _cf_negative(l) else ("✅" if surplus is not None else ""),
-                "+2pp":     l.get("stress_surplus_sro"),
+                "+2pp":     v(l.get("stress_surplus_sro")),
                 "Gross%":   (l.get("gross_yield")         or 0) * 100,
                 "Cap%":     (l.get("cap_rate")            or 0) * 100,
                 "IRR%":     irr_v * 100 if irr_v is not None else None,
@@ -1441,6 +1712,10 @@ with t0:
         df = pd.DataFrame(triage_rows).sort_values(
             ["Score", "Below%"], ascending=[False, False]
         )
+        # The native price only says something when the money columns are
+        # converted, i.e. with both markets on the page.
+        if view_market is not None or (df["Mkt"] == "🇸🇰 SK").all():
+            df = df.drop(columns="Native")
         st.markdown(
             f'<div class="muted">{len(df)} scored listings — sorted by composite deal '
             f'grade (yield + discount to market + location + energy + condition + '
@@ -1455,14 +1730,16 @@ with t0:
             column_config={
                 "Score":   st.column_config.NumberColumn(format="%d", help="0–100 composite deal score"),
                 "Stage":   st.column_config.TextColumn(width="medium"),
-                "Price":   st.column_config.NumberColumn(format="euro", step=1),
-                "Max 🟡":  st.column_config.NumberColumn(format="euro", step=1, help="Highest price that still scores YELLOW"),
-                "Max 🟢":  st.column_config.NumberColumn(format="euro", step=1, help="Highest price that scores GREEN"),
+                "Mkt":     st.column_config.TextColumn(help="Market: Slovakia or Czechia"),
+                "Price":   money_col("Price"),
+                "Native":  st.column_config.TextColumn(help=f"In the listing's own currency · {markets.fx_note()}"),
+                "Max 🟡":  money_col("Max 🟡", help="Highest price that still scores YELLOW"),
+                "Max 🟢":  money_col("Max 🟢", help="Highest price that scores GREEN"),
                 "To 🟡":   st.column_config.NumberColumn(format="%+.1f%%", help="Change from the asking price to the max YELLOW price, as on the card — the cut you need to negotiate (positive = already inside)"),
                 "Size":    st.column_config.NumberColumn(format="%d m²"),
-                "Rent":    st.column_config.NumberColumn(format="euro", step=1),
-                "Surplus": st.column_config.NumberColumn(format="euro", step=1),
-                "+2pp":    st.column_config.NumberColumn(format="euro", step=1, help="s.r.o. surplus at the mortgage rate + 2 pp"),
+                "Rent":    money_col("Rent"),
+                "Surplus": money_col("Surplus"),
+                "+2pp":    money_col("+2pp", help="s.r.o. surplus at the mortgage rate + 2 pp"),
                 "Below%":  st.column_config.NumberColumn(
                     format="%.0f%%", help="Asking €/m² below the regional median "
                                           "(negative = above it; blank = no benchmark)"),
@@ -1512,7 +1789,7 @@ with t1:
                     price = l.get("price_eur") or 0
                     size  = l.get("size_m2") or 0
                     src   = (l.get("source") or "").upper()
-                    rows += f'<div class="brow"><span class="l">{esc(title[:60])}</span><span class="v">€{price:,.0f} · {size:.0f}m² · {esc(src)}</span></div>'
+                    rows += f'<div class="brow"><span class="l">{esc(title[:60])}</span><span class="v">{amt(l, price)} · {size:.0f}m² · {esc(src)}</span></div>'
                 pend.markdown(rows, unsafe_allow_html=True)
 
 
@@ -1538,10 +1815,10 @@ with t_map:
                 "color": palette.get(cls, [96, 125, 139]) + ([110] if approx else [220]),
                 "radius": 60 if cls in ("GREEN", "YELLOW") else 35,
                 "title": (l.get("title") or l.get("district") or "—")[:60],
-                "price": f"€{(l.get('price_eur') or 0):,.0f}",
+                "price": amt(l, l.get("price_eur") or 0),
                 "cls": cls,
-                "surplus": fe(surplus, suffix="/mo"),
-                "maxy": f"€{l['max_price_yellow']:,.0f}" if l.get("max_price_yellow") else "—",
+                "surplus": sgn(l, surplus),
+                "maxy": amt(l, l["max_price_yellow"]) if l.get("max_price_yellow") else "—",
                 "where": "approximate (area centroid)" if approx else (l.get("geo_precision") or ""),
             })
         st.markdown(f'<div class="muted">{len(pts)} of {len(data)} filtered listings have '
@@ -1562,33 +1839,62 @@ with t_map:
 
 
 # ── What-if / tax toggle calculator ───────────────────────────────────────────
-with t_whatif:
+def _whatif_tab():
+    """The what-if calculator, in the picked listing's market (or, for a
+    custom property, the market selected at the top; Slovakia for all)."""
     from engine.financial import (
         analyse, default_ltv, max_offer_price, project_irr, get_rent_estimate,
         base_rent_rate,
     )
     from engine.rent_comps import load_live_rates
-    from config import (
-        MORTGAGE_RATE_PA, LOAN_TERM_YEARS, LTV_RATIO, LTV_RATIO_INVESTOR,
-        HOLD_YEARS, APPRECIATION_RATE, RENT_GROWTH_RATE, EXIT_COST_RATE,
-    )
+    from config import HOLD_YEARS
     st.markdown('<div class="muted">WHAT-IF — RE-RUN ANY DEAL WITH YOUR OWN FINANCING, '
                 'RENT AND HOLD ASSUMPTIONS · PERSONAL vs s.r.o.</div>', unsafe_allow_html=True)
 
-    live_rates = load_live_rates()
     opts = {"✏️ Custom property": None}
-    opts.update({f"{l.get('title') or l.get('district') or '?'} — €{(l.get('price_eur') or 0):,.0f}"
+    opts.update({f"{l.get('title') or l.get('district') or '?'} — {amt(l, l.get('price_eur') or 0)}"
                  f" [{(l.get('id') or '')[:6]}]": l for l in data})
     pick = opts[st.selectbox("Property", list(opts.keys()), key="wi_pick")]
+    wm = markets.of_row(pick) if pick else (view_market or "sk")
+    sk = wm == "sk"
+    prof = markets.get(wm)
+    mk = {} if sk else {"market": wm}
+    sfx = "" if sk else f"_{wm}"           # a market's own widget state
+    cur = {"_cur": prof.currency}
+    sym = prof.currency_symbol
+    if sk:
+        from config import (
+            MORTGAGE_RATE_PA as base_rate, LOAN_TERM_YEARS as base_term,
+            LTV_RATIO as base_ltv, LTV_RATIO_INVESTOR as inv_ltv,
+            APPRECIATION_RATE as base_app, RENT_GROWTH_RATE as base_rg,
+            EXIT_COST_RATE as base_exit, SRO_RATE_PREMIUM_PP as base_prem,
+            SRO_LTV_RATIO as base_sro_ltv, SRO_ANNUAL_RUNNING_COST as base_sro_cost,
+        )
+    else:
+        base_rate, base_term = prof.mortgage_rate_pa, prof.loan_term_years
+        base_ltv, inv_ltv = prof.ltv_ratio, prof.ltv_ratio_investor
+        base_app, base_rg, base_exit = (prof.appreciation_rate, prof.rent_growth_rate,
+                                        prof.exit_cost_rate)
+        base_prem, base_sro_ltv, base_sro_cost = (prof.sro_rate_premium_pp, prof.sro_ltv_ratio,
+                                                  prof.sro_annual_running_cost)
+        if None in (base_rate, base_term, base_ltv, inv_ltv, base_app, base_rg, base_exit,
+                    base_prem, base_sro_ltv, base_sro_cost):
+            st.info(f"{prof.name}: the lending, tax and cost figures are not in markets.py "
+                    f"yet, so there is nothing to calculate.")
+            return
+    live_rates = load_live_rates(**mk)
     # Widget keys carry the pick so choosing another listing reloads its values.
     pk = (pick or {}).get("id") or "custom"
+    # A Slovak price is in euros (up to €5M); a Czech one in crowns.
+    p_min, p_max, p_step, p_default = ((10_000, 5_000_000, 1_000, 120_000) if sk else
+                                       (100_000, 200_000_000, 10_000, 2_900_000))
 
     w1, w2, w3 = st.columns(3)
     with w1:
         st.markdown("**PROPERTY**")
-        wi_price = st.number_input("Price €", 10_000, 5_000_000,
-                                   min(max(int((pick or {}).get("price_eur") or 120_000), 10_000), 5_000_000),
-                                   1_000, key=f"wi_price_{pk}")
+        wi_price = st.number_input(f"Price {sym}", p_min, p_max,
+                                   min(max(int((pick or {}).get("price_eur") or p_default), p_min), p_max),
+                                   p_step, key=f"wi_price_{pk}{sfx}")
         wi_size = st.number_input("Size m²", 10.0, 500.0,
                                   min(max(float((pick or {}).get("size_m2") or 60.0), 10.0), 500.0),
                                   1.0, key=f"wi_size_{pk}")
@@ -1596,70 +1902,85 @@ with t_whatif:
         # with none stays blank: borrowing Bratislava II's median and rent
         # would show a class and a max offer the listing never had.
         wi_district = st.text_input(
-            "District", (pick.get("district") or "") if pick else "Bratislava II",
-            key=f"wi_dist_{pk}")
+            "District", (pick.get("district") or "") if pick else
+            ("Bratislava II" if sk else "Praha 2"), key=f"wi_dist_{pk}{sfx}")
         if pick and not (pick.get("district") or "").strip():
             st.caption("This listing has no district — enter one to benchmark it.")
         wi_rooms = st.number_input("Rooms (0 = unknown)", 0, 6,
                                    min(int((pick or {}).get("rooms") or 0), 6),
                                    key=f"wi_rooms_{pk}")
-    est_rent = get_rent_estimate(wi_district, wi_size, wi_rooms or None,
-                                 (pick or {}).get("has_parking"), (pick or {}).get("furnished"),
-                                 (pick or {}).get("has_balcony"), rates=live_rates)
-    rate_used, rent_key, rent_src = base_rent_rate(wi_district, live_rates)
+    try:
+        est_rent = get_rent_estimate(wi_district, wi_size, wi_rooms or None,
+                                     (pick or {}).get("has_parking"), (pick or {}).get("furnished"),
+                                     (pick or {}).get("has_balcony"), rates=live_rates, **mk)
+        rate_used, rent_key, rent_src = base_rent_rate(wi_district, live_rates, **mk)
+    except (LookupError, TypeError):
+        # No rent figure for this market and place: the user types one.
+        est_rent, rate_used, rent_key, rent_src = 0.0, 0.0, "default", "baseline"
+    regulator = (prof.lending_rules.get("regulator") or "NBS") if not sk else "NBS"
     with w2:
         st.markdown("**FINANCING**")
-        investor = st.toggle("3rd+ property (NBS 70% LTV cap)", value=default_ltv() < LTV_RATIO,
-                             key="wi_inv",
-                             help="From 1 Oct 2026 banks may lend at most 70% on a 3rd-and-"
-                                  "subsequent residential property.")
-        cap = LTV_RATIO_INVESTOR if investor else LTV_RATIO
-        wi_ltv = st.slider("LTV %", 0, 90, int(cap * 100), 5, key=f"wi_ltv_{investor}") / 100
+        investor = st.toggle(f"3rd+ property ({regulator} {inv_ltv:.0%} LTV cap)",
+                             value=default_ltv(**mk) < base_ltv, key=f"wi_inv{sfx}",
+                             help=("From 1 Oct 2026 banks may lend at most 70% on a 3rd-and-"
+                                   "subsequent residential property." if sk else
+                                   prof.lending_rules.get("investor_note")))
+        cap = inv_ltv if investor else base_ltv
+        wi_ltv = st.slider("LTV %", 0, 90, int(cap * 100), 5, key=f"wi_ltv_{investor}{sfx}") / 100
         if wi_ltv > cap + 1e-9:
-            st.warning(f"Above the {cap:.0%} NBS cap for this purchase — a bank won't lend this.")
-        wi_rate = st.slider("Mortgage rate %", 1.0, 9.0, MORTGAGE_RATE_PA * 100, 0.1, key="wi_rate") / 100
-        wi_term = st.slider("Term (years)", 5, 30, LOAN_TERM_YEARS, 1, key="wi_term")
-        from config import SRO_RATE_PREMIUM_PP, SRO_LTV_RATIO, SRO_ANNUAL_RUNNING_COST
+            st.warning(f"Above the {cap:.0%} {regulator} cap for this purchase — a bank won't lend this.")
+        wi_rate = st.slider("Mortgage rate %", 1.0, 9.0, base_rate * 100, 0.1,
+                            key=f"wi_rate{sfx}") / 100
+        wi_term = st.slider("Term (years)", 5, 30, base_term, 1, key=f"wi_term{sfx}")
         wi_sro_prem = st.slider("s.r.o. loan: rate premium (pp)", 0.0, 4.0,
-                                SRO_RATE_PREMIUM_PP * 100, 0.1, key="wi_sro_prem",
+                                base_prem * 100, 0.1, key=f"wi_sro_prem{sfx}",
                                 help="A company borrows on commercial terms, above the "
                                      "hypotéka rate. Use a bank's quote.") / 100
-        wi_sro_ltv = st.slider("s.r.o. loan: max LTV %", 0, 90, int(round(SRO_LTV_RATIO * 100)),
-                               5, key="wi_sro_ltv") / 100
-        wi_sro_cost = st.number_input("s.r.o. running cost €/yr", 0, 20_000,
-                                      int(SRO_ANNUAL_RUNNING_COST), 100, key="wi_sro_cost",
+        wi_sro_ltv = st.slider("s.r.o. loan: max LTV %", 0, 90, int(round(base_sro_ltv * 100)),
+                               5, key=f"wi_sro_ltv{sfx}") / 100
+        wi_sro_cost = st.number_input(f"s.r.o. running cost {sym}/yr", 0,
+                                      20_000 if sk else 500_000,
+                                      int(base_sro_cost), 100 if sk else 1_000,
+                                      key=f"wi_sro_cost{sfx}",
                                       help="Bookkeeping, annual accounts, registered office, "
                                            "bank fees — paid every year the company exists.")
     with w3:
         st.markdown("**RENT & HOLD**")
-        st.caption(f"Estimate €{est_rent:,.0f}/mo · {rate_used:.2f} €/m² for '{rent_key}' "
+        st.caption(f"Estimate {amt(cur, est_rent, '/mo')} · {rate_used:.2f} {sym}/m² for '{rent_key}' "
                    f"({'live comps' if rent_src == 'live' else 'baseline table'})")
-        _fb = _rent_fallback({"rent_key": rent_key})
+        _fb = _rent_fallback({"rent_key": rent_key, "market": wm})
         if _fb:
             st.caption("⚠ " + ("National default rent — this town is in no rent table."
                                if _fb == "default" else
                                "Kraj-level rent — no figure for this town itself."))
-        wi_rent = st.number_input("Rent €/mo (override)", 0, 20_000, int(round(est_rent)), 10,
-                                  key=f"wi_rent_{pk}_{wi_district}_{wi_size}_{wi_rooms}")
+        wi_rent = st.number_input(f"Rent {sym}/mo (override)", 0, 20_000 if sk else 500_000,
+                                  int(round(est_rent)), 10 if sk else 100,
+                                  key=f"wi_rent_{pk}_{wi_district}_{wi_size}_{wi_rooms}{sfx}")
         wi_hold = st.slider("Hold (years)", 1, 30, HOLD_YEARS, key="wi_hold")
-        wi_app = st.slider("Price growth % p.a.", -3.0, 10.0, APPRECIATION_RATE * 100, 0.5, key="wi_app") / 100
-        wi_rg = st.slider("Rent growth % p.a.", -3.0, 10.0, RENT_GROWTH_RATE * 100, 0.5, key="wi_rg") / 100
-        wi_exit = st.slider("Exit costs %", 0.0, 8.0, EXIT_COST_RATE * 100, 0.5, key="wi_exit") / 100
+        wi_app = st.slider("Price growth % p.a.", -3.0, 10.0, base_app * 100, 0.5,
+                           key=f"wi_app{sfx}") / 100
+        wi_rg = st.slider("Rent growth % p.a.", -3.0, 10.0, base_rg * 100, 0.5,
+                          key=f"wi_rg{sfx}") / 100
+        wi_exit = st.slider("Exit costs %", 0.0, 8.0, base_exit * 100, 0.5,
+                            key=f"wi_exit{sfx}") / 100
+    if not wi_rent and not est_rent:
+        st.info("No rent estimate for this place — type the rent in to run the numbers.")
+        return
 
     sro_kw = dict(sro_ltv=wi_sro_ltv, sro_rate_premium=wi_sro_prem,
                   sro_running_cost=float(wi_sro_cost))
     fin = dict(rent_override=wi_rent or None, ltv=wi_ltv, rate=wi_rate, term_years=wi_term,
-               rooms=wi_rooms or None, **sro_kw)
+               rooms=wi_rooms or None, **sro_kw, **mk)
     r = analyse(wi_price, wi_size, wi_district, **fin)
     irr_kw = dict(rent=r.estimated_rent, ltv=wi_ltv, rate=wi_rate, term_years=wi_term,
                   hold_years=wi_hold, appreciation=wi_app, rent_growth=wi_rg,
-                  exit_cost_rate=wi_exit, **sro_kw)
+                  exit_cost_rate=wi_exit, **sro_kw, **mk)
     irr_p = project_irr(wi_price, wi_size, wi_district, structure="PERSONAL", **irr_kw)
     irr_s = project_irr(wi_price, wi_size, wi_district, structure="SRO", **irr_kw)
     # The class is the discount to the regional median, so the max offer
     # depends on size and district only — financing moves cashflow, not class.
-    max_y = max_offer_price(wi_size, wi_district, "YELLOW", rooms=wi_rooms or None)
-    max_g = max_offer_price(wi_size, wi_district, "GREEN", rooms=wi_rooms or None)
+    max_y = max_offer_price(wi_size, wi_district, "YELLOW", rooms=wi_rooms or None, **mk)
+    max_g = max_offer_price(wi_size, wi_district, "GREEN", rooms=wi_rooms or None, **mk)
 
     st.markdown('<hr class="div">', unsafe_allow_html=True)
     k1, k2, k3, k4, k5, k6 = st.columns(6)
@@ -1669,27 +1990,29 @@ with t_whatif:
     # The class is price vs market; the delta is what it earns a month under
     # the better structure (red and pointing down when it costs money).
     k1.metric("Class", r.classification,
-              delta=f"{fe(max(r.surplus_personal, r.surplus_sro))} cash flow",
+              delta=f"{sgn(cur, max(r.surplus_personal, r.surplus_sro), '')} cash flow",
               help=(f"{abs(r.market_discount):.0%} "
                     f"{'below' if r.market_discount >= 0 else 'above'} the regional median "
-                    f"€/m² ({benchmark_note(wi_district, wi_rooms or None)}) · s.r.o. "
+                    f"{sym}/m² ({benchmark_note(wi_district, wi_rooms or None, **mk)}) · s.r.o. "
                     f"self-funding {r.ratio_sro:.0%}")
               if r.market_discount is not None else "No regional median for this district.")
     k2.metric("Best structure", "s.r.o." if r.optimal_structure == "SRO" else "Personal",
-              delta=f"{fe(r.annual_sro_saving, suffix='/yr', signed=True)} s.r.o. vs personal")
-    k3.metric("Cash in", f"€{r.total_cash_invested:,.0f}",
-              help=f"Personal; the s.r.o. puts in €{r.total_cash_invested_sro:,.0f} "
+              delta=(f"{fe(r.annual_sro_saving, suffix='/yr', signed=True)}" if sk else
+                     money(cur, r.annual_sro_saving, "/yr", signed=True))
+              + " s.r.o. vs personal")
+    k3.metric("Cash in", amt(cur, r.total_cash_invested),
+              help=f"Personal; the s.r.o. puts in {amt(cur, r.total_cash_invested_sro)} "
                    f"({r.sro_ltv:.0%} LTV).")
     k4.metric("Cap rate", f"{r.cap_rate:.2%}")
-    k5.metric("Max offer 🟡", f"€{max_y:,.0f}" if max_y else "—",
+    k5.metric("Max offer 🟡", amt(cur, max_y) if max_y else "—",
               delta=f"{max_y / wi_price - 1:+.1%} vs price" if max_y else None)
-    k6.metric("Max offer 🟢", f"€{max_g:,.0f}" if max_g else "—")
+    k6.metric("Max offer 🟢", amt(cur, max_g) if max_g else "—")
 
     rows = [
         ("Rent", r.estimated_rent, r.estimated_rent),
         ("Mortgage (interest + principal)", r.mortgage_monthly, r.mortgage_monthly_sro),
-        ("HOA + property tax", r.hoa_monthly + r.property_tax_monthly,
-         r.hoa_monthly + r.property_tax_monthly),
+        ("HOA + property tax" if sk else "SVJ + property tax",
+         r.hoa_monthly + r.property_tax_monthly, r.hoa_monthly + r.property_tax_monthly),
         ("Vacancy + reserve + mgmt", r.vacancy_cost + r.maintenance_monthly + r.management_monthly,
          r.vacancy_cost + r.maintenance_monthly + r.management_monthly),
         ("s.r.o. running cost", 0.0, r.sro_running_cost_monthly),
@@ -1697,23 +2020,24 @@ with t_whatif:
         ("Total costs", r.total_costs_personal, r.total_costs_sro),
         ("Net surplus", r.surplus_personal, r.surplus_sro),
     ]
+    head = f"{sym} / month"
     cmp_df = pd.DataFrame(
-        [{"€ / month": a, "Personal (FO)": p, "s.r.o.": s_} for a, p, s_ in rows]
-        + [{"€ / month": "Self-funding ratio %", "Personal (FO)": r.ratio_personal * 100,
+        [{head: a, "Personal (FO)": p, "s.r.o.": s_} for a, p, s_ in rows]
+        + [{head: "Self-funding ratio %", "Personal (FO)": r.ratio_personal * 100,
             "s.r.o.": r.ratio_sro * 100},
-           {"€ / month": "Loan LTV %", "Personal (FO)": r.ltv * 100,
+           {head: "Loan LTV %", "Personal (FO)": r.ltv * 100,
             "s.r.o.": r.sro_ltv * 100},
-           {"€ / month": "Loan rate %", "Personal (FO)": r.mortgage_rate * 100,
+           {head: "Loan rate %", "Personal (FO)": r.mortgage_rate * 100,
             "s.r.o.": r.sro_mortgage_rate * 100},
-           {"€ / month": "Cash in €", "Personal (FO)": r.total_cash_invested,
+           {head: f"Cash in {sym}", "Personal (FO)": r.total_cash_invested,
             "s.r.o.": r.total_cash_invested_sro},
-           {"€ / month": f"IRR over {wi_hold}y %", "Personal (FO)": (irr_p.irr or 0) * 100,
+           {head: f"IRR over {wi_hold}y %", "Personal (FO)": (irr_p.irr or 0) * 100,
             "s.r.o.": (irr_s.irr or 0) * 100},
-           {"€ / month": "Equity multiple ×", "Personal (FO)": irr_p.equity_multiple or 0,
+           {head: "Equity multiple ×", "Personal (FO)": irr_p.equity_multiple or 0,
             "s.r.o.": irr_s.equity_multiple or 0},
-           {"€ / month": "Tax caused by the sale €", "Personal (FO)": irr_p.exit_tax,
+           {head: f"Tax caused by the sale {sym}", "Personal (FO)": irr_p.exit_tax,
             "s.r.o.": irr_s.exit_tax},
-           {"€ / month": "Total profit €", "Personal (FO)": irr_p.total_profit,
+           {head: f"Total profit {sym}", "Personal (FO)": irr_p.total_profit,
             "s.r.o.": irr_s.total_profit}])
     c_left, c_right = st.columns([3, 2])
     with c_left:
@@ -1721,32 +2045,43 @@ with t_whatif:
         st.dataframe(cmp_df, hide_index=True, width="stretch",
                      column_config={"Personal (FO)": st.column_config.NumberColumn(format="%.2f"),
                                     "s.r.o.": st.column_config.NumberColumn(format="%.2f")})
-        st.caption(f"Tax rules {r.tax_year}. Personal: §6(3) passive rental, €500 exempt, no "
-                   "health levy, interest not deductible; sale exempt after 5 years. s.r.o.: "
-                   "company loan on its own terms, interest and running cost deductible, "
-                   "corporate + 10% dividend tax; the sale is taxed whenever it happens. "
-                   "s.r.o. is recommended only when it nets more than personal and repays "
-                   "its setup cost within the hold. Confirm with an účtovník.")
+        if sk:
+            st.caption(f"Tax rules {r.tax_year}. Personal: §6(3) passive rental, €500 exempt, no "
+                       "health levy, interest not deductible; sale exempt after 5 years. s.r.o.: "
+                       "company loan on its own terms, interest and running cost deductible, "
+                       "corporate + 10% dividend tax; the sale is taxed whenever it happens. "
+                       "s.r.o. is recommended only when it nets more than personal and repays "
+                       "its setup cost within the hold. Confirm with an účtovník.")
+        else:
+            st.caption(f"{prof.name} tax rules {r.tax_year}: "
+                       + (markets.tax_rules(r.tax_year, wm).get("summary") or "")
+                       + " Confirm with a daňový poradce.")
     with c_right:
         st.markdown('<div class="muted">RATE SHOCK (s.r.o.)</div>', unsafe_allow_html=True)
         shock_rows = []
         for bump in (0.0, 0.01, 0.02, 0.03):
             x = analyse(wi_price, wi_size, wi_district, **{**fin, "rate": wi_rate + bump})
             shock_rows.append({"Rate": f"{(wi_rate + bump) * 100:.1f}%",
-                               "Surplus €/mo": x.surplus_sro,
+                               f"Surplus {sym}/mo": x.surplus_sro,
                                "Self-funding %": x.ratio_sro * 100})
         st.dataframe(pd.DataFrame(shock_rows), hide_index=True, width="stretch",
-                     column_config={"Surplus €/mo": st.column_config.NumberColumn(format="euro", step=1),
+                     column_config={f"Surplus {sym}/mo": (
+                                        st.column_config.NumberColumn(format="euro", step=1) if sk
+                                        else st.column_config.NumberColumn(format="localized", step=1)),
                                     "Self-funding %": st.column_config.NumberColumn(format="%.1f%%")})
         st.markdown('<div class="muted">EQUITY CASH FLOWS (s.r.o.)</div>', unsafe_allow_html=True)
         st.bar_chart(pd.DataFrame({"Year": list(range(len(irr_s.cash_flows))),
-                                   "€": irr_s.cash_flows}).set_index("Year"), height=180)
+                                   sym: irr_s.cash_flows}).set_index("Year"), height=180)
+
+
+with t_whatif:
+    _whatif_tab()
 
 
 # ── Deal pipeline ─────────────────────────────────────────────────────────────
 with t_pipe:
     from database import get_tracked_listings, get_deal_stage_history, set_deal_stage
-    tracked = get_tracked_listings()
+    tracked = [_tag_market(t) for t in get_tracked_listings() if in_view(t)]
     st.markdown('<div class="muted">DEAL PIPELINE — EVERY LISTING YOU HAVE MOVED PAST "NEW". '
                 'Move a deal from its card in ACTIVE SNAG LIST, or below.</div>',
                 unsafe_allow_html=True)
@@ -1776,7 +2111,7 @@ with t_pipe:
                     gone = "" if t.get("is_active") else " · OFF MARKET"
                     if t.get("lv_status") == "REJECTED":
                         gone += " · ⛔ LV REJECTED"
-                    maxy = (f" · max🟡 €{t['max_price_yellow']:,.0f}"
+                    maxy = (f" · max🟡 {amt(t, t['max_price_yellow'])}"
                             if t.get("max_price_yellow") else "")
                     note = f'<div class="muted">{esc(t["note"])}</div>' if t.get("note") else ""
                     name = esc((t.get("title") or t.get("district") or "—")[:40])
@@ -1784,15 +2119,15 @@ with t_pipe:
                         f'<div class="sc" style="margin-bottom:6px;padding:8px">'
                         f'<div class="mono" style="font-size:.7rem;color:#e4eaf5">'
                         f'<a href="{esc(t["url"])}" target="_blank">{name}</a></div>'
-                        f'<div class="muted">€{(t.get("price_eur") or 0):,.0f}{maxy}'
+                        f'<div class="muted">{market_badge(t)} {amt(t, t.get("price_eur") or 0)}{maxy}'
                         f' · {str(t.get("updated_at"))[:10]}{gone}</div>{note}</div>',
                         unsafe_allow_html=True)
 
     st.markdown('<hr class="div">', unsafe_allow_html=True)
-    all_opts = {f"{l.get('title') or l.get('district') or '?'} — €{(l.get('price_eur') or 0):,.0f}"
+    all_opts = {f"{l.get('title') or l.get('district') or '?'} — {amt(l, l.get('price_eur') or 0)}"
                 f" [{(l.get('id') or '')[:6]}]": l.get("id") for l in data}
     for t in tracked:
-        all_opts.setdefault(f"{t.get('title') or '?'} — €{(t.get('price_eur') or 0):,.0f}"
+        all_opts.setdefault(f"{t.get('title') or '?'} — {amt(t, t.get('price_eur') or 0)}"
                             f" [{t['id'][:6]}]", t["id"])
     if all_opts:
         p1, p2, p3 = st.columns([3, 1, 2])
@@ -1822,7 +2157,7 @@ with t_pipe:
 # ── Rejected ──────────────────────────────────────────────────────────────────
 with t_rej:
     from database import get_rejected
-    rejected = get_rejected()
+    rejected = [_tag_market(r_) for r_ in get_rejected() if in_view(r_)]
     st.markdown('<div class="muted">LV REJECTIONS — LISTINGS THE TITLE-DEED FILTER STOPPED, '
                 'AND WHY. These never reach the deal lists.</div>', unsafe_allow_html=True)
     # The outcome of the last RE-VERIFY below, carried across its rerun.
@@ -1841,7 +2176,8 @@ with t_rej:
             "Flagged":  str(r_.get("flagged_at") or "")[:10],
             "Listing":  (r_.get("title") or r_.get("address_raw") or "—")[:50],
             "District": r_.get("district") or "—",
-            "Price":    r_.get("price_eur") or 0,
+            "Mkt":      "🇨🇿 CZ" if r_.get("_market") == "cz" else "🇸🇰 SK",
+            "Price":    in_view_cur(r_, r_.get("price_eur") or 0),
             "Now":      _lv_state(r_)[0],
             "Reason":   r_.get("reason") or "—",
             "Detail":   (r_.get("detail") or "")[:160],
@@ -1862,7 +2198,7 @@ with t_rej:
                        f"{'' if show_overturned else ' (hidden)'}" if n_overturned else "")
                     + '</div>', unsafe_allow_html=True)
         st.dataframe(view, hide_index=True, width="stretch",
-                     column_config={"Price": st.column_config.NumberColumn(format="euro", step=1),
+                     column_config={"Price": money_col("Price"),
                                     "URL": st.column_config.LinkColumn(display_text="open ↗")})
         rv_opts = {f"{r_.get('title') or r_.get('address_raw') or '?'} [{r_['id'][:6]}]": r_["id"]
                    for r_ in rejected
@@ -1917,7 +2253,7 @@ with t_lv:
     _lv_msg = st.session_state.pop("lv_todo_msg", None)
     if _lv_msg:
         getattr(st, _lv_msg[0])(_lv_msg[1])
-    todo = get_lv_todo()
+    todo = [_tag_market(t) for t in get_lv_todo() if in_view(t)]
     if not todo:
         st.info("Nothing waiting: no GREEN or YELLOW listing is short of a verified title deed.")
     else:
@@ -1931,7 +2267,8 @@ with t_lv:
             "Class":    t["cf_class"],
             "Listing":  (t.get("title") or t.get("address_raw") or "—")[:50],
             "District": t.get("district") or "—",
-            "Price":    t.get("price_eur") or 0,
+            "Mkt":      "🇨🇿 CZ" if t.get("_market") == "cz" else "🇸🇰 SK",
+            "Price":    in_view_cur(t, t.get("price_eur") or 0),
             "LV now":   t.get("lv_status") or "PENDING",
             "Last check": (t.get("lv_detail") or "")[:140],
             "Plot found": _plot_found(t),
@@ -1945,11 +2282,13 @@ with t_lv:
             disabled=[c for c in todo_df.columns if c not in editable],
             column_config={
                 "id": None,
-                "Price": st.column_config.NumberColumn(format="euro", step=1),
+                "Price": money_col("Price"),
                 "Flat LV no.": st.column_config.TextColumn(
                     help="The flat's own LV — not the plot's — from the seller or agent."),
                 "Katastrálne územie": st.column_config.TextColumn(
-                    help="Name or numeric code of the flat's cadastral unit."),
+                    "Katastrální území" if view_market == "cz" else None,
+                    help="Name or numeric code of the flat's cadastral unit "
+                         "(katastrálne územie / katastrální území)."),
                 "URL": st.column_config.LinkColumn(display_text="open ↗"),
             })
         stored = {t["id"]: ((t.get("lv_number") or "").strip(),
@@ -2028,7 +2367,7 @@ with t2:
     if not data:
         st.info(hidden_note() if n_hidden else "No listings loaded.")
     else:
-        opts = {f"{l.get('title') or '?'} — €{l.get('price_eur') or 0:,.0f} [{(l.get('id') or '')[:6]}]": l
+        opts = {f"{l.get('title') or '?'} — {amt(l, l.get('price_eur') or 0)} [{(l.get('id') or '')[:6]}]": l
                 for l in data}
         sel  = opts[st.selectbox("Select listing", list(opts.keys()), label_visibility="collapsed")]
 
@@ -2107,7 +2446,7 @@ with t3:
     if not data:
         st.info(hidden_note() if n_hidden else "No listings loaded.")
     else:
-        opts = {f"{l.get('title') or '?'} — €{l.get('price_eur') or 0:,.0f} [{(l.get('id') or '')[:6]}]": l
+        opts = {f"{l.get('title') or '?'} — {amt(l, l.get('price_eur') or 0)} [{(l.get('id') or '')[:6]}]": l
                 for l in data}
         sel3 = opts[st.selectbox("Select listing", list(opts.keys()), key="close_sel")]
 

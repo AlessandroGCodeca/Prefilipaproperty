@@ -1,0 +1,107 @@
+"""The dashboard with both markets: the selector at the top filters every
+tab, a Czech listing keeps its crowns on its own card, and the combined view
+compares in EUR. Synthetic listings only."""
+
+import os
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+pytest.importorskip("streamlit")
+from streamlit.testing.v1 import AppTest  # noqa: E402
+
+import config  # noqa: E402
+from tests.conftest import make_listing  # noqa: E402
+
+APP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app.py")
+NB = " "
+
+
+@pytest.fixture(autouse=True)
+def _isolated(monkeypatch, tmp_path):
+    import database
+    from modules import jobs, pipeline_state
+    monkeypatch.setattr(database, "SQLITE_PATH", str(tmp_path / "sovereign.db"))
+    monkeypatch.setattr(pipeline_state, "STATUS_FILE", str(tmp_path / "status.json"))
+    database.init_db()
+    yield database
+    jobs.wait(60)
+    monkeypatch.setattr(jobs, "_job", None)
+
+
+@pytest.fixture
+def two_markets(_isolated):
+    db = _isolated
+    now = datetime.now(timezone.utc)
+    seen = dict(last_seen_at=now.isoformat(), scraped_at=(now - timedelta(days=3)).isoformat())
+    db.upsert_listing(make_listing("sk1", district="Žilina", price_eur=100_000.0,
+                                   size_m2=55.0, **seen))
+    db.upsert_listing(make_listing("cz1", district="Praha 2", price_eur=4_500_000.0,
+                                   size_m2=55.0, title="Byt 2+kk, Praha 2",
+                                   source="sreality", url="https://example.cz/cz1",
+                                   market="cz", **seen))
+    return db
+
+
+def run(open_cards=()):
+    """Run the page with the PENDING list open: unscored listings show there."""
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["pending_list"] = True
+    for lid in open_cards:
+        at.session_state[f"card_{lid}"] = True
+    return at.run()
+
+
+def _md(at):
+    return "\n".join(m.value for m in at.markdown)
+
+
+def _pick(at, label):
+    next(r for r in at.radio if r.key == "market_view").set_value(label).run()
+    assert not at.exception, [e.value for e in at.exception]
+    return at
+
+
+def test_all_markets_is_the_default_and_shows_both(two_markets):
+    at = run()
+    assert not at.exception, [e.value for e in at.exception]
+    radio = next(r for r in at.radio if r.key == "market_view")
+    assert radio.value == "All markets"
+    md = _md(at)
+    assert "SK 1" in md and "CZ 1" in md
+    # The Czech price is in crowns, Czech style, wherever it is listed.
+    assert f"4{NB}500{NB}000{NB}Kč" in md
+
+
+def test_the_selector_filters_every_list(two_markets):
+    at = _pick(run(), "🇨🇿 Czechia")
+    md = _md(at)
+    assert "Byt 2+kk, Praha 2" in md and "2-izbový byt sk1" not in md
+    at = _pick(at, "🇸🇰 Slovakia")
+    md = _md(at)
+    assert "2-izbový byt sk1" in md and "Byt 2+kk, Praha 2" not in md
+
+
+def test_max_price_is_in_euros_for_a_czech_listing_too(two_markets):
+    # 4.5M Kč ≈ €185k at the configured rate: under €200k, over €150k.
+    eur = 4_500_000 / config.CZK_PER_EUR
+    assert 150_000 < eur < 200_000
+    at = _pick(run(), "🇨🇿 Czechia")
+    slider = next(s for s in at.slider if s.label == "Max Price €")
+    slider.set_value(200_000).run()
+    assert "Byt 2+kk, Praha 2" in _md(at)
+    next(s for s in at.slider if s.label == "Max Price €").set_value(150_000).run()
+    assert not at.exception
+    assert "Byt 2+kk, Praha 2" not in _md(at)
+
+
+def test_a_slovak_only_database_looks_as_before(_isolated):
+    db = _isolated
+    now = datetime.now(timezone.utc).isoformat()
+    db.upsert_listing(make_listing("sk1", district="Žilina", last_seen_at=now, scraped_at=now))
+    at = run()
+    assert not at.exception, [e.value for e in at.exception]
+    md = _md(at)
+    assert "CZ 0" not in md and "Kč" not in md
+    # No Czech status line until Czechia has portals or a run of its own.
+    assert not any(c.value.startswith(("ℹ️ CZ", "✅ CZ")) for c in at.caption)

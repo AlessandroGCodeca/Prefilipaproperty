@@ -152,15 +152,32 @@ _DESCRIPTION_SYSTEM = (
 )
 
 
-def parse_description(description: str) -> dict | None:
-    """Extract structured features from a free-text (Slovak) description.
+# A Czech listing (market "cz") is described in Czech, with Czech terms for
+# the same facts.
+_DESCRIPTION_SYSTEM_CZ = (
+    "You extract structured facts from Czech real-estate listing descriptions. "
+    "Only report what the text states or clearly implies; never invent details. "
+    "Use 'unknown' / -1 / 0 when a field is not mentioned. "
+    "parking is true for any garage (garáž) or dedicated parking space "
+    "(parkovací stání, parkovací místo). rooms is the number before '+' in a "
+    "Czech layout (2+kk and 2+1 are both 2). "
+    "condition maps Czech terms: novostavba=new, po rekonstrukci=renovated, "
+    "původní stav=original, velmi dobrý/dobrý stav/částečná rekonstrukce=good, "
+    "před rekonstrukcí/špatný stav=poor."
+)
+
+
+def parse_description(description: str, market: str = "sk") -> dict | None:
+    """Extract structured features from a free-text (Slovak, or for market
+    "cz" Czech) description.
 
     Returns a dict matching _DESCRIPTION_SCHEMA, or None if disabled/failed.
     """
     description = (description or "").strip()
     if not description:
         return None
-    return _ask_json(_DESCRIPTION_SYSTEM, f"DESCRIPTION:\n{description[:4000]}",
+    system = _DESCRIPTION_SYSTEM if market == "sk" else _DESCRIPTION_SYSTEM_CZ
+    return _ask_json(system, f"DESCRIPTION:\n{description[:4000]}",
                      _DESCRIPTION_SCHEMA)
 
 
@@ -188,14 +205,37 @@ _ADDRESS_SYSTEM = (
 )
 
 
-def normalize_address(address_raw: str) -> dict | None:
-    """Resolve a raw address string into {city, district, kraj}.
+def _address_schema_cz() -> dict:
+    from engine.regional_prices_cz import KRAJ_NAMES
+    return {**_ADDRESS_SCHEMA, "properties": {
+        **_ADDRESS_SCHEMA["properties"],
+        "kraj": {"type": "string", "enum": [*KRAJ_NAMES, ""]}}}
+
+
+def _address_system_cz() -> str:
+    from engine.regional_prices_cz import KRAJ_NAMES
+    return (
+        "You normalise messy Czech property addresses into structured location data. "
+        "Given a raw address string, return the municipality (obec), the city part or "
+        "district (e.g. 'Praha 2', 'Brno-střed', 'Ostrava-Poruba', or '' if none), and "
+        "the Czech kraj (region) as a code: "
+        + ", ".join(f"{code}={name}" for code, name in KRAJ_NAMES.items())
+        + ". Use '' for any field you cannot determine. Never guess a kraj from a "
+          "postcode you are unsure about.")
+
+
+def normalize_address(address_raw: str, market: str = "sk") -> dict | None:
+    """Resolve a raw address string into {city, district, kraj} — a Slovak
+    one, or for market "cz" a Czech one (Czech kraj codes).
 
     Returns a dict matching _ADDRESS_SCHEMA, or None if disabled/failed.
     """
     address_raw = (address_raw or "").strip()
     if not address_raw:
         return None
+    if market != "sk":
+        return _ask_json(_address_system_cz(), f"RAW ADDRESS:\n{address_raw[:500]}",
+                         _address_schema_cz(), max_tokens=2048)
     return _ask_json(_ADDRESS_SYSTEM, f"RAW ADDRESS:\n{address_raw[:500]}",
                      _ADDRESS_SCHEMA, max_tokens=2048)
 

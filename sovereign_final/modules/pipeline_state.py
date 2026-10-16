@@ -15,6 +15,10 @@ failed or not, so the dashboard can show when the pipeline last ran and
 whether it worked. A full run started from the dashboard (▶ RUN EVERYTHING)
 writes it the same way. A pipeline whose every scraper failed used to be recorded
 as done, and nothing on the dashboard said so.
+
+Each market (markets.py) runs its own pipeline and has its own status file:
+STATUS_FILE is Slovakia's, as it always was; another market's sits beside it
+(pipeline_status_cz.json). The one lock is shared by both.
 """
 
 import json
@@ -105,22 +109,33 @@ class PipelineLock:
 
 
 # ── Scheduled-run status ──────────────────────────────────────────────────────
-def read_status() -> dict | None:
+def status_file(market: str = "sk") -> str:
+    """The market's status file: STATUS_FILE for Slovakia, a sibling named
+    for the market otherwise. Read at call time, so moving STATUS_FILE
+    moves every market's."""
+    if (market or "sk") == "sk":
+        return STATUS_FILE
+    base, ext = os.path.splitext(STATUS_FILE)
+    return f"{base}_{market}{ext or '.json'}"
+
+
+def read_status(market: str = "sk") -> dict | None:
     try:
-        with open(STATUS_FILE, encoding="utf-8") as f:
+        with open(status_file(market), encoding="utf-8") as f:
             status = json.load(f)
     except (OSError, ValueError):
         return None
     return status if isinstance(status, dict) else None
 
 
-def write_status(status: dict) -> None:
+def write_status(status: dict, market: str = "sk") -> None:
     """Write atomically: the dashboard reads this file while it changes."""
-    os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
-    tmp = f"{STATUS_FILE}.{os.getpid()}.tmp"
+    path = status_file(market)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(status, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, STATUS_FILE)
+    os.replace(tmp, path)
 
 
 def _parse(iso: str | None) -> datetime | None:

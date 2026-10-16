@@ -12,8 +12,24 @@ from __future__ import annotations
 
 import unicodedata
 
-# Kraj codes (CZ-NUTS 3 abbreviations) and names.
-KRAJ_NAMES: dict[str, str] = {}
+# The fourteen kraje (zákon 129/2000 Sb. o krajích), under short codes of
+# this app's own.
+KRAJ_NAMES: dict[str, str] = {
+    "PHA": "Hlavní město Praha",
+    "STC": "Středočeský kraj",
+    "JHC": "Jihočeský kraj",
+    "PLK": "Plzeňský kraj",
+    "KVK": "Karlovarský kraj",
+    "ULK": "Ústecký kraj",
+    "LBK": "Liberecký kraj",
+    "HKK": "Královéhradecký kraj",
+    "PAK": "Pardubický kraj",
+    "VYS": "Kraj Vysočina",
+    "JHM": "Jihomoravský kraj",
+    "OLK": "Olomoucký kraj",
+    "ZLK": "Zlínský kraj",
+    "MSK": "Moravskoslezský kraj",
+}
 # Kč/m² medians, most specific first: city district, okres / city, kraj.
 DISTRICT_MEDIAN: dict[str, float] = {}
 OKRES_MEDIAN: dict[str, float] = {}

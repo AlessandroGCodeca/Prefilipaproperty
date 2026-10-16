@@ -21,6 +21,10 @@ shared by the whole building — so a clean plot LV says nothing about the flat,
 and a lien on it may be a neighbour's. A flat is verified through its own LV
 number (set on the dashboard card from the seller's papers or the agent).
 
+Markets: a Czech listing (listings.market = "cz") is checked against the
+Czech cadastre (ČÚZK) with the Czech vocabulary — modules/lv_cz — under the
+same three verdicts. Everything here is the Slovak check, unchanged.
+
 Decision layers on an LV that IS the flat's (most reliable first):
   1. Claude analyze_lv() — schema-validated risk read when ANTHROPIC_API_KEY is
      set. It can reject what the screen missed and clear a lien the screen
@@ -183,6 +187,9 @@ def check_plot(row: dict) -> dict:
 
 def check_listing(row: dict) -> dict:
     """LV verdict for one listing row (a get_pending_lv() row)."""
+    if (row.get("market") or "sk") != "sk":
+        from modules import lv_cz
+        return lv_cz.check_listing(row)
     area = row.get("cadastral_unit_code") or row.get("cadastral_area")
     if row.get("lv_number"):
         if not area:
@@ -284,9 +291,11 @@ def _check_and_store(row: dict, module: str = "debt_bot") -> dict:
     return result
 
 
-def run_debt_filter(progress_callback=None) -> tuple[int, int, int]:
-    """Check every pending listing. Returns (passed, rejected, unverified) —
-    `passed` counts only flats whose own LV was read and found clean."""
+def run_debt_filter(progress_callback=None, market: str | None = None) -> tuple[int, int, int]:
+    """Check every pending listing — `market`'s only, or every market's
+    (None), each against its own cadastre. Returns (passed, rejected,
+    unverified) — `passed` counts only flats whose own LV was read and found
+    clean."""
     # Heal rows the old demo mode fabricated: "[DEMO]" rejections hid real
     # listings behind invented liens. Reset them to PENDING so they get an
     # honest re-check below. Idempotent — a clean DB is a no-op.
@@ -294,7 +303,7 @@ def run_debt_filter(progress_callback=None) -> tuple[int, int, int]:
     if healed:
         log.info(f"♻️  Reset {healed} fabricated [DEMO] rejections back to PENDING.")
 
-    pending = get_pending_lv(recheck_days=LV_RECHECK_DAYS)
+    pending = get_pending_lv(recheck_days=LV_RECHECK_DAYS, market=market)
     if not pending:
         log.info("✅ No pending LV checks.")
         return 0, 0, 0
