@@ -34,8 +34,10 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import SCRAPE_DELAY_SEC
 from database import upsert_rental, init_db
+from scraper.textparse import bazos_title_link
 from scraper._http import get, make_session
 from scraper.cz_common import (
+    warmup_url,
     MARKET, CURRENCY, PortalBlocked, require_robots, robots_allows,
     area_cz, rooms_cz, place_from_text, fold,
 )
@@ -56,8 +58,14 @@ _NOT_A_RENTAL = ("prodej", "prodam", "drazb", "nebytov", "kancelar", "garaz",
 # advance for services or energy (zálohy, služby, energie), fees, commission.
 _NOT_RENT = r"kauc|zaloh|poplat|proviz|vratn|jistin|sluzb|energi|depozit"
 # ... named just before it — "Kauce: 30 000 Kč", "služby 4 500 Kč", "vratná
-# kauce ve výši 30 000 Kč" (a word or two may stand between) ...
-_NOT_RENT_BEFORE_RE = re.compile(rf"(?:{_NOT_RENT})\w*\W{{0,3}}(?:\w{{1,6}}\W{{1,3}}){{0,2}}$")
+# kauce ve výši 30 000 Kč" (a word or two may stand between), or a total
+# ("Celkem k úhradě 60 000 Kč") ...
+_NOT_RENT_BEFORE_RE = re.compile(
+    rf"(?:{_NOT_RENT}|celkem|celkov|k\s+uhrade|vstupni)\w*\W{{0,3}}(?:\w{{1,6}}\W{{1,3}}){{0,2}}$")
+# ... unless the label only says what the rent covers: "Nájem bez energií
+# 14 000 Kč", "nájemné včetně služeb".
+_RENT_COVERS_RE = re.compile(
+    rf"(?:bez|vcetne|vc\.?)\s+(?:{_NOT_RENT})\w*\W{{0,3}}(?:\w{{1,6}}\W{{1,3}}){{0,2}}$")
 # ... or right after it — "4 500 Kč měsíčně energie", "3 000 Kč na služby"
 # (not "15 000 Kč/měs. + služby", where the label is the next amount's).
 _NOT_RENT_AFTER_RE = re.compile(
@@ -78,8 +86,13 @@ def rent_from_text(text: str) -> float:
         before = re.split(r"[,;\n+]", fold(text[max(0, m.start() - 30):m.start()]))[-1]
         if re.match(r"\s*(?:/|za)\s*m(?:2|²)", after):
             continue
-        if _NOT_RENT_BEFORE_RE.search(before) or \
-                _NOT_RENT_AFTER_RE.match(fold(text[m.end():m.end() + 40])):
+        # The words after it, up to the end of its clause: a full stop before a
+        # capital ends one ("15 000 Kč/měs. Kauce 30 000 Kč" — the kauce is
+        # the next amount's), "měs. energie" does not.
+        clause = re.split(r"\.(?=\s+[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ])|[,;\n+]",
+                          text[m.end():m.end() + 40])[0]
+        if (_NOT_RENT_BEFORE_RE.search(before) and not _RENT_COVERS_RE.search(before)) \
+                or _NOT_RENT_AFTER_RE.match(fold(clause)):
             continue
         try:
             v = float(re.sub(r"[\s\xa0  .]", "", m.group(1)))
@@ -131,9 +144,9 @@ def parse_bazos_page(html: str, now: str | None = None) -> list[dict]:
     cards = soup.select("div.inzeratyflex") or soup.select("div[class*='inzeratyflex']")
     out = []
     for card in cards:
-        link = card.select_one("div.inzeratynadpis a, h2 a, a[href*='/inzerat/']")
-        if not link:
-            continue
+        link = bazos_title_link(card)
+        if not link or not link.get_text(strip=True):
+            continue                     # no title: no telling a room from a flat
         href = link.get("href", "")
         if not href.startswith("http"):
             href = BAZOS_BASE + "/" + href.lstrip("/")
@@ -152,7 +165,7 @@ def parse_bazos_page(html: str, now: str | None = None) -> list[dict]:
 def scrape_bazos(max_pages: int = 5) -> int:
     first = BAZOS_BASE + BAZOS_CATEGORY
     require_robots(first + f"{BAZOS_PAGE_SIZE}/")
-    session = make_session(BAZOS_BASE)
+    session = make_session(warmup_url(BAZOS_BASE))
     stored = 0
     for p in range(max_pages):
         offset = p * BAZOS_PAGE_SIZE
@@ -199,7 +212,7 @@ def rental_from_advert(advert: dict, url: str, now: str | None = None) -> dict |
 def scrape_bezrealitky(max_pages: int = 5) -> int:
     from scraper import bezrealitky as bz
     require_robots(bz.SITEMAP_INDEX)
-    session = make_session(bz.BASE)
+    session = make_session(warmup_url(bz.BASE))
     urls = bz.walk_sitemap(session, offer="pronajem")[:max_pages * BEZREALITKY_PER_PAGE]
     stored = 0
     for _, url in urls:

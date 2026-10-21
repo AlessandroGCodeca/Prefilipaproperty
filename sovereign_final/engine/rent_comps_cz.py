@@ -55,7 +55,8 @@ def _profile():
 
 # ── Reading a Czech rental ad ─────────────────────────────────────────────────
 _ENERGIES_INCLUDED_RE = re.compile(
-    r"vc(?:etne|\.)\s+(?:vsech\s+)?(?:energi|poplatk|sluzeb)|s\s+energiemi|"
+    r"vc(?:etne|\.)\s*(?:vsech\s+)?(?:energi|poplatk|sluzeb|zaloh|inkas)|"
+    r"(?<!\w)(?:i\s+)?se?\s+(?:energiemi|poplatky|zalohami)(?!\w)|"
     r"energie\s+(?:jsou\s+)?v\s+cene|v\s+cene\s+(?:jsou\s+|je\s+)?(?:i\s+)?energi|"
     r"vse\s+v\s+cene|all\s+inclusive")
 
@@ -85,6 +86,7 @@ def furnishing_from_text(text: str) -> str:
 _NOT_A_FLAT_RE = re.compile(
     r"(?:pro|pod)najem\s+pokoj|pokoj\w*\s+k\s+(?:pro|pod)najmu|"
     r"(?:volny|samostatny)\s+pokoj\s+ve?\s+|pokoj\w*\s+ve\s+sdilen|ve\s+sdilen\w*\s+byt|"
+    r"(?:pro|pod)naj\w*\s+(?:(?!byt|dum|domu|rd(?!\w))\w+\s+){0,2}pokoj(?:e|u|ik\w*)?(?!\w)|"
     r"spolubydl|(?<!\w)luzk|ubytovan|"
     r"(?:na|za|/)\s*noc(?!\w)|na\s+den(?!\w)|kratkodob|airbnb")
 
@@ -198,9 +200,11 @@ def rebuild_rent_comps(max_age_days: int = RENT_COMP_MAX_AGE_DAYS) -> dict:
         old_rates = rates_from_comps(_stored_comps(conn))
         cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
         rentals = [dict(r) for r in conn.execute(
-            "SELECT rent_eur, size_m2, rooms, furnished, energies_included, rent_key "
+            "SELECT rent_eur, size_m2, rooms, furnished, energies_included, rent_key, district "
             "FROM rental_listings WHERE is_active = 1 AND last_seen_at >= ? AND market = ?",
             (cutoff, MARKET)).fetchall()]
+        for r in rentals:                       # keyed as the rules read it now
+            r["rent_key"] = match_rent_key(r["district"]) if r.get("district") else r["rent_key"]
         comps = aggregate(rentals)
         now = datetime.now(timezone.utc).isoformat()
         conn.execute("DELETE FROM rent_comps WHERE source = ? AND market = ?",

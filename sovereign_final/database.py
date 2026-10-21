@@ -1390,7 +1390,7 @@ def requeue_scores_from_older_model() -> int:
         _ensure_cashflow_columns(conn)
         _ensure_market_columns(conn)
         rows = conn.execute("""
-            SELECT l.id, l.market, c.model_version, c.tax_year
+            SELECT l.id, l.market, c.model_version, c.tax_year, c.ltv_used
             FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
             -- Only what get_unscored_cashflow() would score again.
             WHERE l.is_active = 1 AND l.price_eur > 0 AND l.size_m2 > 0
@@ -1407,10 +1407,26 @@ def requeue_scores_from_older_model() -> int:
                 except LookupError:          # no table yet: nothing to compare
                     years[m] = None
             return years[m]
+        # ... and the LTV a bank lends at today: it moves with the date (the
+        # investor cap from INVESTOR_LTV_FROM) and with PROPERTIES_OWNED.
+        ltvs: dict[str, float | None] = {}
+
+        def ltv_now(market):
+            from engine.financial import default_ltv
+            m = markets.normalize(market)
+            if m not in ltvs:
+                try:
+                    ltvs[m] = default_ltv(**_market_kw(m))
+                except LookupError:
+                    ltvs[m] = None
+            return ltvs[m]
         n = sum(_drop_cashflow_score(conn, r["id"]) for r in rows
                 if r["model_version"] is None
                 or r["model_version"] != SCORING_MODEL_VERSION
-                or r["tax_year"] is None or r["tax_year"] != tax_year(r["market"]))
+                or r["tax_year"] is None or r["tax_year"] != tax_year(r["market"])
+                or (ltv_now(r["market"]) is not None
+                    and (r["ltv_used"] is None
+                         or abs(r["ltv_used"] - ltv_now(r["market"])) > 1e-9)))
         conn.commit()
     finally:
         conn.close()
@@ -2191,6 +2207,17 @@ def update_description_features(listing_id: str, features: dict):
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
+        # What the rent estimate reads: when the parse changes it, the score
+        # made without it is dropped and redone by the scoring that follows.
+        def rent_inputs():
+            r = conn.execute("SELECT has_parking, has_balcony, furnished, rooms FROM listings "
+                             "WHERE id = ?", (listing_id,)).fetchone()
+            if not r:
+                return None
+            furn = (r["furnished"] or "").lower()
+            return (bool(r["has_parking"]), bool(r["has_balcony"]),
+                    furn if furn in ("furnished", "semi") else "", r["rooms"])
+        before = rent_inputs()
         conn.execute("""
             UPDATE listings SET
                 has_parking = ?, has_balcony = ?,
@@ -2216,6 +2243,8 @@ def update_description_features(listing_id: str, features: dict):
             features.get("floor"),
             listing_id,
         ))
+        if before is not None and rent_inputs() != before:
+            _drop_cashflow_score(conn, listing_id)
         conn.commit()
     finally:
         conn.close()

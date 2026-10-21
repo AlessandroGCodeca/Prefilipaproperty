@@ -112,13 +112,19 @@ _PUBLIC_HOLDER_RE = re.compile(
 _ENTRY_NO_RE = re.compile(r"(?<!\w)[vzp]\s*-?\s*\d{1,6}/\d{2,4}")
 
 
+# The holder's name and address ("v prospech Jana Nováková, Plynárenská 7, …"),
+# up to the right's own description: a street or a surname is no utility line.
+_HOLDER_BLOCK_RE = re.compile(
+    r"v\s+prospech[\s\S]*?(?=\s[-–—]\s|(?<!\w)(?:prav[oae]|spociva\w*|podla|v\s+rozsahu)(?!\w)|$)")
+
+
 def _tier(label: str, entry_text: str, holder: str) -> tuple[str, str]:
     """("hard" | "soft", why) for an easement or a pre-emption right, from its
     own entry's text (folded) and the holder's name."""
     if label == "vecné bremeno":
         if _PERSONAL_USE_RE.search(entry_text):
             return "hard", "lifetime right to use or live in it"
-        if _TECHNICAL_RE.search(entry_text):
+        if _TECHNICAL_RE.search(_HOLDER_BLOCK_RE.sub(" ", entry_text)):
             return "soft", "utility / access easement"
         return "hard", "kind of easement not recognised"
     if _PUBLIC_HOLDER_RE.search(fold(holder)):
@@ -236,15 +242,34 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
         is_reference = bool(v.reference_before.search(low[max(0, start - 40):start]))
         markers = v.creditor_markers[:1] if is_reference else v.creditor_markers
         marker = None
-        for rx in markers:
+        if v.reference_needs_same_entry and not is_reference:
+            # A Czech entry names its creditor ("Oprávnění pro" / "ve
+            # prospěch") anywhere before the next entry — after a long claim
+            # line ("… a budoucí pohledávky do výše …") or a page break.
+            sep = v.entry_no_re.search(low, end, nxt)
+            entry_window = low[end:sep.start() if sep else nxt]
+            for rx in v.creditor_markers[:2]:
+                marker = rx.search(entry_window)
+                if marker:
+                    break
+        for rx in ([] if marker else markers):
             marker = rx.search(window)
             if marker:
                 break
-        if marker is None and is_reference and last_lien_at is not None \
-                and start - last_lien_at <= _ENTRY_SPAN \
-                and not (v.reference_needs_same_entry
-                         and v.entry_no_re.search(low, last_lien_at, start)):
-            continue
+        if marker is None and is_reference and last_lien_at is not None:
+            if v.reference_needs_same_entry:
+                # Czech: the same entry runs on to the next bullet. A register
+                # number ends a "Listina" line, and another "Listina …
+                # zástavního práva" (an amendment) may follow it in the same
+                # entry: the reference word must come after the last number.
+                seps = list(v.entry_no_re.finditer(low, last_lien_at, start))
+                after = seps[-1].end() if seps else last_lien_at
+                same = all(sp.group() != "•" for sp in seps) and bool(
+                    v.reference_before.search(low[max(after, start - 40):start]))
+            else:
+                same = start - last_lien_at <= _ENTRY_SPAN
+            if same:
+                continue
         if marker is not None:
             c_start = end + marker.end()
             creditor = text[c_start:min(nxt, c_start + _CREDITOR_SPAN)]

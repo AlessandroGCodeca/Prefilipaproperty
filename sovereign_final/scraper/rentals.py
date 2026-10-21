@@ -32,6 +32,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import SCRAPE_DELAY_SEC, RENT_MIN_EUR, RENT_MAX_EUR
 from database import upsert_rental, init_db
+from scraper.textparse import bazos_title_link
 from scraper._http import get, make_session
 from scraper.nehnutelnosti import _extract_location_from_text
 from scraper.textparse import (
@@ -143,7 +144,7 @@ def parse_bazos_page(html: str, now: str | None = None) -> list[dict]:
     cards = soup.select("div.inzeratyflex") or soup.select("div[class*='inzeratyflex']")
     out = []
     for card in cards:
-        link = card.select_one("div.inzeratynadpis a, h2 a, h3 a, a[href*='/inzerat/']")
+        link = bazos_title_link(card)
         if not link:
             continue
         href = link.get("href", "")

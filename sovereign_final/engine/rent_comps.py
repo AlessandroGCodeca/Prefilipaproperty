@@ -56,7 +56,7 @@ def _fold(text: str) -> str:
 
 
 _ENERGIES_INCLUDED_RE = re.compile(
-    r"vratane\s+(?:vsetkych\s+)?(?:energi|poplatk|sluzieb)"
+    r"vratane\s+(?:vsetkych\s+)?(?:energi|poplatk|sluzieb|zaloh)|(?<!\w)so\s+zalohami"
     r"|s\s+energiami|energie\s+(?:su\s+)?v\s+cene|v\s+cene\s+(?:su\s+|je\s+)?(?:aj\s+)?energi"
     r"|vsetko\s+v\s+cene|all\s+inclusive|cena\s+s\s+energiami"
 )
@@ -70,23 +70,33 @@ def energies_included(text: str) -> bool:
 def furnishing_from_text(text: str) -> str:
     """'furnished' / 'semi' / 'unfurnished' / 'unknown' from rental ad text."""
     t = _fold(text)
-    if "nezariaden" in t:
+    # A bathroom's fittings or a fitted kitchen say nothing about furniture.
+    t = re.sub(r"(?:socialn|sanitarn|hygienick)\w*\s+zariaden\w*|zariaden\w*\s+kuchyn\w*|"
+               r"kuchyn\w*(?:\s+\w+){0,2}\s+zariaden\w*", " ", t)
+    if re.search(r"nezariaden|bez\s+(?:zariadenia|nabytku)|nevybaven", t):
         return "unfurnished"
     if re.search(r"ciastocne\s+zariaden|polozariaden|ciastocne\s+vybaven", t):
         return "semi"
-    if re.search(r"zariaden|vybaven[ya]\s+nabytk|kompletne\s+vybaven", t):
+    if re.search(r"(?<!\w)zariaden|vybaven[ya]\s+nabytk|kompletne\s+vybaven", t):
         return "furnished"
     return "unknown"
 
 
-# Not a whole flat let long-term: a single room, a bed, a nightly let.
+# Not a whole flat let long-term: a single room on offer (not a flat that
+# names its "obývacia izba"), a bed, a nightly let.
 _NOT_A_FLAT_RE = re.compile(
-    r"\bizba\b|prenajom\s+izby|podnajom\s+izby|spolubyv|\blozko\b|ubytovan"
+    r"prenajom\s+izby|podnajom\s+izby|izb[au]\s+(?:na|k)\s+(?:pre|pod)najm|"
+    r"(?:pre|pod)najm\w*\s+(?:(?!byt)\w+\s+){0,2}izbu(?!\w)|"
+    r"(?:volna|samostatna)\s+izba\s+v|spolubyv|\blozko\b|ubytovan"
     r"|na\s+noc\b|/\s*noc\b|za\s+noc\b|na\s+den\b|kratkodob|airbnb|apartman\s+na\s+noc"
 )
 
 
 def is_long_term_flat(*texts: str) -> bool:
+    """False for a room, a bed, a shared or a short let. The first text is
+    the title: one that starts with "Izba" offers a room."""
+    if texts and re.match(r"\W*izb[auy](?!\w)", _fold(texts[0])):
+        return False
     folded = " ".join(_fold(t) for t in texts)
     return not _NOT_A_FLAT_RE.search(folded)
 

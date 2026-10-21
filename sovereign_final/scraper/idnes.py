@@ -44,6 +44,7 @@ from database import (
 )
 from scraper._http import get, make_session
 from scraper.cz_common import (
+    warmup_url,
     PortalBlocked, require_robots, robots_allows, listing_record, sale_price, rooms_cz,
     area_cz, energy_cz, is_excluded_cz, cleanup, fold, czk_amounts, place_from_text,
 )
@@ -185,7 +186,7 @@ def apply_detail(listing: dict, html: str) -> None:
 def run(max_pages: int = 10) -> int:
     require_robots(page_url(2))
     log.info(f"🔍 Reality.iDNES.cz ({max_pages} pages)...")
-    session = make_session(BASE)
+    session = make_session(warmup_url(BASE))
     fresh = get_fresh_detail_urls(SOURCE, max_age_days=DETAIL_REFRESH_DAYS)
     total = touched = 0
     first_status = None

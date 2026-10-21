@@ -162,7 +162,9 @@ def is_excluded_listing(*texts: str) -> bool:
 
 # "3-izbový", "3 izbový", "3-izb.", "3izb", "3 - izbovy" … (diacritics stripped
 # before matching, so izbový/izbovy both hit).
-_IZB_RE = re.compile(r"\b([1-6])\s*[-–]?\s*izb", re.I)
+# "1,5-izbový" is a room and a half — never 5 rooms. A half room counts as a
+# room (the conservative side of both the rent and the median multipliers).
+_IZB_RE = re.compile(r"(?<![\d.,])([1-6])(?:\s*[.,]\s*(5))?\s*[-–]?\s*izb", re.I)
 # Garsónka / garzónka == studio == 1 room.
 _GARSONKA_RE = re.compile(r"\bgar[sz]onk", re.I)
 
@@ -213,7 +215,18 @@ def rooms_from_title(title: str) -> int | None:
     text = _strip_diacritics(title)
     m = _IZB_RE.search(text)
     if m:
-        return int(m.group(1))
+        return min(int(m.group(1)) + (1 if m.group(2) else 0), 6)
     if _GARSONKA_RE.search(text):
         return 1
     return None
+
+
+def bazos_title_link(card):
+    """A Bazoš result card's title link. The card's first link is its photo
+    (`<a><img class="obrazek"></a>`, no text), so the h2/h3 title link comes
+    first, then any listing link with text, the photo link only as a last
+    resort."""
+    return (card.select_one("h2.nadpis a, h2 a, h3 a")
+            or next((a for a in card.select("div.inzeratynadpis a, a[href*='/inzerat/']")
+                     if a.get_text(strip=True)), None)
+            or card.select_one("a[href*='/inzerat/']"))

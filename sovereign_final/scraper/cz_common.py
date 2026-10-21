@@ -145,6 +145,12 @@ def require_robots(url: str, fetch=None) -> None:
         raise PortalBlocked(why)
 
 
+def warmup_url(base: str) -> str | None:
+    """The homepage make_session may fetch for cookies — None when robots.txt
+    does not allow it, so the session starts without."""
+    return base if robots_allows(base.rstrip("/") + "/")[0] else None
+
+
 # ── Text ──────────────────────────────────────────────────────────────────────
 def fold(text: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", text or "")
@@ -264,8 +270,13 @@ _SHARE_RE = re.compile(
     r"|(?<![\w/])\d{1,2}\s*/\s*\d{1,2}\s+"
     r"(?:podil\w*(?!\w)(?!\s+(?:na\s+)?pozem)|(?:na\s+)?(?:byt[ue]|jednotk))"
     r"|(?<![^\W\d_])podil\w*\s+\d{1,2}\s*/\s*\d{1,2}(?![\d/])(?!\s+(?:na\s+)?pozem)")
-# A layout names the flat as "byt" does; a URL slug drops the "+" ("2kk").
+# A layout names the flat as "byt" does; a URL slug drops the "+" ("2kk"). It
+# keeps a flat sold with its garage, parking space or land share ("Prodej 2+kk
+# s garáží") — never a house, cottage, villa or office ("Prodej 4+1 rodinného
+# domu"), which only "byt" before it keeps.
 _SLUG_LAYOUT_RE = re.compile(r"(?<![^\W\d_])[1-9]-?kk(?![^\W\d_])")
+CZ_ACCESSORY_STEMS = ("garaz", "parkovac", "pozem")
+_STREET_ADJ_RE = re.compile(r"(?:hotel|penzion)ova(?![^\W\d_])")
 
 
 def is_excluded_cz(*texts: str) -> bool:
@@ -273,12 +284,18 @@ def is_excluded_cz(*texts: str) -> bool:
     from scraper.textparse import _APARTMENT_NOUN_RE, _is_street_name
     for t in texts:
         folded = fold(t)
-        if _ALWAYS_RE.search(folded) or _SHARE_RE.search(folded):
+        if _SHARE_RE.search(folded):
+            return True
+        for m in _ALWAYS_RE.finditer(folded):
+            # A street named after one ("Hotelová", Ostrava-Hrabůvka) is no hotel.
+            if _STREET_ADJ_RE.match(folded, m.start()) or _is_street_name(folded, m.start()):
+                continue
             return True
         for m in _PROPERTY_RE.finditer(folded):
             if (_APARTMENT_NOUN_RE.search(folded, 0, m.start())
-                    or _LAYOUT_RE.search(folded, 0, m.start())
-                    or _SLUG_LAYOUT_RE.search(folded, 0, m.start())):
+                    or (m.group().startswith(CZ_ACCESSORY_STEMS)
+                        and (_LAYOUT_RE.search(folded, 0, m.start())
+                             or _SLUG_LAYOUT_RE.search(folded, 0, m.start())))):
                 continue
             if not _is_street_name(folded, m.start()):
                 return True
@@ -347,7 +364,10 @@ def _load_obce() -> list[str]:
         return []
     head = [h.strip().lower() for h in rows[0]]
     col = head.index("nazev") if "nazev" in head else (head.index("name") if "name" in head else 0)
-    body = rows[1:] if head and not head[0][:1].isupper() else rows
+    # A header names a column, or is not a capitalised town name ("kod", "1").
+    first = rows[0][0].strip() if rows[0] else ""
+    has_header = "nazev" in head or "name" in head or not first[:1].isupper()
+    body = rows[1:] if has_header else rows
     return [r[col].strip() for r in body if len(r) > col and r[col].strip()]
 
 

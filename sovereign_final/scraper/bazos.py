@@ -15,7 +15,7 @@ from config import SCRAPE_DELAY_SEC, SALE_PRICE_MIN_EUR
 from database import upsert_listing, init_db
 from scraper._http import get, make_session
 from scraper.nehnutelnosti import _extract_location_from_text
-from scraper.textparse import rooms_from_title
+from scraper.textparse import bazos_title_link, rooms_from_title
 
 log = logging.getLogger(__name__)
 
@@ -191,7 +191,7 @@ def scrape_page(offset: int, session=None) -> list[dict]:
     if cards:
         for card in cards:
             try:
-                link = card.select_one("div.inzeratynadpis a, h2 a, h3 a, a[href*='/inzerat/']")
+                link = bazos_title_link(card)
                 if not link:
                     continue
                 rec = _build_listing_from_card(card, link)

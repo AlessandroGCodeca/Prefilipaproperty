@@ -70,7 +70,7 @@ def _need(value, what: str, market, where: str = "markets.py"):
 # the room-adjusted benchmark, the rent fallbacks). A stored score from an
 # older model is redone on the next scoring run
 # (database.requeue_scores_from_older_model).
-SCORING_MODEL_VERSION = 2
+SCORING_MODEL_VERSION = 3   # 3: s.r.o. setup cost in the IRR; Bratislava city parts named alone
 
 
 @dataclass
@@ -384,9 +384,11 @@ def _furnished_multiplier(furnished, market: str = "sk") -> float:
     return 1.0
 
 
+# Longest first — but a named city part ("Vrakuňa, Bratislava II") before the
+# Bratislava / Košice okres it lies in, whatever their lengths.
 _KEYS_BY_SPECIFICITY = sorted(
     (k for k in RENT_PER_M2 if k != "default" and k not in _CITY_ONLY_KEYS),
-    key=len, reverse=True,
+    key=lambda k: (bool(re.fullmatch(r"(?:bratislava|košice) [iv]+", k)), -len(k)),
 )
 # A key matches only as whole words, and with or without diacritics:
 # "rača" is not in "Kráčany", "bratislava i" is not the start of
@@ -1093,11 +1095,13 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
     if ltv is None:
         ltv = default_ltv(**_mkw(mkt))
     rules = tax_rules(tax_year) if sk else markets.tax_rules(tax_year, mkt)
-    running = 0.0
+    running = setup = 0.0
     if structure == "SRO":
         ltv, rate = sro_financing(ltv, rate, sro_ltv, sro_rate_premium, **_mkw(mkt))
         running = pick(sro_running_cost, SRO_ANNUAL_RUNNING_COST,
                        "sro_annual_running_cost", "s.r.o. running cost")
+        # The company is set up once, at the start: a cost only it pays.
+        setup = pick(None, SRO_SETUP_COST, "sro_setup_cost", "s.r.o. setup cost")
     if rent is None:
         rent = get_rent_estimate(district, size_m2, rooms, parking, furnished,
                                  balcony, rates=rent_rates, **_mkw(mkt))
@@ -1105,7 +1109,7 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
 
     loan = price_eur * ltv
     acquisition = acquisition_costs(price_eur, **_mkw(mkt))
-    equity_in = price_eur * (1 - ltv) + acquisition
+    equity_in = price_eur * (1 - ltv) + acquisition + setup
     payment_y = calc_mortgage(loan, rate, term_years) * 12
     schedule = amortization_schedule(loan, rate, term_years)
     prop_tax_y = property_tax_annual(price_eur, size_m2, district, **_mkw(mkt))
@@ -1220,6 +1224,10 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
     """
     points = 0.0
     max_pts = 0.0
+    # A price below the sanity floor is a misread, not a bargain (classify()
+    # makes it WHITE): it earns no score, never the top of the ranking.
+    if below_sanity_floor(row.get("market_discount")):
+        return 0, "—"
 
     # ── Financial (yield + discount) ──
     # The self-funding ratio used to be the second half. It sits at 0.60–0.75

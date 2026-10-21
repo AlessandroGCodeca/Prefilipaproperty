@@ -74,10 +74,25 @@ def _town_key(district: str) -> str:
     "Říčany, Praha-východ" → "říčany", "Kladno - Kročehlavy" → "kladno"."""
     first = (district or "").split(",")[0]
     first = re.split(r"\s+[-–]\s+", first)[0].strip()
+    # "Plzeň 2-Slovany", "Liberec XIV-Kunratice": the numbered part's town.
+    first = re.sub(r"\s+(?:\d{1,2}|[ivx]{1,4})\s*[-–]\s*\S.*$", "", first, flags=re.I)
     first = re.sub(r"\s*-\s*město$", "", first, flags=re.I)
+    # "Plzeň-Slovany", "Zlín-Malenovice": a known town and its part — but
+    # "Frýdek-Místek" is one town.
+    if re.search(r"[-–]", first) and not _known_place(first):
+        head = re.split(r"\s*[-–]\s*", first)[0]
+        if _known_place(head):
+            first = head
     # A numbered city part ("Plzeň 3", "Pardubice II") is its town's.
     first = re.sub(r"\s+(\d{1,2}|[ivx]{1,4})$", "", first, flags=re.I)
     return re.sub(r"\s+", " ", first).lower().strip()
+
+
+def _known_place(name: str) -> bool:
+    """A town (or obec) the Czech place table knows by this exact name."""
+    from scraper.cz_common import _place_table
+    from modules.lv_screen import fold as pfold
+    return ("N:" + pfold(name).replace("-", " ").replace("–", " ").strip()) in _place_table()
 
 
 def match_rent_key(district: str) -> str:

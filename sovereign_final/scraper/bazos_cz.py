@@ -36,8 +36,10 @@ from database import (
     upsert_listing, init_db, get_fresh_detail_urls, mark_details_enriched,
     touch_listings,
 )
+from scraper.textparse import bazos_title_link
 from scraper._http import get, make_session
 from scraper.cz_common import (
+    warmup_url,
     PortalBlocked, require_robots, listing_record, sale_price, rooms_cz,
     area_cz, energy_cz, is_excluded_cz, cleanup, place_from_text,
 )
@@ -103,7 +105,7 @@ def parse_page(html: str, now: str | None = None) -> list[dict]:
     pairs = []
     if cards:
         for card in cards:
-            link = card.select_one("div.inzeratynadpis a, h2 a, h3 a, a[href*='/inzerat/']")
+            link = bazos_title_link(card)
             if link:
                 pairs.append((card, link))
     else:
@@ -147,7 +149,7 @@ def apply_detail(listing: dict, html: str) -> None:
 def run(max_pages: int = 10) -> int:
     require_robots(page_url(PAGE_SIZE))
     log.info(f"🔍 Bazos.cz ({max_pages} pages)...")
-    session = make_session(BASE)
+    session = make_session(warmup_url(BASE))
     fresh = get_fresh_detail_urls(SOURCE, max_age_days=DETAIL_REFRESH_DAYS)
     total = touched = 0
     first_status = None

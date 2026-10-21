@@ -106,6 +106,21 @@ def check_flat_lv(area, lv_no) -> dict:
                            f"{result['detail']}")
     text = result["lv_text"]
     decision = _parse_lv(text)
+    if decision["status"] == "PASS":
+        # A clean title needs part C read whole: a report cut at the cap may
+        # have lost it (it comes last), and an error, maintenance or blocked
+        # page relayed with HTTP 200 has none.
+        from kataster_scraper import LV_TEXT_MAX_CHARS
+        if len(text) >= LV_TEXT_MAX_CHARS:
+            return _unverified(
+                f"LV {lv_no}: the cadastre report is longer than {LV_TEXT_MAX_CHARS:,} "
+                f"characters and was cut — part C (ťarchy) may be missing. Read the full "
+                f"LV on the cadastre before relying on it.")
+        if not re.search(r"(?<!\w)cast\s*c(?!\w)", fold(text)):
+            return _unverified(
+                f"LV {lv_no}: the cadastre's answer has no part C ('ČASŤ C: ŤARCHY') — "
+                f"not a readable LV (an error or maintenance page?), so its "
+                f"encumbrances weren't read.")
     flats = _flat_numbers(text)
     if decision["status"] == "REJECT" and len(flats) > 1:
         # A shared LV: a lien on it may sit on another flat's share.
