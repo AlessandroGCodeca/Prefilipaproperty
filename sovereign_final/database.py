@@ -1306,23 +1306,26 @@ def _has_table(conn, name: str) -> bool:
     ).fetchone() is not None
 
 
-def requeue_scores_without_benchmark() -> int:
+def requeue_scores_without_benchmark(market: str | None = None) -> int:
     """Drop the scores worked out with no regional median for a district that
     has one now, so the next scoring run classifies them against it.
 
     A district engine.regional_prices didn't know scored WHITE ("no regional
     price benchmark"), and get_unscored_cashflow() never looks at a scored row
     again — so a town added to the price tables later would stay WHITE for
-    good. Returns the number of scores dropped."""
+    good. `market` keeps it to one market's listings (None: all) — a run
+    scoped to one market must not drop another's scores it won't redo.
+    Returns the number of scores dropped."""
     from engine.regional_prices import regional_median_price
     conn = get_conn()
     try:
         _ensure_market_columns(conn)
-        rows = conn.execute("""
+        only, params = _market_sql(conn, market, "l.")
+        rows = conn.execute(f"""
             SELECT l.id, l.district, l.market FROM listings l
             JOIN cashflow_scores c ON c.listing_id = l.id
-            WHERE c.regional_median_m2 IS NULL AND l.is_active = 1
-        """).fetchall()
+            WHERE c.regional_median_m2 IS NULL AND l.is_active = 1{only}
+        """, params).fetchall()
         n = sum(_drop_cashflow_score(conn, r["id"]) for r in rows
                 if regional_median_price(r["district"] or "",
                                          **_market_kw(r["market"])) is not None)
@@ -1332,14 +1335,15 @@ def requeue_scores_without_benchmark() -> int:
     return n
 
 
-def requeue_scores_with_stale_class() -> int:
+def requeue_scores_with_stale_class(market: str | None = None) -> int:
     """Drop the scores whose class or max offers no longer match what the
     engine gives for the listing's price, size and district today — a
     regional median that moved, or a class rule that changed (classify()
     judging at 4 decimals, so a flat exactly 20% under the median is GREEN
     now, not YELLOW). get_unscored_cashflow() never looks at a scored row
-    again, so without this they would keep the old answer for good. Returns
-    the number of scores dropped."""
+    again, so without this they would keep the old answer for good.
+    `market` keeps it to one market's listings (None: all). Returns the
+    number of scores dropped."""
     from engine.financial import class_at_price, max_offer_price
     conn = get_conn()
     try:
@@ -1347,14 +1351,15 @@ def requeue_scores_with_stale_class() -> int:
             return 0
         _ensure_cashflow_columns(conn)
         _ensure_market_columns(conn)
-        rows = conn.execute("""
+        only, params = _market_sql(conn, market, "l.")
+        rows = conn.execute(f"""
             SELECT l.id, l.price_eur, l.size_m2, l.district, l.rooms, l.market,
                    c.classification, c.max_price_green, c.max_price_yellow
             FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
             -- Only what get_unscored_cashflow() would score again.
             WHERE l.is_active = 1 AND l.price_eur > 0 AND l.size_m2 > 0
-              AND l.lv_status != 'REJECTED'
-        """).fetchall()
+              AND l.lv_status != 'REJECTED'{only}
+        """, params).fetchall()
         stale = [
             r["id"] for r in rows
             if (class_at_price(r["price_eur"], r["size_m2"], r["district"] or "",
@@ -1374,13 +1379,14 @@ def requeue_scores_with_stale_class() -> int:
     return n
 
 
-def requeue_scores_from_older_model() -> int:
+def requeue_scores_from_older_model(market: str | None = None) -> int:
     """Drop the scores worked out by an older version of the engine
     (engine.financial.SCORING_MODEL_VERSION) or under another year's tax
     table than the one scoring uses now (config.tax_rules), so the next
     scoring run redoes them. A new tax year's table, or a change to how the
     figures are worked out, would otherwise reach only listings scored after
-    it. Returns the number of scores dropped."""
+    it. `market` keeps it to one market's listings (None: all). Returns the
+    number of scores dropped."""
     import markets
     from engine.financial import SCORING_MODEL_VERSION
     conn = get_conn()
@@ -1389,13 +1395,14 @@ def requeue_scores_from_older_model() -> int:
             return 0
         _ensure_cashflow_columns(conn)
         _ensure_market_columns(conn)
-        rows = conn.execute("""
+        only, params = _market_sql(conn, market, "l.")
+        rows = conn.execute(f"""
             SELECT l.id, l.market, c.model_version, c.tax_year, c.ltv_used
             FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
             -- Only what get_unscored_cashflow() would score again.
             WHERE l.is_active = 1 AND l.price_eur > 0 AND l.size_m2 > 0
-              AND l.lv_status != 'REJECTED'
-        """).fetchall()
+              AND l.lv_status != 'REJECTED'{only}
+        """, params).fetchall()
         # Each market has its own tax tables, so its own current year.
         years: dict[str, int | None] = {}
 

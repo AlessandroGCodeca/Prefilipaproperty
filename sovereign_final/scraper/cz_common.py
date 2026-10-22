@@ -261,21 +261,30 @@ CZ_PROPERTY_EXCLUDE = ("rodinn", "pozem", "garaz", "parkovac", "kancelar", "chat
 _ALWAYS_RE = re.compile(r"(?<![^\W\d_])(?:" + "|".join(CZ_ALWAYS_EXCLUDE) + ")")
 _PROPERTY_RE = re.compile(r"(?<![^\W\d_])(?:" + "|".join(CZ_PROPERTY_EXCLUDE) + ")")
 # A share of a flat, not the flat: "Prodám podíl na bytě", "Prodej 1/2 podílu",
-# "1/2 bytu", "id. 1/2", "podíl 1/3". A flat's land share — "s podílem na
-# pozemku", "včetně podílu" — is no sale of a share and does not count.
+# "1/2 bytu", "id. 1/2", "podíl 1/3". A flat's share of its land, garden,
+# yard, garage or parking — "s podílem na pozemku", "podíl 1/4 na zahradě",
+# "včetně podílu" — is no sale of a share and does not count.
+_ACCESSORY_SHARE = r"(?:pozem|zahrad|dvor|garaz|parkovac)"
 _SHARE_RE = re.compile(
     r"(?<![^\W\d_])(?:prodej\w*|proda[mv]\w*|nabiz\w*)\s+(?:(?:id\.?|idealn\w*)\s*)?"
     r"(?:\d{1,2}\s*/\s*\d{1,2}\s+)?podil"
     r"|(?<![^\W\d_])(?:id\.|idealn\w*)\s*\d{1,2}\s*/\s*\d{1,2}(?!\d)"
     r"|(?<![\w/])\d{1,2}\s*/\s*\d{1,2}\s+"
-    r"(?:podil\w*(?!\w)(?!\s+(?:na\s+)?pozem)|(?:na\s+)?(?:byt[ue]|jednotk))"
-    r"|(?<![^\W\d_])podil\w*\s+\d{1,2}\s*/\s*\d{1,2}(?![\d/])(?!\s+(?:na\s+)?pozem)")
+    r"(?:podil\w*(?!\w)(?!\s+(?:na\s+)?" + _ACCESSORY_SHARE + r")"
+    r"|(?:na\s+)?(?:byt[ue]|jednotk))"
+    r"|(?<![^\W\d_])podil\w*\s+\d{1,2}\s*/\s*\d{1,2}(?![\d/])"
+    r"(?!\s+(?:na\s+)?" + _ACCESSORY_SHARE + r")")
 # A layout names the flat as "byt" does; a URL slug drops the "+" ("2kk"). It
 # keeps a flat sold with its garage, parking space or land share ("Prodej 2+kk
 # s garáží") — never a house, cottage, villa or office ("Prodej 4+1 rodinného
-# domu"), which only "byt" before it keeps.
+# domu"), which only "byt" before it keeps. Nor does it keep a house named
+# before the garage or plot ("Prodej domu 5+1 s pozemkem", "Prodej RD 4+kk se
+# zahradou a pozemkem"); a flat in a house ("2+kk v domě", "2+1 v RD") stays.
 _SLUG_LAYOUT_RE = re.compile(r"(?<![^\W\d_])[1-9]-?kk(?![^\W\d_])")
 CZ_ACCESSORY_STEMS = ("garaz", "parkovac", "pozem")
+_HOUSE_NOUN_RE = re.compile(
+    r"(?<![^\W_])(?<!(?<!\w)v[\s-])(?<!(?<!\w)ve[\s-])"
+    r"(?:rd|dum|domu|domek|domku|domecek)(?![^\W\d_])")
 _STREET_ADJ_RE = re.compile(r"(?:hotel|penzion)ova(?![^\W\d_])")
 
 
@@ -294,6 +303,7 @@ def is_excluded_cz(*texts: str) -> bool:
         for m in _PROPERTY_RE.finditer(folded):
             if (_APARTMENT_NOUN_RE.search(folded, 0, m.start())
                     or (m.group().startswith(CZ_ACCESSORY_STEMS)
+                        and not _HOUSE_NOUN_RE.search(folded, 0, m.start())
                         and (_LAYOUT_RE.search(folded, 0, m.start())
                              or _SLUG_LAYOUT_RE.search(folded, 0, m.start())))):
                 continue
@@ -348,10 +358,14 @@ def cleanup(source: str) -> None:
 # the okresy (RÚIAN's okres names, engine/regional_prices_cz), Prague and its
 # 22 numbered districts, Brno's city districts — and, when the file exists,
 # every municipality in data/cz_obce.csv (a RÚIAN export of the obce: one
-# name per row, column "nazev" or the first column).
+# name per row, column "nazev" / "Název" / "Obec" or the first column).
 CZ_OBCE_CSV = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "cz_obce.csv")
 _RURAL_OKRES_RE = re.compile(r"-(?:venkov|vychod|zapad|jih|sever)$")
 _places: dict[str, tuple[str, int]] | None = None
+# The column a header names the municipality by (first found wins), and the
+# words a header row is told by — no town is called "Obec" or "Kód".
+_OBCE_NAME_COLUMNS = ("nazev", "nazev obce", "obec", "name")
+_OBCE_HEADER_WORDS = frozenset(_OBCE_NAME_COLUMNS) | {"kod", "kod obce", "okres", "kraj"}
 
 
 def _load_obce() -> list[str]:
@@ -362,11 +376,12 @@ def _load_obce() -> list[str]:
         rows = list(csv.reader(f))
     if not rows:
         return []
-    head = [h.strip().lower() for h in rows[0]]
-    col = head.index("nazev") if "nazev" in head else (head.index("name") if "name" in head else 0)
+    # Header cells read without diacritics or case: "Název", "Obec", "Kód".
+    head = [fold(h).strip() for h in rows[0]]
+    col = next((head.index(n) for n in _OBCE_NAME_COLUMNS if n in head), 0)
     # A header names a column, or is not a capitalised town name ("kod", "1").
     first = rows[0][0].strip() if rows[0] else ""
-    has_header = "nazev" in head or "name" in head or not first[:1].isupper()
+    has_header = any(h in _OBCE_HEADER_WORDS for h in head) or not first[:1].isupper()
     body = rows[1:] if has_header else rows
     return [r[col].strip() for r in body if len(r) > col and r[col].strip()]
 

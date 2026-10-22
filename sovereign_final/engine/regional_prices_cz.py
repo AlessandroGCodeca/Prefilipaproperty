@@ -131,9 +131,13 @@ def _pattern(name: str) -> re.Pattern:
     return re.compile(rf"(?<!\w){re.escape(_words(name))}(?!\w)")
 
 
+_TOWN_U_NAMES = {"Benešov u Prahy": "Benešov"}
+
+
 def _town_pattern(name: str) -> re.Pattern:
     """An okres town's name, not the start of another town's: "Benešov nad
-    Ploučnicí" (okres Děčín) is not Benešov, "Teplice nad Metují" not Teplice."""
+    Ploučnicí" (okres Děčín) is not Benešov, "Teplice nad Metují" not Teplice
+    (the town's own "Benešov u Prahy" is listed in _TOWN_U_NAMES)."""
     return re.compile(rf"(?<!\w){re.escape(_words(name))}(?!\w)(?!\s+(?:nad|pod|u|ve?|na)\s+\w)")
 
 
@@ -149,6 +153,10 @@ def _okres_needles() -> list[tuple[re.Pattern, str]]:
             needles.setdefault(_words(town), okres)
     needles["praha"] = "Hlavní město Praha"
     needles["prague"] = "Hlavní město Praha"
+    # An okres town's own "u" name: Benešov's post office is "Benešov u Prahy",
+    # which a Bazoš card's place keeps. Other "<town> u X" names stay villages.
+    for town, okres in _TOWN_U_NAMES.items():
+        needles.setdefault(_words(town), okres)
     return [(_pattern(n) if n in ("praha", "prague") else _town_pattern(n), okres)
             for n, okres in sorted(needles.items(), key=lambda kv: len(kv[0]), reverse=True)]
 

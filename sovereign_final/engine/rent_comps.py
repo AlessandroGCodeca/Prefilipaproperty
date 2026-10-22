@@ -70,32 +70,51 @@ def energies_included(text: str) -> bool:
 def furnishing_from_text(text: str) -> str:
     """'furnished' / 'semi' / 'unfurnished' / 'unknown' from rental ad text."""
     t = _fold(text)
-    # A bathroom's fittings or a fitted kitchen say nothing about furniture.
+    # A bathroom's fittings or a fitted (or unequipped) kitchen say nothing
+    # about furniture: "nevybavená kuchyňa, inak zariadený byt" is furnished.
     t = re.sub(r"(?:socialn|sanitarn|hygienick)\w*\s+zariaden\w*|zariaden\w*\s+kuchyn\w*|"
-               r"kuchyn\w*(?:\s+\w+){0,2}\s+zariaden\w*", " ", t)
+               r"kuchyn\w*(?:\s+\w+){0,2}\s+zariaden\w*|"
+               r"nevybaven\w*\s+kuchyn\w*|kuchyn\w*(?:\s+\w+){0,2}\s+nevybaven\w*", " ", t)
     if re.search(r"nezariaden|bez\s+(?:zariadenia|nabytku)|nevybaven", t):
         return "unfurnished"
-    if re.search(r"ciastocne\s+zariaden|polozariaden|ciastocne\s+vybaven", t):
+    if re.search(r"ciastocne\s+zariaden|polozariaden|ciastocne\s+vybaven"
+                 r"|ciastocne\s+s\s+nabytkom", t):
         return "semi"
-    if re.search(r"(?<!\w)zariaden|vybaven[ya]\s+nabytk|kompletne\s+vybaven", t):
+    # The participle that describes the flat ("zariadený", "plne zariadená")
+    # or a flat let "so zariadením", never the noun on its own (a facility:
+    # "predškolské zariadenie").
+    if re.search(r"(?<!\w)zariaden(?:y|a|e|eho|emu|om|ej|u|ych|ym|ymi)(?!\w)"
+                 r"|(?<!\w)(?:so|s\s+(?:kompletnym|celym|plnym|novym))\s+zariadenim(?!\w)"
+                 r"|vybaven[ya]\s+nabytk|kompletne\s+vybaven"
+                 r"|(?<!\w)s\s+nabytkom|nabytok\s+(?:je\s+)?v\s+cene", t):
         return "furnished"
     return "unknown"
 
 
 # Not a whole flat let long-term: a single room on offer (not a flat that
-# names its "obývacia izba"), a bed, a nightly let.
+# names its "obývacia izba"), a bed, a nightly let. Folded, "prenájom" is
+# "prenajom" and "prenájmu"/"prenajmem" are "prenajm…": both stems count
+# ("izba na prenájom", "izbu do prenájmu", "Na prenájom izba").
 _NOT_A_FLAT_RE = re.compile(
-    r"prenajom\s+izby|podnajom\s+izby|izb[au]\s+(?:na|k)\s+(?:pre|pod)najm|"
-    r"(?:pre|pod)najm\w*\s+(?:(?!byt)\w+\s+){0,2}izbu(?!\w)|"
+    r"prenajom\s+izby|podnajom\s+izby|"
+    r"izb[au]\s+(?:na|k|do)\s+(?:(?:pre|pod)naj(?:om|m\w*)|naj(?:om|mu)(?!\w))|"
+    r"(?:pre|pod)naj(?:om|m\w*)\s+(?:(?!byt)\w+\s+){0,2}izbu(?!\w)|"
+    r"(?:pre|pod)najom(?:\s*[:\-–]\s*|\s+)izb[auy](?!\w)|"
     r"(?:volna|samostatna)\s+izba\s+v|spolubyv|\blozko\b|ubytovan"
     r"|na\s+noc\b|/\s*noc\b|za\s+noc\b|na\s+den\b|kratkodob|airbnb|apartman\s+na\s+noc"
 )
 
+# A title that offers a room: "Izba …", "Voľná izba od 1.11.", "Samostatná
+# izba pre 1 osobu". Only at the start of the title — inside a whole flat's
+# ad "obývačka a samostatná izba" is one of its rooms.
+_ROOM_TITLE_RE = re.compile(r"\W*(?:(?:volna|samostatna|volnu|samostatnu)\s+)?izb[auy](?!\w)")
+
 
 def is_long_term_flat(*texts: str) -> bool:
     """False for a room, a bed, a shared or a short let. The first text is
-    the title: one that starts with "Izba" offers a room."""
-    if texts and re.match(r"\W*izb[auy](?!\w)", _fold(texts[0])):
+    the title: one that starts with "Izba" (or "Voľná/Samostatná izba")
+    offers a room."""
+    if texts and _ROOM_TITLE_RE.match(_fold(texts[0])):
         return False
     folded = " ".join(_fold(t) for t in texts)
     return not _NOT_A_FLAT_RE.search(folded)

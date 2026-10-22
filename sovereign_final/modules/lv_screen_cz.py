@@ -134,10 +134,13 @@ _NAME_END = re.compile(
     r"(?<!\w)na\s+(?:byt|jednotk|nebyt|nemovit|parc|pozem|stavb|podil)"
 )
 
+# "Služebnost bytu" / "Věcné břemeno bytu" is a right to live in it. The
+# generic type "Věcné břemeno užívání" is not on its own: its entry says what
+# is used (a flat — "užívání bytu" — or a strip of land for a cable).
 _PERSONAL_USE_RE = re.compile(
     r"doziv|bydlen|(?<!\w)pozivan|(?<!\w)vymen(?:ek|ku|kem)(?!\w)|"
     r"uzivan\w*\s+(?:bytu|byt|jednotk|nemovit|stavb|domu|mistnost)|"
-    r"(?:sluzebnost|bremen)\w*\s+(?:bytu|uzivan\w*)")
+    r"(?:sluzebnost|bremen)\w*\s+bytu")
 _TECHNICAL_RE = re.compile(
     r"inzenyr|(?<!\w)sit(?:e|i|emi)?(?!\w)|vedeni|elektr|plyn|vodovod|vodn\w*\s+dil|"
     r"kanaliz|rozvod|energet|distribuc|telekom|trafostanic|teplovod|potrub|pripojk|"
@@ -153,6 +156,26 @@ _PUBLIC_HOLDER_RE = re.compile(
 # "Povinnost k": a surname or a street is no utility line.
 _HOLDER_BLOCK_RE = re.compile(
     r"(?:opravnen\w*\s+pro|ve\s+prospech\w*)[\s\S]*?(?=(?<!\w)povinnost\w*\s+k(?!\w)|$)")
+_HOLDER_MARKER_RE = re.compile(r"(?:opravnen\w*\s+pro|ve\s+prospech\w*)\s*:?\s*")
+# A company's legal form, in its name ("Testovací teplárna a.s.") or right
+# after it (", a. s.", ", s.r.o.", ", spol. s r.o.") — folded text.
+_COMPANY_FORM_RE = re.compile(r"(?<!\w)(?:a\.\s*s\.|s\.\s*r\.\s*o\.|spol\.\s*s\s*r\.\s*o\.)")
+
+
+def _holder_evidence(block) -> str:
+    """What of a holder's block may say what an easement is for: the name of a
+    company ("ČEZ Distribuce, a. s." — a distribution company's easement is a
+    line or a pipe, whatever the deed calls it), never a person's name nor
+    anyone's address."""
+    rest = block.group()[_HOLDER_MARKER_RE.match(block.group()).end():]
+    cut = _NAME_END.search(rest)
+    name = rest[:cut.start()] if cut else rest
+    form = _COMPANY_FORM_RE.search(name)
+    if form:                    # "… a.s. Plynární 5": the street is not the name
+        return f" {name[:form.end()]} "
+    if _COMPANY_FORM_RE.match(rest[len(name):].lstrip(" \t,")):
+        return f" {name} "
+    return " "
 
 
 def _tier(label: str, entry_text: str, holder: str) -> tuple[str, str]:
@@ -161,7 +184,7 @@ def _tier(label: str, entry_text: str, holder: str) -> tuple[str, str]:
     if label == "věcné břemeno":
         if _PERSONAL_USE_RE.search(entry_text):
             return "hard", "lifetime right to use or live in it"
-        if _TECHNICAL_RE.search(_HOLDER_BLOCK_RE.sub(" ", entry_text)):
+        if _TECHNICAL_RE.search(_HOLDER_BLOCK_RE.sub(_holder_evidence, entry_text)):
             return "soft", "utility / access easement"
         return "hard", "kind of easement not recognised"
     if label == "předkupní právo":
@@ -300,13 +323,36 @@ def screen_lv_cz(lv_text) -> list[dict]:
 
 _BULLET_RE = re.compile(r"•[ \t]*([^\s•][^\n•]*)")
 _RULE_RES = tuple(rx for _, _, rx in VOCABULARY.rules)
+# For finding entries only (the screen keeps _norm's bullets): a bullet in
+# capitals ("O NAŘÍZENÍ …" — only at a line's start, so the "O" of "POZNÁMKA
+# O UZAVŘENÍ SMLOUVY" is no bullet), copied as "○", followed by a
+# non-breaking space, or left on a line of its own by a PDF copy.
+_CAPS_BULLET_RE = re.compile(
+    r"^([ \t\u00a0]*)O(?=(?:[ \t\u00a0]+|[ \t\u00a0]*\n[ \t\u00a0]*)[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ])", re.M)
+_BULLET_LOOSE_RE = re.compile(
+    r"(?:(?<=\s)|^)[o◦○▪●•](?:[ \t\u00a0]+|[ \t\u00a0]*\n[ \t\u00a0]*)"
+    r"(?=[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ])", re.M)
+# A line that only goes on with the entry before it: its holder, what it
+# burdens, its deed ("Listina …") — after a register number the entry cited
+# ("… dle V-3333/2026-101") or a deed of its own.
+_CONTINUATION_RE = re.compile(
+    r"\W*(?:povinnost\w*\s+k(?!\w)|opravnen\w*\s+pro|ve\s+prospech|listin)")
+_NOT_A_TYPE_LINE_RE = re.compile(r"\W*(?:typ\s+vztahu|poradi)")
+
+
+def _first_line(seg: str) -> str:
+    """The first line of a (folded) segment that could name an entry: two
+    letters or more, not the "Typ vztahu" header nor a "Pořadí k …" stamp."""
+    return next((ln for ln in seg.splitlines()
+                 if len(re.findall(r"[^\W\d_]", ln)) >= 2
+                 and not _NOT_A_TYPE_LINE_RE.match(ln)), "")
 
 
 def unrecognised_entries(lv_text) -> list[str]:
     """The entries of parts C–D ("o <Typ>" bullets) that no rule above names —
     a kind of burden this screen does not know, so it cannot call the title
     clean. Empty when the text has no recognisable part C."""
-    text = _norm(lv_text)
+    text = _BULLET_LOOSE_RE.sub("•", _CAPS_BULLET_RE.sub(r"\1o", _norm(lv_text)))
     low = fold(text)
     region, c, _ = _parts(text, low)
     if not c:
@@ -318,11 +364,20 @@ def unrecognised_entries(lv_text) -> list[str]:
             out.append(re.sub(r"\s+", " ", text[m.start(1):m.end(1)]).strip()[:80])
     # A bullet copied as another glyph, lost, or in capitals hides the entry
     # from the pass above: read every entry body ("Oprávnění pro" /
-    # "Povinnost k") between register numbers and bullets too.
-    seps = sorted([(m.start(), m.end()) for m in _ENTRY_NO_CZ_RE.finditer(flow)]
-                  + [(m.start(), m.end()) for m in _PART_D_RE.finditer(low)])
-    cuts = [0] + [x for sep in seps for x in sep] + [len(flow)]
-    for start, end in zip(cuts[::2], cuts[1::2]):
+    # "Povinnost k") between register numbers and bullets too. A segment
+    # after a register number that only goes on with the entry before it
+    # (its "Povinnost k", another "Listina") is read as part of that entry.
+    seps = sorted([(m.start(), m.end(), m.group() != "•")
+                   for m in _ENTRY_NO_CZ_RE.finditer(flow)]
+                  + [(m.start(), m.end(), False) for m in _PART_D_RE.finditer(low)])
+    spans, pos, after_number = [], 0, False
+    for s, e, number in seps + [(len(flow), len(flow), False)]:
+        if spans and after_number and _CONTINUATION_RE.match(_first_line(flow[pos:s])):
+            spans[-1][1] = s
+        else:
+            spans.append([pos, s])
+        pos, after_number = e, number
+    for start, end in spans:
         seg = flow[start:end]
         if not _ENTRY_BODY_RE.search(seg) or any(rx.search(seg) for rx in _RULE_RES):
             continue
@@ -364,6 +419,12 @@ _KU_RE = re.compile(
     r"kat(?:astraln\w*)?\.?\s*uzemi\s*:?[ \t]*(\d{6})?[ \t]*(?:[-–,][ \t]*)?"
     r"([^\W\d][^\n]*?)?(?=[ \t]{2,}|[ \t]*list\w*\s+vlastnictvi|[ \t]*\n|[ \t]*$)")
 _PART_B1_RE = re.compile(r"(?<!\w)b1(?!\w)")
+# Part B as a table: a "Jednotky" heading or its "Č.p./Č.jednotky" ("Číslo
+# jednotky") column, then a row per unit — its number and its use ("1567/12
+# byt  6543/123456"). A share alone on its line ("6543/123456") is no row.
+_UNIT_TABLE_RE = re.compile(
+    r"(?<!\w)(?:c\.?\s*|cislo\s+)jednotk\w*|^[ \t]*jednotky[ \t]*$", re.M)
+_UNIT_ROW_RE = re.compile(r"^[ \t]*(\d{1,5}/\d{1,5})(?=[ \t]+[^\W\d_])", re.M)
 
 
 def lv_number_in(lv_text) -> str | None:
@@ -390,14 +451,19 @@ def ku_in(lv_text) -> tuple[str, str] | None:
 
 
 def unit_numbers(lv_text) -> set:
-    """The units ("Jednotka č. 101/5") part B of a výpis lists — the whole
-    text when it has no part B heading. More than one means its encumbrances
-    may be another unit's. A unit named in B1, C or E (an easement's
-    beneficiary, a declaration's range) is not one of the LV's."""
+    """The units ("Jednotka č. 101/5", or a row of the "Jednotky" table) part
+    B of a výpis lists — the whole text when it has no part B heading. More
+    than one means its encumbrances may be another unit's. A unit named in
+    B1, C or E (an easement's beneficiary, a declaration's range) is not one
+    of the LV's."""
     low = fold(_norm(lv_text))
     b = _PART_B_RE.search(low)
     if b:
         ends = [m.start() for m in (_PART_B1_RE.search(low, b.end()),
                                     _PART_C_RE.search(low, b.end())) if m]
         low = low[b.start():min(ends) if ends else len(low)]
-    return set(_UNIT_RE.findall(low))
+    units = set(_UNIT_RE.findall(low))
+    table = _UNIT_TABLE_RE.search(low)
+    if table:
+        units |= set(_UNIT_ROW_RE.findall(low, table.end()))
+    return units

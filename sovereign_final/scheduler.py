@@ -4,7 +4,8 @@ Runs the full pipeline every day at 06:00 CET.
 On launch it runs only to catch up: when no run has succeeded since the last
 06:00 (first start, the machine was off at 06:00, or the run failed).
 Restarting the container, Docker Desktop or the PC does not re-run a pipeline
-that already ran today.
+that already ran today. A 06:00 the machine slept through (the process was
+suspended, not restarted) runs once when it wakes.
 A run succeeds when at least one portal was read. A failed run (every scraper
 blocked, say) is retried hourly, up to three times; each attempt's outcome is
 written to data/pipeline_status.json, which the dashboard shows.
@@ -410,6 +411,14 @@ def run_pipeline(trigger: str = "06:00", holder: str | None = None,
         log.info(f"📊{tag} Done in ~{elapsed} min | {summary}"
                  + (f" | ⚠ failed: {', '.join(failed)}" if failed else ""))
     else:
+        # An attempt that began before a 06:00 and failed after it (a startup
+        # catch-up at 05:45 whose portals took past 06:00 to give up) is that
+        # 06:00's first failed attempt: under the slot it started in,
+        # retry_due() — which only retries this slot's failure — would never
+        # try it again, and the 06:00 run it ran across never fires.
+        if last_slot(end).isoformat() != slot:
+            slot, attempt = last_slot(end).isoformat(), 1
+            status.update(slot=slot, attempt=attempt)
         retry = end + RETRY_AFTER if attempt < MAX_ATTEMPTS else None
         if holder and holder != "scheduler":   # ▶ RUN EVERYTHING: no scheduler may be running to retry
             then = "Click ▶ RUN EVERYTHING to try again."
@@ -509,7 +518,17 @@ def run_all_markets(trigger: str = "06:00", holder: str | None = None,
         except pipeline_state.PipelineBusy as busy:
             error = f"{busy} — still busy after {LOCK_WAIT_S // 60} min"
             log.error(f"❌ {error}")
+            now = datetime.now(TZ)
             for m in todo:
+                # The lock holder (▶ RUN EVERYTHING, say) may have run this
+                # market since the last 06:00 while we waited: its fresh
+                # success stands — a "failed" over it would never be retried
+                # (nothing is owed) and would show FAILED all day.
+                if not catch_up_due(now, read_last_run(m)):
+                    log.info(f"   [{m.upper()}] already ran since the last 06:00 — "
+                             f"not recorded as failed.")
+                    results[m] = True
+                    continue
                 _record_failure(m, trigger, None, error)
                 results[m] = False
         except Exception as e:
@@ -561,6 +580,30 @@ def retry_failed_run() -> None:
         _RUN_GUARD.release()
 
 
+def arm(scheduler) -> None:
+    """Add the daily 06:00 run and the 10-minute retry check to `scheduler`.
+
+    The 06:00 run has no misfire grace: a process that was asleep at 06:00
+    (the PC or Docker Desktop's VM suspended — neither restarts the
+    container, so no startup catch-up runs) runs the missed 06:00 once when
+    it wakes, at any hour, as a startup catch-up would. With a grace time
+    APScheduler dropped it, and the retry check never ran it either (it
+    retries failed runs only). coalesce: several missed 06:00s run once."""
+    scheduler.add_job(
+        run_daily,
+        trigger=CronTrigger(hour=RUN_HOUR, minute=0, timezone=TZ),
+        id="daily_pipeline",
+        misfire_grace_time=None,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        retry_failed_run,
+        trigger=IntervalTrigger(minutes=10, timezone=TZ),
+        id="retry_failed_run",
+        coalesce=True,
+    )
+
+
 if __name__ == "__main__":
     _setup_logging()
     log.info(f"⏰ Sovereign Scheduler — 06:00 CET daily · markets: "
@@ -579,18 +622,7 @@ if __name__ == "__main__":
             run_all_markets(trigger="catch-up", which=owed)
 
     scheduler = BlockingScheduler(timezone=TZ)
-    scheduler.add_job(
-        run_daily,
-        trigger=CronTrigger(hour=RUN_HOUR, minute=0, timezone=TZ),
-        id="daily_pipeline",
-        misfire_grace_time=3600,
-    )
-    scheduler.add_job(
-        retry_failed_run,
-        trigger=IntervalTrigger(minutes=10, timezone=TZ),
-        id="retry_failed_run",
-        coalesce=True,
-    )
+    arm(scheduler)
     log.info("✅ Scheduler armed. Next run: 06:00 CET (a failed run is retried hourly, "
              f"{MAX_ATTEMPTS - 1}× a day).")
     try:

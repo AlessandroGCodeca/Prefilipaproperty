@@ -72,6 +72,11 @@ def geocode(address: str) -> tuple[float | None, float | None]:
 
 # ── Places Queries ────────────────────────────────────────────────────────────
 def nearest_transit(lat: float, lng: float) -> float:
+    """Metres to the nearest transit stop, or 9999.0 when none is found.
+
+    Google's Nearby Search lists results by prominence, not distance, so the
+    first result is often a main station a kilometre away while a tram stop
+    sits at the door: the nearest is the shortest distance over all results."""
     if not GOOGLE_API_KEY:
         elements = risk_data.fetch_osm(lat, lng)
         t = risk_data.classify_osm(elements, lat, lng)["nearest_transit_m"] if elements else None
@@ -81,10 +86,15 @@ def nearest_transit(lat: float, lng: float) -> float:
             "location": f"{lat},{lng}", "radius": 2000,
             "type": "transit_station", "key": GOOGLE_API_KEY,
         }, timeout=10)
-        results = r.json().get("results", [])
-        if results:
-            rl = results[0]["geometry"]["location"]
-            return _haversine(lat, lng, rl["lat"], rl["lng"])
+        dists = []
+        for p in r.json().get("results", []):
+            try:
+                rl = p["geometry"]["location"]
+                dists.append(_haversine(lat, lng, float(rl["lat"]), float(rl["lng"])))
+            except (KeyError, TypeError, ValueError):
+                continue        # a result without a usable location
+        if dists:
+            return min(dists)
     except Exception as e:
         log.warning(f"    Transit error: {e}")
     return 9999.0

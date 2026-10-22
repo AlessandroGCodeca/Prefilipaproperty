@@ -119,10 +119,14 @@ def build_rental(source: str, url: str, title: str, text: str, location: str = "
     size = size or area_from_text(title) or area_from_text(text)
     if not is_plausible_rent(rent, size):
         return None
-    # One pass over location + title + text: the extractor prefers a suburb
-    # over a city, and the portal's location field often names only the city
-    # ("Bratislava") while the title names the part ("… Petržalka").
-    district = _extract_location_from_text(f"{location} {title} {text}")
+    # The portal's own location field says where the flat is. The portal often
+    # names only the city ("Bratislava") while the title names the part
+    # ("… Petržalka"), so title and text may refine it to a part of that same
+    # town — but another town they mention ("pre ľudí pracujúcich v
+    # Bratislave", an agent called Martin) does not replace it.
+    own = _extract_location_from_text(location)
+    found = _extract_location_from_text(f"{location} {title} {text}")
+    district = found if not own or found == own or found.endswith(", " + own) else own
     if not district:
         return None                      # a comp with no place is no comp
     now = now or datetime.now(timezone.utc).isoformat()

@@ -120,6 +120,14 @@ def _is_street_name(text: str, start: int) -> bool:
                 or _STREET_BEFORE_RE.search(text, 0, start))
 
 
+# "záhradný byt" — a garden flat, an ordinary flat for sale: the adjective
+# followed by the flat's own noun, with at most a few room/layout tokens in
+# between ("Záhradný 2-izbový byt", "3i záhradný byt", "záhradného bytu").
+_GARDEN_FLAT_RE = re.compile(
+    r"zahradn[^\W\d_]*[\s\-–]+(?:[^\s\-–]*(?:\d|izb)[^\s\-–]*[\s\-–]+){0,3}"
+    r"(?=" + _APARTMENT_NOUN_RE.pattern + r")")
+
+
 def _excludes(text: str, m: "re.Match[str]") -> bool:
     """Whether one keyword hit in `text` (folded) makes it a non-apartment.
 
@@ -127,9 +135,12 @@ def _excludes(text: str, m: "re.Match[str]") -> bool:
     byt s garážou", "byt so záhradou", "2-izb. byt, Obchodná" — while one before
     it is what the listing is: "Garáž pri byte", "Rodinný dom s 2 bytmi". A
     street name ("Obchodná ulica", "ul. Skladová", "Záhradnícka 45") is never
-    the property. ALWAYS_EXCLUDE_KEYWORDS count wherever they are."""
+    the property, nor is "záhradný" when it describes the flat ("Záhradný
+    2-izbový byt"). ALWAYS_EXCLUDE_KEYWORDS count wherever they are."""
     if m.group(0) in _ALWAYS_STEMS:
         return True
+    if m.group(0) == "zahrad" and _GARDEN_FLAT_RE.match(text, m.start()):
+        return False
     if _APARTMENT_NOUN_RE.search(text, 0, m.start()):
         return False
     return not _is_street_name(text, m.start())
@@ -153,10 +164,54 @@ def matches_keywords(pattern: "re.Pattern[str]", *texts: str) -> bool:
 
 _EXCLUDE_RE = keyword_pattern(EXCLUDE_KEYWORDS)
 
+# A share of a flat, not the flat (the Slovak twin of cz_common._SHARE_RE):
+# "Predaj spoluvlastníckeho podielu 1/2 na byte", "Predám podiel na byte",
+# "Predaj 2/3 podielu bytu", "Predám 1/2 bytu", "id. 1/2". The price is for
+# part of the flat while its size is the whole flat's, so €/m² reads cheap.
+# A flat's share of the land or of the common parts ("s podielom na pozemku",
+# "spoluvlastnícky podiel na spoločných častiach domu") is no sale of a share,
+# and a floor ("1/2 poschodia", "2/2 podlažie") is no fraction of the flat.
+# Words may be joined by hyphens, as in a URL slug ("predaj-podielu-na-byte").
+_SEP = r"[\s\-–]+"
+_NOT_LAND_OR_COMMON = (r"(?!\w)(?!" + _SEP + r"(?:\d{1,2}\s*/\s*\d{1,2}" + _SEP + r")?"
+                       r"(?:na" + _SEP + r")?(?:pozem|spolocn))")
+_SHARE_RE = re.compile(
+    r"(?<![^\W\d_])(?:predaj\w*|preda[mv]\w*|ponuk\w*)" + _SEP +
+    r"(?:(?:id\.?|idealn\w*|spoluvlastn\w*)" + _SEP + r")?"
+    r"(?:(?P<n1>\d{1,2})\s*/\s*(?P<d1>\d{1,2})" + _SEP + r")?"
+    r"podiel\w*" + _NOT_LAND_OR_COMMON +
+    r"|(?<![^\W\d_])(?:id\.|idealn\w*)\s*(?P<n2>\d{1,2})\s*/\s*(?P<d2>\d{1,2})(?!\d)"
+    r"|(?<![\w/])(?P<n3>\d{1,2})\s*/\s*(?P<d3>\d{1,2})" + _SEP +
+    r"(?:podiel\w*" + _NOT_LAND_OR_COMMON +
+    r"|(?:(?:z|na)" + _SEP + r")?byt(?:u|e)?(?!\w))"
+    r"|(?<![^\W\d_])spoluvlastnick\w*" + _SEP + r"podiel\w*" + _NOT_LAND_OR_COMMON +
+    r"|(?<![^\W\d_])podiel\w*" + _NOT_LAND_OR_COMMON + _SEP + r"(?:na|z)" + _SEP +
+    r"(?:[\w.]+" + _SEP + r"){0,2}byt(?:u|e|om)?(?!\w)")
+
+
+_FRACTION_AFTER_RE = re.compile(r"\s*(\d{1,2})\s*/\s*(\d{1,2})(?!\d)")
+
+
+def _is_share(folded: str) -> bool:
+    """True when the folded text sells a share of a flat. A fraction n/n
+    ("podiel 1/1") is the whole flat, not a share of it."""
+    for m in _SHARE_RE.finditer(folded):
+        fractions = [(m.group(f"n{i}"), m.group(f"d{i}")) for i in (1, 2, 3)]
+        after = _FRACTION_AFTER_RE.match(folded, m.end())
+        if after:
+            fractions.append(after.groups())
+        if any(n and d and int(n) >= int(d) for n, d in fractions):
+            continue
+        return True
+    return False
+
 
 def is_excluded_listing(*texts: str) -> bool:
     """True when any of the given strings (title, URL, …) names a
-    non-apartment listing per EXCLUDE_KEYWORDS (see matches_keywords)."""
+    non-apartment listing per EXCLUDE_KEYWORDS (see matches_keywords), or
+    the sale of a share of a flat (_SHARE_RE)."""
+    if any(_is_share(_fold(t)) for t in texts):
+        return True
     return matches_keywords(_EXCLUDE_RE, *texts)
 
 
@@ -178,7 +233,11 @@ APARTMENT_MAX_M2 = 500.0
 _AREA_M2_RE = re.compile(r"(\d{1,4}(?:[.,]\d+)?)\s*m(?:²|2)\b", re.I)
 # "58 m" with no superscript. Also matches "s 6m logiou" — a 6 m² loggia, not
 # a 6 m² flat — so this form is only consulted after the one above fails.
-_AREA_BARE_M_RE = re.compile(r"(\d{1,4}(?:[.,]\d+)?)\s*m\b", re.I)
+# A distance in metres is no area: "300 m od zastávky", "200 m k lesu",
+# "100 m do centra", "150 m pešo".
+_AREA_BARE_M_RE = re.compile(
+    r"(\d{1,4}(?:[.,]\d+)?)\s*m\b"
+    r"(?!\s*(?:od|k|ku|do|pred|za|chodze|chôdze|pesi|peši|peso|pešo)\b)", re.I)
 
 
 def area_from_text(text: str, min_m2: float = APARTMENT_MIN_M2,

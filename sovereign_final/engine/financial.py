@@ -1210,6 +1210,8 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
     Each component contributes points out of its own max; only components with
     data are counted, and the score is rescaled to 100 over the available maxima
     so a missing location score (no Google API) doesn't unfairly sink the grade.
+    The discount to the regional median is the exception: a listing with no
+    benchmark earns 0 of its 25 rather than being graded without it.
 
     Components & weights:
       Financial (50): cap rate (25) + discount to the regional median (25)
@@ -1239,10 +1241,14 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
         if cap is not None:
             points += max(0.0, min(cap / 0.06, 1.0)) * 25   # 6%+ cap = full marks
             max_pts += 25
+        # The discount's 25 always count. With no regional median (WHITE "no
+        # benchmark" — every Czech listing until a sale-price CSV fills the
+        # medians) it earns none of them: leaving it out of the maximum graded
+        # the flat on cap rate alone, above one that is cheap against its median.
+        max_pts += 25
         if discount is not None:
             # At or above the median → 0 pts, 30%+ below → full 25
             points += max(0.0, min(discount / 0.30, 1.0)) * 25
-            max_pts += 25
     else:
         return 0, "—"
 

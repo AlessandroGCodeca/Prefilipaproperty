@@ -496,7 +496,7 @@ def _parse_api_item(item: dict, now: str, require_url_field: bool = False) -> di
         # never has its detail page opened — so without this its district stays
         # blank and the rent estimate silently falls back to €6.50/m². The slug
         # we just built the URL from names the town ("…-corvus-atrium-malacky").
-        district = _district(addr)
+        district = _detail_district(addr)
         if not addr or not district:
             slug_data = _parse_slug(url)
             addr = addr or slug_data.get("address", "")
@@ -926,7 +926,7 @@ def _scrape_detail_page(page, url: str) -> dict:
         fallback = _fallback_price(
             text or html,
             size_m2=data.get("size") or 0.0,
-            district=_district(data.get("address") or "") or (data.get("address") or ""),
+            district=_detail_district(data.get("address") or "") or (data.get("address") or ""),
         )
         if fallback:
             data["price"] = fallback
@@ -957,6 +957,23 @@ _TEXT_LOCATION_PATTERNS: list[tuple[re.Pattern, str, str]] = []
 # the text mentions Bratislava in any form ("v Bratislave", "Bratislavský kraj").
 _GENERIC_CITY_PARTS = {"Staré Mesto", "Nové Mesto"}
 _MENTIONS_BRATISLAVA = re.compile(r"(?<!\w)bratislav", re.IGNORECASE)
+
+# The regional hubs. Pages and cards name them for other reasons than where
+# the flat is — a site menu ("Byty Bratislava"), a commute ("pre ľudí
+# pracujúcich v Bratislave") — so they count only when the text names no
+# other town or city part.
+_HUB_CITIES = {"Bratislava", "Košice"}
+
+# A name in the nominative right after one of these is not where the flat is:
+# a direction ("diaľnica smer Senec") or a person ("Maklér: Martin Horváth",
+# "Kontakt: Ing. Martin", "Volajte Martin", "pán Martin", "Ing. Martin …").
+_TITLE_BEFORE_NAME = r"(?:ing|mgr|bc|judr|mudr|phdr|rndr|dr|doc|prof)\.\s*"
+_NOT_HERE_BEFORE_RE = re.compile(
+    r"(?:(?<!\w)(?:smer(?:om)?(?:\s+na)?|makl[eé]r(?:k[ay])?"
+    r"|kontakt(?:ujte|n[aá]\s+osoba)?|volajte|p[aá]n)\s*[:\-–]?\s*"
+    r"|(?<!\w)" + _TITLE_BEFORE_NAME + r")(?:" + _TITLE_BEFORE_NAME + r")*$",
+    re.IGNORECASE)
+_NOT_HERE_LOOKBACK = 60
 
 
 def _words_pattern(words) -> str:
@@ -1054,27 +1071,60 @@ def _extract_location_from_text(text: str) -> str:
         return ""
     snippet = text[:4000]
     hits = [
-        (*_place_span(m), rank)
+        (*_place_span(m), rank, m.group("loc") is None)
         for rank, (pattern, _, _) in enumerate(_TEXT_LOCATION_PATTERNS)
         for m in pattern.finditer(snippet)
     ]
     hits = [
-        (start, end, rank) for start, end, rank in hits
+        (start, end, rank) for start, end, rank, nominative in hits
         if not any(s <= start and end <= e and e - s > end - start
-                   for s, e, _ in hits)
+                   for s, e, _, _ in hits)
+        and not (nominative and _NOT_HERE_BEFORE_RE.search(
+            snippet[max(0, start - _NOT_HERE_LOOKBACK):start]))
     ]
     if not hits:
         return ""
-    ranks = sorted({rank for _, _, rank in hits})
-    _, name, parent = _TEXT_LOCATION_PATTERNS[ranks[0]]
+    # The first place the text names, in text order — not the longest name
+    # anywhere in it. A regional hub counts only when nothing else is named.
+    in_order = [rank for _, _, rank in sorted(hits)]
+    first = next((r for r in in_order
+                  if _TEXT_LOCATION_PATTERNS[r][1] not in _HUB_CITIES), in_order[0])
+    _, name, parent = _TEXT_LOCATION_PATTERNS[first]
     if not parent:
         return name
     if name in _GENERIC_CITY_PARTS and not _MENTIONS_BRATISLAVA.search(snippet):
-        cities = [_TEXT_LOCATION_PATTERNS[r][1] for r in ranks
+        cities = [_TEXT_LOCATION_PATTERNS[r][1] for r in in_order
                   if not _TEXT_LOCATION_PATTERNS[r][2]]
         if cities:
             parent = cities[0]
     return f"{name}, {parent}"
+
+
+_POSTCODE_RE = re.compile(r"\d{3}\s?\d{2}")
+_KRAJ_RE = re.compile(r"(?<!\w)kraj(?!\w)", re.IGNORECASE)
+
+
+def _detail_district(address: str) -> str:
+    """The district a detail page's address names.
+
+    A known city part keeps its city ("Petržalka, Bratislava"), as bazos,
+    _parse_slug and the backfills store it, so engine.match_rent_key finds the
+    part's rent and median: the last comma part alone was "Bratislava". A
+    JSON-LD address ending in its region or postcode ("…, Košický kraj, 040
+    01") gives the town named before them. The last part still wins when it
+    is the found town with more detail ("Bratislava III", "Košice-Juh").
+    """
+    address = address or ""
+    parts = [p.strip() for p in address.split(",")]
+    parts = [p for p in parts
+             if p and not _POSTCODE_RE.fullmatch(p) and not _KRAJ_RE.search(p)]
+    last = parts[-1] if parts else ""
+    found = _extract_location_from_text(address)
+    if not found:
+        return last
+    if last.lower().startswith(found.lower()) and len(last) > len(found):
+        return last
+    return found
 
 
 def _apply_detail(listing: dict, detail: dict) -> None:
@@ -1093,7 +1143,7 @@ def _apply_detail(listing: dict, detail: dict) -> None:
         listing["rooms"] = detail["rooms"]
     if detail.get("address"):
         listing["address_raw"] = detail["address"]
-        listing["district"] = _district(detail["address"])
+        listing["district"] = _detail_district(detail["address"])
     if detail.get("energy"):
         listing["energy_class"] = detail["energy"]
     if detail.get("image"):

@@ -53,7 +53,7 @@ run).
 The start file serves the dashboard to this Mac only (`--server.address
 127.0.0.1`), as `docker-compose.yml` does. A bare `streamlit run app.py`
 listens on every network, so anyone on the same Wi-Fi could open it — see
-below.
+below. `restart.sh` also serves it to this computer only.
 
 Moving to a newer download of the project: copy the `data/` folder (the
 database: listings, deal stages, notes) and `.env` from the old folder into
@@ -257,6 +257,8 @@ Each listing also gets a **composite deal grade (A–D)** blending financial
 (cap rate + discount to the regional median), location, energy class,
 condition and risk flags — so a GREEN deal in a poor location doesn't outrank
 a genuinely solid one. An LV that is verified clean scores above an unverified one.
+A listing with no regional median earns none of the discount points, so it
+can't outrank one that is measured against its market.
 A price below the sanity floor gets no grade ("—"): it is a data error, not a deal.
 
 ---
@@ -434,7 +436,9 @@ How a check runs:
 3. **The flat's own LV verifies it.** Type the flat's LV number (from the
    seller's papers or the agent) and its katastrálne územie into the card and
    press RE-VERIFY LV — or enter many at once in the **LV TO-DO** tab, which
-   lists every GREEN / YELLOW deal still waiting for one. A shared LV with a
+   lists every GREEN / YELLOW deal still waiting for one. RE-VERIFY LV reads
+   the cadastre afresh; the daily run may use a copy read within
+   `CADASTRE_CACHE_TTL_DAYS` (30). A shared LV with a
    flag on it stays UNVERIFIED until you've checked part C against the flat's
    number.
 
@@ -444,8 +448,10 @@ rejects a flat only once its own LV has been read. Until then the flat is
 
 The screen (`modules/lv_screen.py`) reads each encumbrance separately: a lien
 passes only when its **own** creditor ("v prospech …") is a bank or ŠFRB, and
-an exekúcia / konkurz / súdny spor never passes — not even when the optional
-Claude read says otherwise. A report with no part C, or one cut short at
+an exekúcia / konkurz / súdny spor — or a dražba (from part C on), výkon
+záložného práva, predbežné opatrenie, zaistenie or a dispute over ownership —
+never passes, not even when the optional Claude read says otherwise. A
+leasing, insurance or factoring company of a banking group is not a bank. A report with no part C, or one cut short at
 the reader's length cap (`LV_TEXT_MAX_CHARS` in `kataster_scraper.py`), is
 never called clean: it stays UNVERIFIED. Matching is inflection-aware ("začatie exekúcie",
 "záložným právom"). An easement is read within its own entry (up to the next

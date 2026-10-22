@@ -15,4 +15,7 @@ fi
 mkdir -p logs
 echo $$ > "$PIDFILE"
 # exec keeps this PID, so the file names the Streamlit process itself.
-exec streamlit run app.py
+# 127.0.0.1: this computer only, as "Start Sovereign.command" and Docker
+# (docker-compose.yml) do it. Streamlit on its own listens on every network,
+# so anyone on the same Wi-Fi could open the dashboard and press its buttons.
+exec streamlit run app.py --server.address 127.0.0.1

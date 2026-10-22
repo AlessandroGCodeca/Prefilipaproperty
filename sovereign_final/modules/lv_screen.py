@@ -15,8 +15,9 @@ This screen reads each encumbrance on its own:
   - A lien (záložné právo) is cleared only by ITS OWN creditor — the name after
     "v prospech" (or "oprávnený" / "veriteľ" / "pre") in the same entry. A bank
     named in some other entry clears nothing.
-  - Distress entries (exekúcia, konkurz, súdny spor / žaloba) are never cleared
-    by anything, whoever the creditor is.
+  - Distress entries (exekúcia, konkurz, súdny spor / žaloba, výkon záložného
+    práva, dražba, predbežné opatrenie, zaistenie) are never cleared by
+    anything, whoever the creditor is.
   - Easements and pre-emption rights are tiered. A lifetime right to use or
     live in the flat, a pre-emption right held by a person or a company, and
     any easement whose kind can't be read are hard stops. A technical easement
@@ -58,7 +59,20 @@ def fold(text: str) -> str:
 _RULES = (
     ("exekúcia",       "distress",    r"exeku"),           # exekúcia, exekučný príkaz, exekútor
     ("konkurz",        "distress",    r"konkurz"),
-    ("súdny spor",     "distress",    r"sudn\w*\s+(?:spor|konan)\w*|(?<!\w)zalob\w*"),
+    # A court case, a court's note that the owner's title is disputed
+    # ("poznámka o spornosti"), or proceedings to determine who owns it.
+    ("súdny spor",     "distress",    r"sudn\w*\s+(?:spor|konan)\w*|(?<!\w)zalob\w*|"
+                                      r"(?<!\w)spornost\w*|urcen\w*\s+vlastnick\w*\s+prav\w*"),
+    # A pledgee has started enforcing its lien: the bank's name on the note
+    # clears nothing.
+    ("výkon záložného práva", "distress", r"vykon\w*\s+zalozn\w*\s+prav\w*"),
+    # An auction, a court's ban on disposing of the flat, a seizure in
+    # criminal proceedings: a sale may be void, or the flat may go to someone
+    # else. (An auction counts from part C on: SK_VOCABULARY.part_c_only.)
+    ("dražba",         "distress",    r"(?<!\w)drazb\w*|(?<!\w)drazobn\w*"),
+    ("predbežné opatrenie", "distress", r"predbezn\w*\s+opatren\w*|zakaz\w*\s+naklad\w*"),
+    ("zaistenie",      "distress",
+     r"zaisten\w*\s+(?:nehnutel\w*|majetk\w*|bytu)|trestn\w*\s+poriad\w*"),
     ("vecné bremeno",  "encumbrance", r"vecn\w*\s+bremen\w*"),
     ("predkupné právo", "encumbrance", r"predkupn\w*\s+prav\w*"),
     ("zabezpečovacie prevodné právo", "lien",
@@ -81,11 +95,15 @@ _REFERENCE_BEFORE = re.compile(r"zmluv|zriaden|zanik|vymaz|zrus")
 
 # Slovak law reserves the word "banka" for licensed banks, so the word itself
 # identifies one; the config list adds names and abbreviations that don't
-# contain it (VÚB, ČSOB, Oberbank, mBank, …).
+# contain it (VÚB, ČSOB, Oberbank, mBank, …) — as whole words. A non-bank
+# company of a banking group (leasing, insurance, factoring, an investment
+# firm) or a credit union is no bank, whatever its name shares with one.
+_NON_BANK = r"leasing|poistov|fa[ck]toring|invest(?!ic)|druzstv"
 _BANK_RE = re.compile(
+    rf"^(?!.*(?:{_NON_BANK})).*?(?:"
     r"(?<!\w)bank(?:a|y|e|u|ou|ovi|ami)?(?!\w)|sporiteln|"
-    + "|".join(re.escape(fold(b)) for b in LV_BANK_NAMES)
-)
+    + "|".join(rf"(?<!\w){re.escape(fold(b))}(?!\w)" for b in LV_BANK_NAMES)
+    + ")", re.S)
 
 _CREDITOR_SPAN = 60    # longest creditor name read after the marker
 _MARKER_SPAN   = 120   # how far after a lien phrase its creditor may start
@@ -94,8 +112,12 @@ _ENTRY_SPAN    = 400   # a back-reference must sit this close to its lien
 # ── Tiers for vecné bremeno / predkupné právo (folded text) ──────────────────
 # A right for someone to use or live in the flat for life: whoever buys it,
 # buys a sitting occupant. Always a hard stop, even beside a technical word.
+# The noun ("doživotného užívania bytu", "bývania") or the verb ("právo
+# užívať byt", "bývať v byte", "do smrti").
 _PERSONAL_USE_RE = re.compile(
-    r"doziv|dozit|byvan|uzivan\w*\s+(?:bytu|bytom|nehnutel|stavb|domu|miestnost)")
+    r"doziv|dozit|byvan|(?<!\w)byvat(?!\w)|(?<!\w)do\s+smrti(?!\w)|"
+    r"uzivan\w*\s+(?:bytu|bytom|nehnutel|stavb|domu|miestnost)|"
+    r"(?<!\w)uzivat\s+(?:(?:byt|dom)(?:u|om|e)?(?!\w)|nehnutel|stavb|miestnost)")
 # Lines, pipes and access across the land: common, and no bar to letting.
 _TECHNICAL_RE = re.compile(
     r"inzinier|siet|vedeni|elektr|plyn|vodovod|vodn\w*\s+stavb|kanaliz|rozvod|"
@@ -113,9 +135,16 @@ _ENTRY_NO_RE = re.compile(r"(?<!\w)[vzp]\s*-?\s*\d{1,6}/\d{2,4}")
 
 
 # The holder's name and address ("v prospech Jana Nováková, Plynárenská 7, …"),
-# up to the right's own description: a street or a surname is no utility line.
+# up to the right's own description ("- právo …", "spočívajúce v …", "podľa
+# …", "v zmysle zák. …", "na uloženie …"): a street or a surname is no
+# utility line.
 _HOLDER_BLOCK_RE = re.compile(
-    r"v\s+prospech[\s\S]*?(?=\s[-–—]\s|(?<!\w)(?:prav[oae]|spociva\w*|podla|v\s+rozsahu)(?!\w)|$)")
+    r"v\s+prospech[\s\S]*?(?=\s[-–—]\s|§|(?<!\w)(?:prav[oae]|spociva\w*|podla|v\s+rozsahu|"
+    r"v\s+zmysle|zak(?:on\w*|\.)|na\s+(?:ulozen|umiestnen|zriaden|vedeni)\w*)(?!\w)|$)")
+# A company's legal form or IČO in the holder's block: then the holder's own
+# name ("Západoslovenská energetika, a.s.", "Slovak Telekom, a.s.") says what
+# the easement serves. A person's surname ("Kabelková") says nothing.
+_COMPANY_RE = re.compile(r"(?<!\w)(?:a\.\s?s\.|s\.\s?r\.\s?o|s\.\s?p\.|ico)(?!\w)")
 
 
 def _tier(label: str, entry_text: str, holder: str) -> tuple[str, str]:
@@ -124,7 +153,10 @@ def _tier(label: str, entry_text: str, holder: str) -> tuple[str, str]:
     if label == "vecné bremeno":
         if _PERSONAL_USE_RE.search(entry_text):
             return "hard", "lifetime right to use or live in it"
-        if _TECHNICAL_RE.search(_HOLDER_BLOCK_RE.sub(" ", entry_text)):
+        block = _HOLDER_BLOCK_RE.search(entry_text)
+        if _TECHNICAL_RE.search(_HOLDER_BLOCK_RE.sub(" ", entry_text)) or (
+                block and _COMPANY_RE.search(block.group())
+                and _TECHNICAL_RE.search(fold(holder))):
             return "soft", "utility / access easement"
         return "hard", "kind of easement not recognised"
     if _PUBLIC_HOLDER_RE.search(fold(holder)):
@@ -173,6 +205,24 @@ class Vocabulary:
     # A back-reference stays in its own entry: a lien phrase with an entry
     # separator (entry_no_re) since the last lien is a new lien (Czech).
     reference_needs_same_entry: bool = False
+    # Rules (by label) read only from part C's heading on, when part_c_at
+    # finds one: their word may also name, in part B, how the owner acquired
+    # the flat (bought at an auction), which burdens nothing.
+    part_c_only: frozenset = frozenset()
+    part_c_at: object = None     # (text) -> index of part C's heading, or None
+
+
+# Where part C (ťarchy — the encumbrances) starts in the report's text:
+# "ČASŤ C: ŤARCHY", "Časť C - Ťarchy", "C. ŤARCHY".
+_PART_C_RE = re.compile(r"cast\s*c\s*[:.\-–]?\s*tarch|(?<!\w)c\s*[.:]\s*tarch")
+
+
+def part_c_start(lv_text) -> int | None:
+    """Index of part C's heading in an LV text, or None when there is none to
+    recognise. Part C runs to the end of the report (notes and "Iné údaje"
+    follow the ťarchy), so everything from here on is what can block."""
+    m = _PART_C_RE.search(fold(str(lv_text or "")))
+    return m.start() if m else None
 
 
 SK_VOCABULARY = Vocabulary(
@@ -180,6 +230,7 @@ SK_VOCABULARY = Vocabulary(
     holder_markers=_CREDITOR_MARKERS[:1], reference_before=_REFERENCE_BEFORE,
     bank_re=_BANK_RE, name_end=_NAME_END, tier=_tier, entry_no_re=_ENTRY_NO_RE,
     distress_lien_prefix="exeku",
+    part_c_only=frozenset({"dražba"}), part_c_at=part_c_start,
 )
 
 
@@ -195,10 +246,12 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
     text = str(lv_text or "")
     low = fold(text)
 
+    c_at = v.part_c_at(text) if v.part_c_only and v.part_c_at else None
     hits = sorted(
         (m.start(), m.end(), label, kind)
         for label, kind, rx in v.rules
         for m in rx.finditer(low)
+        if c_at is None or label not in v.part_c_only or m.start() >= c_at
     )
     entries: list[dict] = []
     last_lien_at = None
@@ -239,9 +292,21 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
         nxt = hits[i + 1][0] if i + 1 < len(hits) else len(low)
         window_end = min(nxt, end + _MARKER_SPAN)
         window = low[end:window_end]
-        is_reference = bool(v.reference_before.search(low[max(0, start - 40):start]))
-        markers = v.creditor_markers[:1] if is_reference else v.creditor_markers
+        ref_from = max(0, start - 40)
+        if not v.reference_needs_same_entry:
+            # "… podľa zmluvy V 2797/2013  2 V 512/2019 - Záložné právo pre …":
+            # a contract word before the next entry's register number belongs
+            # to the entry before; it makes this entry's lien no reference.
+            for sp in v.entry_no_re.finditer(low, ref_from, start):
+                ref_from = sp.end()
+        is_reference = bool(v.reference_before.search(low[ref_from:start]))
+        # A reference reads only a creditor it names itself ("v prospech", or
+        # in Slovak the older "oprávnený" / "veriteľ" — not a bare "pre",
+        # as in "zmluvy … pre zabezpečenie").
+        markers = (v.creditor_markers[:1 if v.reference_needs_same_entry else 3]
+                   if is_reference else v.creditor_markers)
         marker = None
+        entry_stop = None
         if v.reference_needs_same_entry and not is_reference:
             # A Czech entry names its creditor ("Oprávnění pro" / "ve
             # prospěch") anywhere before the next entry — after a long claim
@@ -256,6 +321,22 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
             marker = rx.search(window)
             if marker:
                 break
+        if marker is None and v.reference_needs_same_entry and not is_reference:
+            # Czech, no creditor before the next hit: that hit may be the
+            # entry's own claim line naming the lien again, in lower case
+            # ("zástavní právo k zajištění pohledávky …"), so read on to the
+            # entry's end — its register number or bullet, or a hit written
+            # with a capital ("Zástavní právo smluvní"): the next entry's type
+            # line, its bullet lost.
+            sep = v.entry_no_re.search(low, end)
+            entry_stop = sep.start() if sep else len(low)
+            entry_stop = next((h[0] for h in hits[i + 1:]
+                               if end <= h[0] < entry_stop and text[h[0]].isupper()),
+                              entry_stop)
+            for rx in v.creditor_markers[:2]:
+                marker = rx.search(low[end:entry_stop])
+                if marker:
+                    break
         if marker is None and is_reference and last_lien_at is not None:
             if v.reference_needs_same_entry:
                 # Czech: the same entry runs on to the next bullet. A register
@@ -272,7 +353,13 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
                 continue
         if marker is not None:
             c_start = end + marker.end()
-            creditor = text[c_start:min(nxt, c_start + _CREDITOR_SPAN)]
+            c_stop = nxt
+            if entry_stop is not None and c_start >= nxt:
+                # Czech: the creditor follows another hit of its own entry —
+                # read the name up to the next hit after it, in this entry.
+                c_stop = min(entry_stop, next(
+                    (h[0] for h in hits[i + 1:] if h[0] >= c_start), len(low)))
+            creditor = text[c_start:min(c_stop, c_start + _CREDITOR_SPAN)]
         else:
             # No marker: the name may simply follow ("Záložné právo: Tatra
             # banka, a.s."). Anything else is a lien we can't attribute.
@@ -302,19 +389,6 @@ def _holder(text: str, low: str, end: int, entry_end: int,
         return ""
     start = end + m.end()
     return _creditor_name(text[start:min(entry_end, start + _CREDITOR_SPAN)], v.name_end)
-
-
-# Where part C (ťarchy — the encumbrances) starts in the report's text:
-# "ČASŤ C: ŤARCHY", "Časť C - Ťarchy", "C. ŤARCHY".
-_PART_C_RE = re.compile(r"cast\s*c\s*[:.\-–]?\s*tarch|(?<!\w)c\s*[.:]\s*tarch")
-
-
-def part_c_start(lv_text) -> int | None:
-    """Index of part C's heading in an LV text, or None when there is none to
-    recognise. Part C runs to the end of the report (notes and "Iné údaje"
-    follow the ťarchy), so everything from here on is what can block."""
-    m = _PART_C_RE.search(fold(str(lv_text or "")))
-    return m.start() if m else None
 
 
 def describe(entry: dict) -> str:
