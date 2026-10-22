@@ -1211,9 +1211,19 @@ def _load_stage(key, cur, *source):
     (the deal, and its stored stage) changes, or its state has gone (a closed
     card drops it); a stage the user picks since then is kept."""
     cur = cur if cur in DEAL_STAGES else DEAL_STAGES[0]
-    src_key, src = f"_src_{key}", (*source, cur)
+    _load_box(key, cur, *source)
+
+
+def _load_box(key, value, *source):
+    """Put a stored value into its keyed box, as _load_stage does for a stage
+    box: a keyed text_input also keeps its last value whatever value= says, so
+    a card left open showed (and RE-VERIFY LV or SAVE STAGE wrote back) what
+    was stored when it was opened. The box is reloaded whenever the stored
+    value (or its source) changes, or its state has gone; what the user types
+    since then is kept. The widget is then drawn without value=."""
+    src_key, src = f"_src_{key}", (*source, value)
     if key not in st.session_state or st.session_state.get(src_key) != src:
-        st.session_state[key] = cur
+        st.session_state[key] = value
         st.session_state[src_key] = src
 
 
@@ -1598,10 +1608,14 @@ def render_card(l):
         lid = l.get("id", "")
         with s1:
             cur = (stage or {}).get("stage", "NEW")
-            _load_stage(f"stg_{lid}", cur)
+            # Both boxes reload when the stored row changes (a move in DEAL
+            # PIPELINE, even one that only adds a note), so SAVE STAGE never
+            # writes back a stage or note that has been replaced since.
+            upd = (stage or {}).get("updated_at")
+            _load_stage(f"stg_{lid}", cur, upd)
+            _load_box(f"stgn_{lid}", (stage or {}).get("note") or "", upd)
             st.selectbox(T("Deal stage"), DEAL_STAGES, key=f"stg_{lid}")
-            st.text_input(T("Stage note"), value=(stage or {}).get("note") or "",
-                          key=f"stgn_{lid}",
+            st.text_input(T("Stage note"), key=f"stgn_{lid}",
                           placeholder="např. prohlídka so 10:00" if cz else "e.g. viewing Sat 10:00")
             # Demo rows aren't in the database: writing their ids would leave
             # deal stages (and LV checks, notes) for listings that don't exist.
@@ -1637,10 +1651,15 @@ def render_card(l):
 
         # The flat's own LV — the only thing that can verify it. The building
         # plot found from the map pin is a different LV (see modules/debt_bot).
+        # The boxes reload when the stored LV changes (saved in LV TO-DO, say):
+        # RE-VERIFY LV takes a box that differs from the stored LV as an edit,
+        # and a stale box would clear the saved number or put back an old one.
+        _load_box(f"lvno_{lid}", l.get("lv_number") or "")
+        _load_box(f"lvku_{lid}", l.get("cadastral_area") or "")
         v1, v2 = st.columns(2)
         with v1:
             flat_lv = st.text_input(
-                T("Flat's own LV no."), value=l.get("lv_number") or "",
+                T("Flat's own LV no."),
                 key=f"lvno_{lid}", placeholder="e.g. 4321",
                 help=("Z dokladů prodávajícího nebo od makléře. LV pozemku pod domem "
                       "není LV bytové jednotky." if cz else
@@ -1648,14 +1667,17 @@ def render_card(l):
                       "plot's LV is not the flat's."))
         with v2:
             flat_ku = st.text_input(
-                T("Katastrálne územie"), value=l.get("cadastral_area") or "",
+                T("Katastrálne územie"),
                 key=f"lvku_{lid}", placeholder="např. Vinohrady" if cz else "e.g. Petržalka",
                 help=("Název nebo kód katastrálního území." if cz else
                       "Name or numeric code of the cadastral unit."))
         lv_doc = None
         if cz:
+            # As the LV boxes: a výpis pasted since (in the REJECTED tab, say)
+            # reloads the box, so RE-VERIFY LV can't write the old text back.
+            _load_box(f"lvdoc_{lid}", _LV_DOCS.get(lid, ""))
             lv_doc = st.text_area(
-                T("LV extract (text)"), value=_LV_DOCS.get(lid, ""), key=f"lvdoc_{lid}",
+                T("LV extract (text)"), key=f"lvdoc_{lid}",
                 height=110, disabled=using_demo,
                 placeholder="Vložte text výpisu z listu vlastnictví…",
                 help="Text výpisu z LV této jednotky (CzechPOINT nebo dálkový přístup "
@@ -2252,7 +2274,7 @@ with t_pipe:
                         f'<div class="mono" style="font-size:.7rem;color:#e4eaf5">'
                         f'<a href="{esc(t["url"])}" target="_blank">{name}</a></div>'
                         f'<div class="muted">{market_badge(t)} {amt(t, t.get("price_eur") or 0)}{maxy}'
-                        f' · {str(t.get("updated_at"))[:10]}{gone}</div>{note}</div>',
+                        f' · {_local_stamp(t.get("updated_at"))[0][:10]}{gone}</div>{note}</div>',
                         unsafe_allow_html=True)
 
     st.markdown('<hr class="div">', unsafe_allow_html=True)
@@ -2279,10 +2301,11 @@ with t_pipe:
             st.rerun()
         if demo_pick:
             st.caption("Demo listing — it can't be moved.")
+        # Stored in UTC; shown in Bratislava time, as EARLIER DRAFTS is.
         hist = get_deal_stage_history(pick_id)
         if hist:
             st.markdown("".join(
-                f'<div class="brow"><span class="l">{str(h["changed_at"])[:16].replace("T", " ")}</span>'
+                f'<div class="brow"><span class="l">{_local_stamp(h["changed_at"])[0]}</span>'
                 f'<span class="v">{esc(h["stage"])}{" — " + esc(h["note"]) if h.get("note") else ""}</span></div>'
                 for h in hist), unsafe_allow_html=True)
 
@@ -2618,7 +2641,7 @@ with t2:
         if using_demo:
             st.caption("Demo listing — notes can't be saved.")
 
-        # Saved notes for this listing, newest first.
+        # Saved notes for this listing, newest first (in Bratislava time).
         from database import get_annotations
         notes = get_annotations(sel["id"])
         if notes:
@@ -2626,7 +2649,7 @@ with t2:
                         unsafe_allow_html=True)
             html = ""
             for n in notes:
-                html += (f'<div class="brow"><span class="l">{str(n.get("created_at"))[:16].replace("T", " ")}'
+                html += (f'<div class="brow"><span class="l">{_local_stamp(n.get("created_at"))[0]}'
                          f' · {n.get("vibe_score") or "—"}/10</span>'
                          f'<span class="v">{esc(n.get("note"))}</span></div>')
             st.markdown(html, unsafe_allow_html=True)

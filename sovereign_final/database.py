@@ -508,6 +508,9 @@ _ENRICHMENT_COLUMNS = {
     # The soft flags (utility easement, a municipality's pre-emption right)
     # on the flat's own LV at its last check — shown, not rejected.
     "lv_soft_flags":      "TEXT",
+    # When Location IQ last failed to geocode the listing (no row written):
+    # get_unscored_location puts it behind every listing not yet tried.
+    "location_tried_at":  "TEXT",
 }
 
 
@@ -2329,6 +2332,11 @@ def update_address(listing_id: str, district: str, city: str):
 
 
 def get_unscored_location():
+    """The listings Location IQ still has to locate: listings never tried
+    first (oldest first, as before), then the ones whose geocode failed,
+    least recently tried first. Without that order the same listings that
+    never geocode came first on every run and filled its per-run limit, and
+    the listings behind them were never located."""
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
@@ -2340,10 +2348,24 @@ def get_unscored_location():
             LEFT JOIN location_scores lc ON l.id = lc.listing_id
             WHERE l.lv_status IN ('PASS', 'UNVERIFIED')
               AND lc.listing_id IS NULL AND l.is_active=1
+            ORDER BY l.location_tried_at IS NOT NULL, l.location_tried_at, l.rowid
         """).fetchall()
     finally:
         conn.close()
     return [dict(r) for r in rows]
+
+
+def mark_location_tried(listing_id: str) -> None:
+    """Record that Location IQ could not geocode the listing just now, so the
+    next run tries it after every listing not yet tried."""
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        conn.execute("UPDATE listings SET location_tried_at=? WHERE id=?",
+                     (datetime.now(timezone.utc).isoformat(), listing_id))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def save_contract_draft(listing_id: str, ownership_type: str, agreed_price: float,

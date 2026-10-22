@@ -155,7 +155,7 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
     """generated_at is the time printed on the memo (default: now); like the
     contract draft, it is shown in Bratislava time (modules.contract_draft)."""
     from engine.financial import compute_deal_score, project_irr, is_cashflow_negative
-    from modules.contract_draft import doc_stamp
+    from modules.contract_draft import doc_stamp, to_local
     from engine.regional_prices import benchmark_note
     from database import days_on_market
     import markets
@@ -332,8 +332,12 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
     pdf.h2("Location & risk")
     precision = l.get("geo_precision")
     pdf.kv([
-        ("Location score", f"{l.get('location_score') or '—'}/100 {l.get('location_tier') or ''}"),
-        ("Nearest transit", f"{l['nearest_transit_m']:.0f} m" if l.get("nearest_transit_m") else "—"),
+        # As on the card: a real 0 is "0/100"; no score at all is "—".
+        ("Location score", ("—" if l.get("location_score") is None
+                            else f"{l['location_score']}/100")
+                           + (f" {l['location_tier']}" if l.get("location_tier") else "")),
+        ("Nearest transit", f"{l['nearest_transit_m']:.0f} m"
+                            if l.get("nearest_transit_m") is not None else "—"),
         ("Energy class", l.get("energy_class") or "—"),
         ("Geocode", precision or "—"),
     ])
@@ -377,13 +381,19 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
                 if l.get("lv_soft_flags") else "")
              + "\nRe-verify the LV 48 hours before signing.")
 
+    def day(stamp):
+        # Stored in UTC; dated in Bratislava time, like "Memo generated". A
+        # value that isn't a time is printed as stored.
+        ts = to_local(stamp)
+        return ts.strftime("%Y-%m-%d") if ts else str(stamp)[:10]
+
     if stage or notes:
         pdf.h2("Deal notes")
         if stage:
-            pdf.para(f"Stage: {stage.get('stage')} (since {str(stage.get('updated_at'))[:10]})"
+            pdf.para(f"Stage: {stage.get('stage')} (since {day(stage.get('updated_at'))})"
                      + (f" — {stage['note']}" if stage.get("note") else ""))
         for n in (notes or [])[:8]:
-            pdf.para(f"{str(n.get('created_at'))[:10]} · vibe {n.get('vibe_score') or '—'}/10 · "
+            pdf.para(f"{day(n.get('created_at'))} · vibe {n.get('vibe_score') or '—'}/10 · "
                      f"{n.get('note') or ''}")
 
     pdf.h2("Caveats")

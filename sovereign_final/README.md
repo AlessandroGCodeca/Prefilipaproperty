@@ -292,8 +292,10 @@ removed listing's URL serves.
 Runs automatically every morning at 06:00 CET via scheduler container. When
 the scheduler starts it runs the pipeline only if none has succeeded since the
 last 06:00 (first start, the PC was off at 06:00, or the run failed) —
-restarting Docker or the PC does not re-scrape a day that is already done. Or
-click buttons in sidebar to run manually anytime.
+restarting Docker or the PC does not re-scrape a day that is already done. A
+06:00 the computer slept through runs when it wakes, and a run that started
+before 06:00 and ended after it is followed by the new day's run. Or click
+buttons in sidebar to run manually anytime.
 
 A run **succeeds** when at least one portal was read. When all three scrapers
 fail (blocked, offline) the run is not counted as done: it is retried an hour

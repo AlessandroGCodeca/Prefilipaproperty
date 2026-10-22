@@ -51,6 +51,14 @@ def fold(text: str) -> str:
     return "".join(out)
 
 
+# The determination of who owns the flat. In part B it may be how the owner
+# acquired it ("Titul nadobudnutia: Rozsudok … o určení vlastníckeho práva"),
+# which burdens nothing: on its own it counts from part C on, like an auction
+# (SK_VOCABULARY.part_c_only holds this very pattern). Proceedings for it
+# ("začatie konania o určenie vlastníckeho práva") block wherever they are
+# noted.
+_OWNERSHIP_RULING_RE = re.compile(r"urcen\w*\s+vlastnick\w*\s+prav\w*")
+
 # kind:
 #   lien         — a security right; ordinary when the creditor is a bank
 #   encumbrance  — burdens the property whoever holds it
@@ -62,7 +70,12 @@ _RULES = (
     # A court case, a court's note that the owner's title is disputed
     # ("poznámka o spornosti"), or proceedings to determine who owns it.
     ("súdny spor",     "distress",    r"sudn\w*\s+(?:spor|konan)\w*|(?<!\w)zalob\w*|"
-                                      r"(?<!\w)spornost\w*|urcen\w*\s+vlastnick\w*\s+prav\w*"),
+                                      r"(?<!\w)spornost\w*|"
+                                      r"konan\w*\s+(?:o|vo\s+veci)\s+"
+                                      + _OWNERSHIP_RULING_RE.pattern),
+    # The determination itself, from part C on (compiled already: re.compile
+    # hands this same object to _COMPILED, which part_c_only names).
+    ("súdny spor",     "distress",    _OWNERSHIP_RULING_RE),
     # A pledgee has started enforcing its lien: the bank's name on the note
     # clears nothing.
     ("výkon záložného práva", "distress", r"vykon\w*\s+zalozn\w*\s+prav\w*"),
@@ -113,11 +126,16 @@ _ENTRY_SPAN    = 400   # a back-reference must sit this close to its lien
 # A right for someone to use or live in the flat for life: whoever buys it,
 # buys a sitting occupant. Always a hard stop, even beside a technical word.
 # The noun ("doživotného užívania bytu", "bývania") or the verb ("právo
-# užívať byt", "bývať v byte", "do smrti").
+# užívať byt", "bývať v byte", "do smrti"). The flat or a room may come a
+# word or two after it ("užívať celý byt", "užívania jednej izby", "užívania
+# kuchyne v byte"); a building or a part of the land may not, as a utility's
+# "užívania elektroenergetickej stavby" or "užívania časti nehnuteľnosti" is
+# no one's home.
 _PERSONAL_USE_RE = re.compile(
     r"doziv|dozit|byvan|(?<!\w)byvat(?!\w)|(?<!\w)do\s+smrti(?!\w)|"
     r"uzivan\w*\s+(?:bytu|bytom|nehnutel|stavb|domu|miestnost)|"
-    r"(?<!\w)uzivat\s+(?:(?:byt|dom)(?:u|om|e)?(?!\w)|nehnutel|stavb|miestnost)")
+    r"(?<!\w)uzivat\s+(?:(?:byt|dom)(?:u|om|e)?(?!\w)|nehnutel|stavb|miestnost)|"
+    r"(?<!\w)uziva(?:n\w*|t)\s+(?:\w+\s+){0,2}(?:byt(?:u|om|e|y)?(?!\w)|izb\w*)")
 # Lines, pipes and access across the land: common, and no bar to letting.
 _TECHNICAL_RE = re.compile(
     r"inzinier|siet|vedeni|elektr|plyn|vodovod|vodn\w*\s+stavb|kanaliz|rozvod|"
@@ -132,6 +150,36 @@ _PUBLIC_HOLDER_RE = re.compile(
 
 # An entry's register number opens the next entry: "V 512/2019", "Z 55/2021".
 _ENTRY_NO_RE = re.compile(r"(?<!\w)[vzp]\s*-?\s*\d{1,6}/\d{2,4}")
+# A new entry's heading: its ordinal, register number and dash ("2 V 200/2021
+# - "). A register number inside an entry ("podľa V 100/2015 zmluvy", "byt č.
+# 12 V …", "IČO … V …", a date before it) has no ordinal of its own.
+_SK_ENTRY_HEAD_RE = re.compile(
+    r"(?<![\w./])(?<!c\.\s)\d{1,3}\.?\s+[vzp]\s*-?\s*\d{1,6}/\d{2,4}\s*[-–]\s")
+# Where a new Slovak entry starts: a register number, its heading's dash and
+# a type line in capitals ("P 55/2022 - Poznámka …" — a contract's own
+# "V 100/2015 - zmluva o …" is part of its entry), or a line opened by an
+# ordinal and then a register number or a capital ("2 V 200/2021 Zmluva …",
+# "2 Zmluva …"). A lien's creditor, or its back-reference, never reaches
+# past one.
+_SK_NEW_ENTRY_RE = re.compile(
+    r"(?<!\w)[VZPvzp]\s*-?\s*\d{1,6}/\d{2,4}\s*[-–]\s*(?=[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ])")
+_SK_LINE_ENTRY_RE = re.compile(
+    r"^[ \t]*\d{1,3}\.?[ \t]+(?:[VZP][ \t]*-?[ \t]*\d{1,6}/\d{2,4}[ \t]*[-–]?[ \t]*)?"
+    r"(?=[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ])", re.M)
+
+
+def _sk_next_entry(text: str, low: str, pos: int, endpos: int) -> int:
+    """Where the next Slovak entry starts in [pos, endpos), else endpos."""
+    found = [m.start() for m in (_SK_NEW_ENTRY_RE.search(text, pos, endpos),
+                                 _SK_LINE_ENTRY_RE.search(text, pos, endpos)) if m]
+    return min(found, default=endpos)
+
+
+# A contract's register number right after the lien phrase that names the
+# contract ("zmluvy o zriadení záložného práva V 2797/2013"), not followed by
+# an entry's dash.
+_CONTRACT_NO_RE = re.compile(
+    r"[\s,]*(?:c\.\s*)?[vzp]\s*-?\s*\d{1,6}/\d{2,4}(?!\d)(?!\s*[-–]\s)")
 
 
 # The holder's name and address ("v prospech Jana Nováková, Plynárenská 7, …"),
@@ -141,10 +189,25 @@ _ENTRY_NO_RE = re.compile(r"(?<!\w)[vzp]\s*-?\s*\d{1,6}/\d{2,4}")
 _HOLDER_BLOCK_RE = re.compile(
     r"v\s+prospech[\s\S]*?(?=\s[-–—]\s|§|(?<!\w)(?:prav[oae]|spociva\w*|podla|v\s+rozsahu|"
     r"v\s+zmysle|zak(?:on\w*|\.)|na\s+(?:ulozen|umiestnen|zriaden|vedeni)\w*)(?!\w)|$)")
-# A company's legal form or IČO in the holder's block: then the holder's own
-# name ("Západoslovenská energetika, a.s.", "Slovak Telekom, a.s.") says what
-# the easement serves. A person's surname ("Kabelková") says nothing.
-_COMPANY_RE = re.compile(r"(?<!\w)(?:a\.\s?s\.|s\.\s?r\.\s?o|s\.\s?p\.|ico)(?!\w)")
+# A company's legal form, in the holder's own name or right after it
+# ("Západoslovenská energetika, a.s.", "Slovak Telekom, a.s."): then that name
+# says what the easement serves. A person's surname ("Kabelková") says
+# nothing, nor does a form or an IČO further on in the holder's block — a
+# co-holder's, an address's, a sole trader's IČO.
+_LEGAL_FORM_RE = re.compile(r"(?<!\w)(?:a\.\s?s\.|s\.\s?r\.\s?o|s\.\s?p\.)(?!\w)")
+
+
+def _holder_is_company(entry_text: str) -> bool:
+    """The holder's name (folded entry text, after "v prospech") carries a
+    company's legal form, in it or directly after it."""
+    m = _CREDITOR_MARKERS[0].search(entry_text)
+    if not m:
+        return False
+    rest = entry_text[m.end():]
+    cut = _NAME_END.search(rest)
+    name = rest[:cut.start()] if cut else rest
+    return bool(_LEGAL_FORM_RE.search(name)
+                or _LEGAL_FORM_RE.match(rest[len(name):].lstrip(" \t\r\n,")))
 
 
 def _tier(label: str, entry_text: str, holder: str) -> tuple[str, str]:
@@ -153,10 +216,8 @@ def _tier(label: str, entry_text: str, holder: str) -> tuple[str, str]:
     if label == "vecné bremeno":
         if _PERSONAL_USE_RE.search(entry_text):
             return "hard", "lifetime right to use or live in it"
-        block = _HOLDER_BLOCK_RE.search(entry_text)
         if _TECHNICAL_RE.search(_HOLDER_BLOCK_RE.sub(" ", entry_text)) or (
-                block and _COMPANY_RE.search(block.group())
-                and _TECHNICAL_RE.search(fold(holder))):
+                _holder_is_company(entry_text) and _TECHNICAL_RE.search(fold(holder))):
             return "soft", "utility / access easement"
         return "hard", "kind of easement not recognised"
     if _PUBLIC_HOLDER_RE.search(fold(holder)):
@@ -205,9 +266,10 @@ class Vocabulary:
     # A back-reference stays in its own entry: a lien phrase with an entry
     # separator (entry_no_re) since the last lien is a new lien (Czech).
     reference_needs_same_entry: bool = False
-    # Rules (by label) read only from part C's heading on, when part_c_at
-    # finds one: their word may also name, in part B, how the owner acquired
-    # the flat (bought at an auction), which burdens nothing.
+    # Rules read only from part C's heading on, when part_c_at finds one — by
+    # label, or one compiled pattern of a label: their words may also name,
+    # in part B, how the owner acquired the flat (bought at an auction,
+    # awarded by a court's ruling on ownership), which burdens nothing.
     part_c_only: frozenset = frozenset()
     part_c_at: object = None     # (text) -> index of part C's heading, or None
 
@@ -230,7 +292,7 @@ SK_VOCABULARY = Vocabulary(
     holder_markers=_CREDITOR_MARKERS[:1], reference_before=_REFERENCE_BEFORE,
     bank_re=_BANK_RE, name_end=_NAME_END, tier=_tier, entry_no_re=_ENTRY_NO_RE,
     distress_lien_prefix="exeku",
-    part_c_only=frozenset({"dražba"}), part_c_at=part_c_start,
+    part_c_only=frozenset({"dražba", _OWNERSHIP_RULING_RE}), part_c_at=part_c_start,
 )
 
 
@@ -251,7 +313,8 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
         (m.start(), m.end(), label, kind)
         for label, kind, rx in v.rules
         for m in rx.finditer(low)
-        if c_at is None or label not in v.part_c_only or m.start() >= c_at
+        if c_at is None or m.start() >= c_at
+        or (label not in v.part_c_only and rx not in v.part_c_only)
     )
     entries: list[dict] = []
     last_lien_at = None
@@ -291,6 +354,10 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
             continue
         nxt = hits[i + 1][0] if i + 1 < len(hits) else len(low)
         window_end = min(nxt, end + _MARKER_SPAN)
+        if not v.reference_needs_same_entry:
+            # Slovak: the next entry's "… v prospech Tatra banka" is not this
+            # lien's creditor.
+            window_end = _sk_next_entry(text, low, end, window_end)
         window = low[end:window_end]
         ref_from = max(0, start - 40)
         if not v.reference_needs_same_entry:
@@ -348,12 +415,45 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
                 same = all(sp.group() != "•" for sp in seps) and bool(
                     v.reference_before.search(low[max(after, start - 40):start]))
             else:
-                same = start - last_lien_at <= _ENTRY_SPAN
+                # Slovak: close to the lien, and no new entry's heading
+                # ("2 V 200/2021 - Zmluva o zriadení záložného práva pre …")
+                # in between — that is a lien of its own.
+                same = (start - last_lien_at <= _ENTRY_SPAN
+                        and not _SK_ENTRY_HEAD_RE.search(low, last_lien_at, start)
+                        and _sk_next_entry(text, low, last_lien_at, start) == start)
             if same:
                 continue
+        sk_stop = None
+        if marker is None and not v.reference_needs_same_entry:
+            # Slovak, no creditor within reach: a long claim line ("na
+            # zabezpečenie pohľadávky … zo zmluvy o úvere …") or the contract
+            # it names ("podľa zmluvy o zriadení záložného práva V 2797/2013")
+            # may come before "v prospech". Read on for "v prospech" alone —
+            # never a "pre" or "veriteľ" of the claim's history — past such
+            # contract references and their numbers, to the entry's end: the
+            # next other hit or register number, or a lien phrase written
+            # with a capital (the next entry's type line, "Záložné právo"),
+            # at most _ENTRY_SPAN on.
+            stop, at = min(len(low), end + _ENTRY_SPAN), end
+            for h in hits[i + 1:]:
+                if h[0] >= stop or v.entry_no_re.search(low, at, h[0]):
+                    break
+                if not (h[3] == "lien" and not text[h[0]].isupper()
+                        and v.reference_before.search(low[max(0, h[0] - 40):h[0]])):
+                    stop = h[0]
+                    break
+                num = _CONTRACT_NO_RE.match(low, h[1])
+                at = num.end() if num else h[1]
+            sep = v.entry_no_re.search(low, at, stop)
+            if sep:
+                stop = sep.start()
+            stop = _sk_next_entry(text, low, end, stop)
+            marker = v.creditor_markers[0].search(low[end:stop])
+            if marker is not None:
+                sk_stop = stop
         if marker is not None:
             c_start = end + marker.end()
-            c_stop = nxt
+            c_stop = nxt if sk_stop is None else sk_stop
             if entry_stop is not None and c_start >= nxt:
                 # Czech: the creditor follows another hit of its own entry —
                 # read the name up to the next hit after it, in this entry.

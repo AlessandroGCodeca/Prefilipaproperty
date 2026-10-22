@@ -23,6 +23,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 
@@ -96,6 +97,29 @@ def rent_from_text(text: str) -> float:
     return plain[0] if plain else 0.0
 
 
+# A location part that is only a postcode or a region ("851 01", "Bratislavský
+# kraj") names no town.
+_POSTCODE_OR_REGION_RE = re.compile(r"\d{3}\s?\d{2}|.*(?<!\w)kraj(?!\w).*", re.I)
+
+
+def _same_part_named_city(location: str, own: str, found: str) -> bool:
+    """A bare city part in the location ("Staré Mesto") is placed in
+    Bratislava by default; when the ad names the city ("… Košice"), the same
+    part of that city is meant. A location that names its city keeps it."""
+    if not found or ", " not in own or found.split(", ")[0] != own.split(", ")[0]:
+        return False
+    city = unicodedata.normalize("NFKD", own.split(", ", 1)[1]).encode("ascii", "ignore")
+    loc = unicodedata.normalize("NFKD", location).encode("ascii", "ignore")
+    return city.decode().lower()[:5] not in loc.decode().lower()
+
+
+def _names_a_place(location: str) -> bool:
+    """Whether a portal's location field names a place more precise than a
+    region or a postcode."""
+    return any(p.strip() and not _POSTCODE_OR_REGION_RE.fullmatch(p.strip())
+               for p in (location or "").split(","))
+
+
 def _is_excluded(*texts: str) -> bool:
     """EXCLUDE_KEYWORDS (minus "prenajom") against each text — see
     textparse.matches_keywords for when a keyword counts ("Prenájom 2-izb.
@@ -125,8 +149,15 @@ def build_rental(source: str, url: str, title: str, text: str, location: str = "
     # town — but another town they mention ("pre ľudí pracujúcich v
     # Bratislave", an agent called Martin) does not replace it.
     own = _extract_location_from_text(location)
+    if not own and _names_a_place(location):
+        # The portal names a place the matcher does not know (a village): a
+        # town the title or text mentions ("pre ľudí pracujúcich v
+        # Bratislave", "10 min od Bratislava Vajnory") is not where the flat
+        # is, so there is no comp — as for the same ad without that sentence.
+        return None
     found = _extract_location_from_text(f"{location} {title} {text}")
-    district = found if not own or found == own or found.endswith(", " + own) else own
+    district = found if (not own or found == own or found.endswith(", " + own)
+                         or _same_part_named_city(location, own, found)) else own
     if not district:
         return None                      # a comp with no place is no comp
     now = now or datetime.now(timezone.utc).isoformat()

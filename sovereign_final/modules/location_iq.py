@@ -29,7 +29,7 @@ from config import (
 )
 from database import (
     get_unscored_location, upsert_location, init_db,
-    get_location_rows_missing_risk, update_location_risk,
+    get_location_rows_missing_risk, update_location_risk, mark_location_tried,
 )
 from modules import risk_data
 
@@ -257,6 +257,9 @@ def run_location_scoring(progress_callback=None, limit: int | None = 200,
             lat, lng, precision = _geocode(addr, mkt)
         if lat is None:
             log.warning(f"  ⚠️ No geocode: {addr[:50]}")
+            # To the back of the queue: listings that never geocode would
+            # otherwise take the first `limit` places on every run.
+            mark_location_tried(lid)
             continue
 
         risk = _assess(lat, lng, precision, mkt)

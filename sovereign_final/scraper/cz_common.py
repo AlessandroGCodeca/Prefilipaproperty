@@ -262,9 +262,12 @@ _ALWAYS_RE = re.compile(r"(?<![^\W\d_])(?:" + "|".join(CZ_ALWAYS_EXCLUDE) + ")")
 _PROPERTY_RE = re.compile(r"(?<![^\W\d_])(?:" + "|".join(CZ_PROPERTY_EXCLUDE) + ")")
 # A share of a flat, not the flat: "Prodám podíl na bytě", "Prodej 1/2 podílu",
 # "1/2 bytu", "id. 1/2", "podíl 1/3". A flat's share of its land, garden,
-# yard, garage or parking — "s podílem na pozemku", "podíl 1/4 na zahradě",
-# "včetně podílu" — is no sale of a share and does not count.
-_ACCESSORY_SHARE = r"(?:pozem|zahrad|dvor|garaz|parkovac)"
+# yard, garage, parking, cellar or the house's common parts — "s podílem na
+# pozemku", "podíl 1/4 na zahradě", "podíl 1/10 na společných částech domu",
+# "1/6 podíl na sklepě", "včetně podílu" — is no sale of a share and does not
+# count; nor is "se spoluvlastnickým podílem na pozemku" (_CO_OWNED_ACCESSORY_RE).
+_ACCESSORY_SHARE = (r"(?:pozem|zahrad|dvor|garaz|parkovac|sklep"
+                    r"|spolecn\w*[\s-]+(?:cast|prostor))")
 _SHARE_RE = re.compile(
     r"(?<![^\W\d_])(?:prodej\w*|proda[mv]\w*|nabiz\w*)\s+(?:(?:id\.?|idealn\w*)\s*)?"
     r"(?:\d{1,2}\s*/\s*\d{1,2}\s+)?podil"
@@ -274,18 +277,32 @@ _SHARE_RE = re.compile(
     r"|(?:na\s+)?(?:byt[ue]|jednotk))"
     r"|(?<![^\W\d_])podil\w*\s+\d{1,2}\s*/\s*\d{1,2}(?![\d/])"
     r"(?!\s+(?:na\s+)?" + _ACCESSORY_SHARE + r")")
+_CO_OWNED_ACCESSORY_RE = re.compile(
+    r"spoluvlastnick\w*[\s-]+podil\w*[\s-]+(?:\d{1,2}\s*/\s*\d{1,2}[\s-]+)?(?:na[\s-]+)?"
+    + _ACCESSORY_SHARE)
 # A layout names the flat as "byt" does; a URL slug drops the "+" ("2kk"). It
 # keeps a flat sold with its garage, parking space or land share ("Prodej 2+kk
 # s garáží") — never a house, cottage, villa or office ("Prodej 4+1 rodinného
 # domu"), which only "byt" before it keeps. Nor does it keep a house named
-# before the garage or plot ("Prodej domu 5+1 s pozemkem", "Prodej RD 4+kk se
-# zahradou a pozemkem"); a flat in a house ("2+kk v domě", "2+1 v RD") stays.
+# before the layout or right after it ("Prodej domu 5+1 s pozemkem", "Prodej
+# RD 4+kk se zahradou a pozemkem", "Prodej 5+1 RD s pozemkem"). A house noun
+# further on is the flat's own building ("2+kk, cihlový dům, garáž", "2+kk,
+# bytový dům s garáží", "2+kk - novostavba domu"), and a flat in a house
+# ("2+kk v domě", "2+1 v RD") stays.
 _SLUG_LAYOUT_RE = re.compile(r"(?<![^\W\d_])[1-9]-?kk(?![^\W\d_])")
 CZ_ACCESSORY_STEMS = ("garaz", "parkovac", "pozem")
-_HOUSE_NOUN_RE = re.compile(
-    r"(?<![^\W_])(?<!(?<!\w)v[\s-])(?<!(?<!\w)ve[\s-])"
-    r"(?:rd|dum|domu|domek|domku|domecek)(?![^\W\d_])")
+_HOUSE_NOUNS = r"(?:rd|dum|domu|domek|domku|domecek)(?![^\W\d_])"
+_HOUSE_NOUN_RE = re.compile(r"(?<![^\W_])(?<!(?<!\w)v[\s-])(?<!(?<!\w)ve[\s-])" + _HOUSE_NOUNS)
+_HOUSE_AFTER_LAYOUT_RE = re.compile(r"(?:\s+|-)" + _HOUSE_NOUNS)
 _STREET_ADJ_RE = re.compile(r"(?:hotel|penzion)ova(?![^\W\d_])")
+
+
+def _flat_layout_before(folded: str, pos: int) -> bool:
+    """True when a layout before pos names a flat: no house noun before it or
+    right after it."""
+    lay = _LAYOUT_RE.search(folded, 0, pos) or _SLUG_LAYOUT_RE.search(folded, 0, pos)
+    return bool(lay and not _HOUSE_NOUN_RE.search(folded, 0, lay.start())
+                and not _HOUSE_AFTER_LAYOUT_RE.match(folded, lay.end()))
 
 
 def is_excluded_cz(*texts: str) -> bool:
@@ -296,16 +313,19 @@ def is_excluded_cz(*texts: str) -> bool:
         if _SHARE_RE.search(folded):
             return True
         for m in _ALWAYS_RE.finditer(folded):
-            # A street named after one ("Hotelová", Ostrava-Hrabůvka) is no hotel.
-            if _STREET_ADJ_RE.match(folded, m.start()) or _is_street_name(folded, m.start()):
+            # A street named after one ("Hotelová", Ostrava-Hrabůvka) is no hotel;
+            # a flat's co-owned share of its land or garage, after the flat is
+            # named, is no share of the flat.
+            if (_STREET_ADJ_RE.match(folded, m.start()) or _is_street_name(folded, m.start())
+                    or (_CO_OWNED_ACCESSORY_RE.match(folded, m.start())
+                        and (_APARTMENT_NOUN_RE.search(folded, 0, m.start())
+                             or _flat_layout_before(folded, m.start())))):
                 continue
             return True
         for m in _PROPERTY_RE.finditer(folded):
             if (_APARTMENT_NOUN_RE.search(folded, 0, m.start())
                     or (m.group().startswith(CZ_ACCESSORY_STEMS)
-                        and not _HOUSE_NOUN_RE.search(folded, 0, m.start())
-                        and (_LAYOUT_RE.search(folded, 0, m.start())
-                             or _SLUG_LAYOUT_RE.search(folded, 0, m.start())))):
+                        and _flat_layout_before(folded, m.start()))):
                 continue
             if not _is_street_name(folded, m.start()):
                 return True

@@ -5,7 +5,8 @@ On launch it runs only to catch up: when no run has succeeded since the last
 06:00 (first start, the machine was off at 06:00, or the run failed).
 Restarting the container, Docker Desktop or the PC does not re-run a pipeline
 that already ran today. A 06:00 the machine slept through (the process was
-suspended, not restarted) runs once when it wakes.
+suspended, not restarted) runs once when it wakes. A catch-up that runs
+past the next 06:00 then runs the markets that 06:00 still owes.
 A run succeeds when at least one portal was read. A failed run (every scraper
 blocked, say) is retried hourly, up to three times; each attempt's outcome is
 written to data/pipeline_status.json, which the dashboard shows.
@@ -564,9 +565,38 @@ def due_markets(now: datetime, kind: str = "catch_up") -> list[str]:
 _RUN_GUARD = threading.Lock()
 
 
+def _run_new_slot(began: datetime) -> None:
+    """After a run that began before a 06:00 and ended after it, run the
+    markets that 06:00 still owes. Nothing else would: the 06:00 job was
+    skipped because this run was still going (APScheduler runs one instance
+    at a time), or — at startup — the scheduler was armed only after it.
+    A market whose own attempt ended before 06:00 (Slovakia, run first,
+    failing at 05:45 while Czechia runs to 06:15) is owed with its status
+    still in the earlier slot, where retry_due() never retries it. A market
+    whose attempt already belongs to this slot (one that failed after 06:00,
+    or never got the lock) is left to its hourly retries. `began` is
+    last_slot() when the run started; the caller holds _RUN_GUARD."""
+    from modules import pipeline_state
+    while True:
+        now = datetime.now(TZ)
+        slot = last_slot(now)
+        if slot <= began:
+            return
+        owed = [m for m in due_markets(now)
+                if (pipeline_state.read_status(m) or {}).get("slot") != slot.isoformat()]
+        if not owed:              # never which=[]: that would run every market
+            return
+        log.info(f"   The run went past {slot:%H:%M}: running "
+                 f"{', '.join(m.upper() for m in owed)} for it now...")
+        began = slot
+        run_all_markets(trigger="catch-up", which=owed)
+
+
 def run_daily() -> None:
     with _RUN_GUARD:
+        began = last_slot(datetime.now(TZ))
         run_all_markets(trigger="06:00")
+        _run_new_slot(began)
 
 
 def retry_failed_run() -> None:
@@ -588,7 +618,9 @@ def arm(scheduler) -> None:
     container, so no startup catch-up runs) runs the missed 06:00 once when
     it wakes, at any hour, as a startup catch-up would. With a grace time
     APScheduler dropped it, and the retry check never ran it either (it
-    retries failed runs only). coalesce: several missed 06:00s run once."""
+    retries failed runs only). coalesce: several missed 06:00s run once.
+    APScheduler skips a 06:00 that comes while that run is still going (one
+    instance at a time); run_daily then runs what it owed (_run_new_slot)."""
     scheduler.add_job(
         run_daily,
         trigger=CronTrigger(hour=RUN_HOUR, minute=0, timezone=TZ),
@@ -620,6 +652,9 @@ if __name__ == "__main__":
                  f"— running now...")
         with _RUN_GUARD:
             run_all_markets(trigger="catch-up", which=owed)
+            # The scheduler is armed below: a 06:00 this catch-up ran past
+            # never fires.
+            _run_new_slot(last_slot(now))
 
     scheduler = BlockingScheduler(timezone=TZ)
     arm(scheduler)

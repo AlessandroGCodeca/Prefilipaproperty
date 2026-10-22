@@ -965,11 +965,13 @@ _MENTIONS_BRATISLAVA = re.compile(r"(?<!\w)bratislav", re.IGNORECASE)
 _HUB_CITIES = {"Bratislava", "Košice"}
 
 # A name in the nominative right after one of these is not where the flat is:
-# a direction ("diaľnica smer Senec") or a person ("Maklér: Martin Horváth",
-# "Kontakt: Ing. Martin", "Volajte Martin", "pán Martin", "Ing. Martin …").
+# a direction ("diaľnica smer Senec", "rýchly výjazd na Senec" — a flat is
+# placed with "v"/"vo" and the locative, "na" + a nominative-looking name is
+# where you drive to) or a person ("Maklér: Martin Horváth", "Kontakt: Ing.
+# Martin", "Volajte Martin", "pán Martin", "Ing. Martin …").
 _TITLE_BEFORE_NAME = r"(?:ing|mgr|bc|judr|mudr|phdr|rndr|dr|doc|prof)\.\s*"
 _NOT_HERE_BEFORE_RE = re.compile(
-    r"(?:(?<!\w)(?:smer(?:om)?(?:\s+na)?|makl[eé]r(?:k[ay])?"
+    r"(?:(?<!\w)(?:smer(?:om)?(?:\s+na)?|na|makl[eé]r(?:k[ay])?"
     r"|kontakt(?:ujte|n[aá]\s+osoba)?|volajte|p[aá]n)\s*[:\-–]?\s*"
     r"|(?<!\w)" + _TITLE_BEFORE_NAME + r")(?:" + _TITLE_BEFORE_NAME + r")*$",
     re.IGNORECASE)
@@ -1102,6 +1104,7 @@ def _extract_location_from_text(text: str) -> str:
 
 _POSTCODE_RE = re.compile(r"\d{3}\s?\d{2}")
 _KRAJ_RE = re.compile(r"(?<!\w)kraj(?!\w)", re.IGNORECASE)
+_OKRES_PREFIX_RE = re.compile(r"^(?:okres(?!\w)|okr\.)\s*", re.IGNORECASE)
 
 
 def _detail_district(address: str) -> str:
@@ -1113,13 +1116,24 @@ def _detail_district(address: str) -> str:
     JSON-LD address ending in its region or postcode ("…, Košický kraj, 040
     01") gives the town named before them. The last part still wins when it
     is the found town with more detail ("Bratislava III", "Košice-Juh").
+
+    The address's own last part (its okres, "okres " dropped) decides the
+    town: a town named earlier in it — the first word of a village ("Martin
+    nad Žitavou, okres Zlaté Moravce"), the city in an okres name ("Valaliky,
+    okres Košice-okolie") — only refines it to a city part of that same town
+    ("Petržalka, Bratislava"), or places the same city part ("Košice, Staré
+    Mesto" is Košice's).
     """
     address = address or ""
-    parts = [p.strip() for p in address.split(",")]
+    parts = [_OKRES_PREFIX_RE.sub("", p.strip()) for p in address.split(",")]
     parts = [p for p in parts
              if p and not _POSTCODE_RE.fullmatch(p) and not _KRAJ_RE.search(p)]
     last = parts[-1] if parts else ""
     found = _extract_location_from_text(address)
+    own = _extract_location_from_text(last)
+    if (own and found != own and not found.endswith(", " + own)
+            and found.split(", ")[0] != own.split(", ")[0]):
+        found = own
     if not found:
         return last
     if last.lower().startswith(found.lower()) and len(last) > len(found):
