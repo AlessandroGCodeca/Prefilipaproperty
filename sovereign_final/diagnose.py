@@ -96,16 +96,35 @@ for r in rows:
     print(f"  {(r['district'] or '(blank)'):<35} {r['n']:>6}")
 
 print("\n=== Sample listings by classification ===")
+# price_eur holds each listing's own currency (CZK for a Czech one), so the
+# samples are each market's own top 3 — Slovakia's first — each priced in its
+# own currency: ranked together, a price in crowns would push every Slovak
+# one out, and it is not euros.
+_markets = [r["market"] for r in conn.execute(
+    "SELECT DISTINCT market FROM listings WHERE is_active=1 "
+    "ORDER BY market = 'sk' DESC, market")]
+
+
+def _price(r) -> str:
+    cur = (r["currency"] or "EUR").upper()
+    if cur == "EUR":
+        return f"€{r['price_eur']:>8.0f}"
+    return f"{cur} {r['price_eur']:>8.0f}"
+
+
 for cls in ("GREEN", "YELLOW", "WHITE", "PENDING"):
-    rows = conn.execute("""
-        SELECT price_eur, size_m2, district, source, substr(title,1,55) AS title
-        FROM listings WHERE classification=? AND is_active=1
-        ORDER BY price_eur DESC LIMIT 3
-    """, (cls,)).fetchall()
+    rows = []
+    for _m in _markets:
+        rows += conn.execute("""
+            SELECT price_eur, size_m2, district, source, currency,
+                   substr(title,1,55) AS title
+            FROM listings WHERE classification=? AND is_active=1 AND market=?
+            ORDER BY price_eur DESC LIMIT 3
+        """, (cls, _m)).fetchall()
     if rows:
         print(f"\n  {cls}:")
         for r in rows:
-            print(f"    [{r['source']:<12}] €{r['price_eur']:>8.0f}  {r['size_m2']:>5.1f}m²  "
+            print(f"    [{r['source']:<12}] {_price(r)}  {r['size_m2']:>5.1f}m²  "
                   f"{(r['district'] or '?'):<25}  {r['title']}")
 
 conn.close()

@@ -14,7 +14,6 @@ import os, sys
 from html import escape as _html_escape
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -1090,6 +1089,27 @@ def fe(v, prefix="€", suffix="", decimals=0, signed=None):
 def fp(v):
     return f"{(v or 0)*100:.1f}%" if v is not None else "—"
 
+def _of100(v):
+    """A 0–100 score that may be missing: None shows "—", a real 0 "0/100"."""
+    return "—" if v is None else f"{v}/100"
+
+def _digest(items) -> str:
+    """A short, stable digest of a sequence, for a widget key that has to
+    change when the rows or options behind the widget change."""
+    import hashlib
+    return hashlib.sha1("\x1f".join(map(str, items)).encode("utf-8")).hexdigest()[:12]
+
+def _local_stamp(iso: str | None) -> tuple[str, str]:
+    """A stored UTC timestamp in Bratislava time — the time the draft's own
+    "Vygenerované" line carries — as (shown, for a file name). A value that
+    isn't ISO is shown as it was stored."""
+    from modules.contract_draft import to_local
+    raw = (iso or "")[:16]
+    ts = to_local(iso)
+    if ts is None:
+        return raw.replace("T", " "), raw.replace("-", "").replace(":", "").replace("T", "_")
+    return ts.strftime("%Y-%m-%d %H:%M"), ts.strftime("%Y%m%d_%H%M")
+
 def badge(cls, text):
     return f'<span class="badge b{cls[0].lower()}">{text}</span>'
 
@@ -1181,6 +1201,30 @@ def _lv_link(l):
         from kataster_scraper import GENERATE_PRF
         return GENERATE_PRF.format(lv_no=lv_no, ku_code=ku)
     return "https://kataster.skgeodesy.sk/EsriRegistrationWeb/"
+
+
+def _load_stage(key, cur, *source):
+    """Put a deal's stored stage into its keyed stage box. A keyed selectbox
+    keeps its last value whatever index= says, so picking another deal, or a
+    move made elsewhere, left the box on a stale stage — and MOVE DEAL or
+    SAVE STAGE then wrote it back. The box is reloaded whenever what it shows
+    (the deal, and its stored stage) changes, or its state has gone (a closed
+    card drops it); a stage the user picks since then is kept."""
+    cur = cur if cur in DEAL_STAGES else DEAL_STAGES[0]
+    _load_box(key, cur, *source)
+
+
+def _load_box(key, value, *source):
+    """Put a stored value into its keyed box, as _load_stage does for a stage
+    box: a keyed text_input also keeps its last value whatever value= says, so
+    a card left open showed (and RE-VERIFY LV or SAVE STAGE wrote back) what
+    was stored when it was opened. The box is reloaded whenever the stored
+    value (or its source) changes, or its state has gone; what the user types
+    since then is kept. The widget is then drawn without value=."""
+    src_key, src = f"_src_{key}", (*source, value)
+    if key not in st.session_state or st.session_state.get(src_key) != src:
+        st.session_state[key] = value
+        st.session_state[src_key] = src
 
 
 def _save_stage(lid):
@@ -1288,7 +1332,9 @@ def render_card(l):
     size     = l.get("size_m2", 0) or 0
     district = l.get("district","—")
     title    = l.get("title") or district
-    loc_tier = l.get("location_tier","—")
+    # get_all_active LEFT JOINs location_scores: a listing without a Location
+    # IQ row has these keys, set to None, so a .get() default never applies.
+    loc_tier = l.get("location_tier")
     transit  = l.get("nearest_transit_m")
     ind      = l.get("industrial_zone", 0)
     opt      = l.get("optimal_structure","—")
@@ -1376,7 +1422,7 @@ def render_card(l):
                       help="Days since this dashboard first saw the flat on any "
                            "portal — not the portal's posting date, so a listing "
                            "that was up long before the first scrape reads young.")
-            st.metric(T("Location"),   f"{l.get('location_score','—')}/100")
+            st.metric(T("Location"),   _of100(l.get("location_score")))
 
         # Composite deal grade (financial + location + energy + risk)
         from engine.financial import compute_deal_score
@@ -1393,7 +1439,7 @@ def render_card(l):
             (f'<span class="badge {grade_css}">GRADE {deal_grade} · {deal_score}</span> '
              if deal_grade != "—" else "") +
             f'<span class="badge bo">{"s.r.o." if opt=="SRO" else T("PERSONAL")}</span>' + " " +
-            tier_badge(loc_tier) +
+            (tier_badge(loc_tier) if loc_tier else "") +
             (' <span class="badge bg">⚙️ INDUSTRIAL</span>' if ind else "") +
             f' <span class="badge {lv_badge_css}">{lv_label}</span>' +
             (f' <span class="badge {lv_css}">⚖️ LV {lv_risk}</span>' if lv_risk else "") +
@@ -1528,8 +1574,9 @@ def render_card(l):
             precision = l.get("geo_precision")
             loc_rows = [
                 (T("Transit"),        f"{transit:.0f}m {'✅' if (transit or 9999) <= 560 else '⚠️'}" if transit else "—"),
-                (T("Amenities"),      f"{l.get('amenity_count','—')} {'✅' if (l.get('amenity_count') or 0) >= 3 else '⚠️'}"),
-                (T("Walkability"),    f"{l.get('walkability_score','—')}/100"),
+                (T("Amenities"),      "—" if l.get("amenity_count") is None else
+                                      f"{l['amenity_count']} {'✅' if l['amenity_count'] >= 3 else '⚠️'}"),
+                (T("Walkability"),    _of100(l.get("walkability_score"))),
                 (T("Industrial"),     T("✅ YES") if ind else "—"),
                 (T("Construction"),   _risk_label(l.get("construction_risk"), T("⚠️ Site nearby"), T("✅ Clear"), T)),
                 (T("Noise"),          _risk_label(l.get("noise_flag"), T("⚠️ ≥65 dB source"), T("✅ Clear"), T)),
@@ -1561,11 +1608,14 @@ def render_card(l):
         lid = l.get("id", "")
         with s1:
             cur = (stage or {}).get("stage", "NEW")
-            st.selectbox(T("Deal stage"), DEAL_STAGES,
-                         index=DEAL_STAGES.index(cur) if cur in DEAL_STAGES else 0,
-                         key=f"stg_{lid}")
-            st.text_input(T("Stage note"), value=(stage or {}).get("note") or "",
-                          key=f"stgn_{lid}",
+            # Both boxes reload when the stored row changes (a move in DEAL
+            # PIPELINE, even one that only adds a note), so SAVE STAGE never
+            # writes back a stage or note that has been replaced since.
+            upd = (stage or {}).get("updated_at")
+            _load_stage(f"stg_{lid}", cur, upd)
+            _load_box(f"stgn_{lid}", (stage or {}).get("note") or "", upd)
+            st.selectbox(T("Deal stage"), DEAL_STAGES, key=f"stg_{lid}")
+            st.text_input(T("Stage note"), key=f"stgn_{lid}",
                           placeholder="např. prohlídka so 10:00" if cz else "e.g. viewing Sat 10:00")
             # Demo rows aren't in the database: writing their ids would leave
             # deal stages (and LV checks, notes) for listings that don't exist.
@@ -1601,10 +1651,15 @@ def render_card(l):
 
         # The flat's own LV — the only thing that can verify it. The building
         # plot found from the map pin is a different LV (see modules/debt_bot).
+        # The boxes reload when the stored LV changes (saved in LV TO-DO, say):
+        # RE-VERIFY LV takes a box that differs from the stored LV as an edit,
+        # and a stale box would clear the saved number or put back an old one.
+        _load_box(f"lvno_{lid}", l.get("lv_number") or "")
+        _load_box(f"lvku_{lid}", l.get("cadastral_area") or "")
         v1, v2 = st.columns(2)
         with v1:
             flat_lv = st.text_input(
-                T("Flat's own LV no."), value=l.get("lv_number") or "",
+                T("Flat's own LV no."),
                 key=f"lvno_{lid}", placeholder="e.g. 4321",
                 help=("Z dokladů prodávajícího nebo od makléře. LV pozemku pod domem "
                       "není LV bytové jednotky." if cz else
@@ -1612,14 +1667,17 @@ def render_card(l):
                       "plot's LV is not the flat's."))
         with v2:
             flat_ku = st.text_input(
-                T("Katastrálne územie"), value=l.get("cadastral_area") or "",
+                T("Katastrálne územie"),
                 key=f"lvku_{lid}", placeholder="např. Vinohrady" if cz else "e.g. Petržalka",
                 help=("Název nebo kód katastrálního území." if cz else
                       "Name or numeric code of the cadastral unit."))
         lv_doc = None
         if cz:
+            # As the LV boxes: a výpis pasted since (in the REJECTED tab, say)
+            # reloads the box, so RE-VERIFY LV can't write the old text back.
+            _load_box(f"lvdoc_{lid}", _LV_DOCS.get(lid, ""))
             lv_doc = st.text_area(
-                T("LV extract (text)"), value=_LV_DOCS.get(lid, ""), key=f"lvdoc_{lid}",
+                T("LV extract (text)"), key=f"lvdoc_{lid}",
                 height=110, disabled=using_demo,
                 placeholder="Vložte text výpisu z listu vlastnictví…",
                 help="Text výpisu z LV této jednotky (CzechPOINT nebo dálkový přístup "
@@ -1659,20 +1717,33 @@ def render_card(l):
 
 def render_memo_button(l, key):
     """Two-step PDF memo: building every card's PDF on each rerun would be
-    slow, so the first click builds this one and swaps in the download."""
-    ready = st.session_state.get("memo_ready", {})
-    if key in ready:
-        st.download_button("⬇️ MEMO PDF", ready[key],
-                           file_name=f"memo_{(l.get('id') or 'x')[:8]}_{datetime.now():%Y%m%d}.pdf",
+    slow, so the first click builds this one and swaps in the download. The
+    built memo is kept with a fingerprint of what it prints: once the row
+    changes (price, rescore, LV check, a note, the deal stage), the kept PDF
+    is dropped and 📄 MEMO is offered again. The file is named after the time
+    the memo was built, the time printed on it (Bratislava time)."""
+    from modules.memo import memo_fingerprint
+    ready = st.session_state.setdefault("memo_ready", {})
+    sig = memo_fingerprint(l)
+    kept = ready.get(key)
+    if kept is not None and not (isinstance(kept, tuple) and kept[0] == sig):
+        ready.pop(key, None)
+        kept = None
+    if kept is not None:
+        _, pdf, made = kept
+        st.download_button("⬇️ MEMO PDF", pdf,
+                           file_name=f"memo_{(l.get('id') or 'x')[:8]}_{made:%Y%m%d}.pdf",
                            mime="application/pdf", key=f"{key}_dl", width="stretch")
     elif st.button("📄 MEMO", key=key, width="stretch"):
         from modules.memo import build_memo_pdf
+        from modules.contract_draft import local_now
         from database import get_annotations
         try:
+            made = local_now()
             pdf = build_memo_pdf(l, price_history={l.get("id"): l.get("_ph")} if l.get("_ph") else None,
                                  notes=get_annotations(l.get("id")), stage=l.get("_stage"),
-                                 portals=l.get("_copies"))
-            st.session_state.setdefault("memo_ready", {})[key] = pdf
+                                 portals=l.get("_copies"), generated_at=made)
+            ready[key] = (sig, pdf, made)
             st.rerun()
         except Exception as e:
             st.warning(f"Memo: {e}")
@@ -1962,9 +2033,17 @@ def _whatif_tab():
     w1, w2, w3 = st.columns(3)
     with w1:
         st.markdown("**PROPERTY**")
+        # Only a custom property starts from the example price. A listing
+        # scraped without one (price 0, awaiting its detail page) starts
+        # blank: the example would show a class, cash flow and cap rate the
+        # listing never had.
+        no_price = bool(pick) and (pick.get("price_eur") or 0) <= 0
         wi_price = st.number_input(f"Price {sym}", p_min, p_max,
+                                   None if no_price else
                                    min(max(int((pick or {}).get("price_eur") or p_default), p_min), p_max),
                                    p_step, key=f"wi_price_{pk}{sfx}")
+        if no_price:
+            st.caption("This listing has no price — enter one to run the numbers.")
         wi_size = st.number_input("Size m²", 10.0, 500.0,
                                   min(max(float((pick or {}).get("size_m2") or 60.0), 10.0), 500.0),
                                   1.0, key=f"wi_size_{pk}")
@@ -2035,6 +2114,9 @@ def _whatif_tab():
                           key=f"wi_rg{sfx}") / 100
         wi_exit = st.slider("Exit costs %", 0.0, 8.0, base_exit * 100, 0.5,
                             key=f"wi_exit{sfx}") / 100
+    if wi_price is None:
+        st.info("Enter a price to run the numbers.")
+        return
     if not wi_rent and not est_rent:
         st.info("No rent estimate for this place — type the rent in to run the numbers.")
         return
@@ -2192,7 +2274,7 @@ with t_pipe:
                         f'<div class="mono" style="font-size:.7rem;color:#e4eaf5">'
                         f'<a href="{esc(t["url"])}" target="_blank">{name}</a></div>'
                         f'<div class="muted">{market_badge(t)} {amt(t, t.get("price_eur") or 0)}{maxy}'
-                        f' · {str(t.get("updated_at"))[:10]}{gone}</div>{note}</div>',
+                        f' · {_local_stamp(t.get("updated_at"))[0][:10]}{gone}</div>{note}</div>',
                         unsafe_allow_html=True)
 
     st.markdown('<hr class="div">', unsafe_allow_html=True)
@@ -2207,7 +2289,8 @@ with t_pipe:
             pick_id = all_opts[st.selectbox("Listing", list(all_opts.keys()), key="pipe_pick")]
         with p2:
             cur = (stages.get(pick_id) or {}).get("stage", "NEW")
-            pick_stage = st.selectbox("Stage", DEAL_STAGES, index=DEAL_STAGES.index(cur), key="pipe_stage")
+            _load_stage("pipe_stage", cur, pick_id)
+            pick_stage = st.selectbox("Stage", DEAL_STAGES, key="pipe_stage")
         with p3:
             pick_note = st.text_input("Note", key="pipe_note")
         # In demo mode the picker still offers the real tracked deals, and
@@ -2218,10 +2301,11 @@ with t_pipe:
             st.rerun()
         if demo_pick:
             st.caption("Demo listing — it can't be moved.")
+        # Stored in UTC; shown in Bratislava time, as EARLIER DRAFTS is.
         hist = get_deal_stage_history(pick_id)
         if hist:
             st.markdown("".join(
-                f'<div class="brow"><span class="l">{str(h["changed_at"])[:16].replace("T", " ")}</span>'
+                f'<div class="brow"><span class="l">{_local_stamp(h["changed_at"])[0]}</span>'
                 f'<span class="v">{esc(h["stage"])}{" — " + esc(h["note"]) if h.get("note") else ""}</span></div>'
                 for h in hist), unsafe_allow_html=True)
 
@@ -2260,7 +2344,12 @@ with t_rej:
             "_still":   (r_.get("lv_status") or "") == "REJECTED",
         } for r_ in rejected])
         reasons = sorted(rej_df["Reason"].unique())
-        pick_reasons = st.multiselect("Reason", reasons, default=reasons, key="rej_reasons")
+        # A keyed multiselect keeps its selection whatever default= says: the
+        # reasons of an earlier render (another market's view, before a new
+        # rejection came in) stayed picked and hid the rest. Keyed on the
+        # reasons, it starts from all of them again whenever they change.
+        pick_reasons = st.multiselect("Reason", reasons, default=reasons,
+                                      key=f"rej_reasons_{_digest(reasons)}")
         view = rej_df[rej_df["Reason"].isin(pick_reasons)
                       & (rej_df["_still"] | show_overturned)].drop(columns="_still")
         n_overturned = int((~rej_df["_still"]).sum())
@@ -2293,13 +2382,15 @@ with t_rej:
                 try:
                     from modules.debt_bot import reverify
                     from database import mark_duplicates
-                    from kataster_scraper import quick_requests
                     if rv_doc is not None:
                         from database import get_lv_document, set_lv_document
                         if rv_doc.strip() != (get_lv_document(rv_id) or "").strip():
                             set_lv_document(rv_id, rv_doc)
-                    with st.spinner("Checking the cadastre..."), quick_requests():
-                        res = reverify(rv_opts[rv_pick])
+                    # The listing's own market's short timeout, as on its card:
+                    # a Czech flat's lookups go to ČÚZK, not the Slovak cadastre.
+                    rv_row = next(r_ for r_ in rejected if r_["id"] == rv_id)
+                    with st.spinner("Checking the cadastre..."), _quick_cadastre(rv_row):
+                        res = reverify(rv_id)
                     # A copy that is no longer rejected rejoins its group and
                     # lifts "a copy failed LV" from the others (or the reverse).
                     mark_duplicates()
@@ -2349,6 +2440,12 @@ with t_lv:
                 return "—"
             return (f"parcel {t['cadastral_number']} (k.ú. {t.get('cadastral_area') or '?'})"
                     + (f" · plot LV {t['plot_lv_number']}" if t.get("plot_lv_number") else ""))
+        # The browser keeps an editor's edits by row number. With a plain
+        # 0..n index and a fixed key, a queue that re-sorted (a re-score, a
+        # finished job, the other market's view) kept the same editor, and a
+        # typed LV number moved onto whichever flat now sat in that row — and
+        # SAVE stored it there. The listing ids are the index, and their order
+        # is in the key: when the rows change, the pending edits are dropped.
         todo_df = pd.DataFrame([{
             "id":       t["id"],
             "Class":    t["cf_class"],
@@ -2362,13 +2459,12 @@ with t_lv:
             "Flat LV no.": t.get("lv_number") or "",
             "Katastrálne územie": t.get("cadastral_area") or "",
             "URL":      t.get("url") or "",
-        } for t in todo])
+        } for t in todo]).set_index("id")
         editable = ("Flat LV no.", "Katastrálne územie")
         edited = st.data_editor(
-            todo_df, key="lv_todo_editor", hide_index=True, width="stretch",
-            disabled=[c for c in todo_df.columns if c not in editable],
+            todo_df, key=f"lv_todo_editor_{_digest(todo_df.index)}", hide_index=True,
+            width="stretch", disabled=[c for c in todo_df.columns if c not in editable],
             column_config={
-                "id": None,
                 "Price": money_col("Price"),
                 "Flat LV no.": st.column_config.TextColumn(
                     help="The flat's own LV — not the plot's — from the seller or agent."),
@@ -2380,10 +2476,11 @@ with t_lv:
             })
         stored = {t["id"]: ((t.get("lv_number") or "").strip(),
                             (t.get("cadastral_area") or "").strip()) for t in todo}
-        changed = [(row["id"], _cell(row["Flat LV no."]), _cell(row["Katastrálne územie"]))
-                   for _, row in edited.iterrows()
-                   if (_cell(row["Flat LV no."]), _cell(row["Katastrálne územie"]))
-                   != stored.get(row["id"])]
+        changed = [(lid, _cell(row["Flat LV no."]), _cell(row["Katastrálne územie"]))
+                   for lid, row in edited.iterrows()
+                   if lid in stored
+                   and (_cell(row["Flat LV no."]), _cell(row["Katastrálne územie"]))
+                   != stored[lid]]
         st.caption(f"{len(todo)} listing(s) waiting · {len(changed)} edited")
         b1, b2 = st.columns(2)
         save_lv = b1.button("SAVE LV NUMBERS", key="lv_todo_save", disabled=not changed,
@@ -2544,7 +2641,7 @@ with t2:
         if using_demo:
             st.caption("Demo listing — notes can't be saved.")
 
-        # Saved notes for this listing, newest first.
+        # Saved notes for this listing, newest first (in Bratislava time).
         from database import get_annotations
         notes = get_annotations(sel["id"])
         if notes:
@@ -2552,7 +2649,7 @@ with t2:
                         unsafe_allow_html=True)
             html = ""
             for n in notes:
-                html += (f'<div class="brow"><span class="l">{str(n.get("created_at"))[:16].replace("T", " ")}'
+                html += (f'<div class="brow"><span class="l">{_local_stamp(n.get("created_at"))[0]}'
                          f' · {n.get("vibe_score") or "—"}/10</span>'
                          f'<span class="v">{esc(n.get("note"))}</span></div>')
             st.markdown(html, unsafe_allow_html=True)
@@ -2611,7 +2708,10 @@ with t3:
             if not buyer_name.strip():
                 st.error("Enter buyer name first.")
             else:
-                now = datetime.now()
+                # Bratislava time on the draft, the note, their file names and
+                # EARLIER DRAFTS alike, whatever the host's clock is set to.
+                from modules.contract_draft import local_now
+                now = local_now()
                 if close_cz:
                     from modules.contract_draft_cz import (
                         build_contract_draft_cz, build_internal_analysis_cz,
@@ -2678,17 +2778,18 @@ with t3:
             if earlier:
                 with st.expander(f"EARLIER DRAFTS ({len(earlier)})"):
                     for d in earlier:
-                        stamp = (d["generated_at"] or "")[:16]
+                        # Stored in UTC; shown (and named) in the Bratislava
+                        # time the draft's own "Vygenerované" line carries.
+                        stamp, file_stamp = _local_stamp(d["generated_at"])
                         st.caption(
-                            f'{stamp.replace("T", " ")} · {d["buyer_name"]} · '
+                            f'{stamp} · {d["buyer_name"]} · '
                             f'{d["ownership_type"]} · '
                             + (amt(sel3, d["agreed_price"] or 0) if close_cz
                                else f'€{d["agreed_price"] or 0:,.0f}'))
                         st.download_button(
                             "⬇️ DOWNLOAD",
                             d["draft_text"] or "",
-                            file_name=f"contract_{sel3['id'][:8]}_"
-                                      f"{stamp.replace('-', '').replace(':', '').replace('T', '_')}.txt",
+                            file_name=f"contract_{sel3['id'][:8]}_{file_stamp}.txt",
                             mime="text/plain",
                             key=f"draft_{d['id']}",
                         )

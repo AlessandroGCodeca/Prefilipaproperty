@@ -73,6 +73,10 @@ _NOMINATIM_STREET = {"road", "street", "pedestrian", "residential", "square",
 
 def nominatim_precision(result: dict) -> str:
     kind = (result.get("addresstype") or result.get("type") or "").lower()
+    # A bare address point (an addr:* node, imported as place=house) can be
+    # labelled with its class, "place"; its type then says it is an address.
+    if kind == "place" and (result.get("type") or "").lower() in _NOMINATIM_ADDRESS:
+        return "address"
     if kind in _NOMINATIM_ADDRESS:
         return "address"
     if kind in _NOMINATIM_STREET:

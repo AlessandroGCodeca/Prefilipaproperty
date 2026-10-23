@@ -30,6 +30,8 @@ import time
 import uuid
 from datetime import datetime, timedelta
 
+import pytz
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import database
 from config import DATA_DIR
@@ -37,6 +39,8 @@ from config import DATA_DIR
 log = logging.getLogger("sovereign")
 
 STATUS_FILE   = os.path.join(DATA_DIR, "pipeline_status.json")
+# The time zone the dashboard shows times in: the scheduler's (scheduler.TZ).
+LOCAL_TZ      = pytz.timezone("Europe/Bratislava")
 HEARTBEAT_S   = 30
 STALE_AFTER_S = 300
 # A successful run older than this means the scheduler isn't running.
@@ -52,9 +56,14 @@ class PipelineBusy(Exception):
         super().__init__(describe_lock(lock))
 
 
-def describe_lock(lock: dict) -> str:
+def describe_lock(lock: dict, now: datetime | None = None) -> str:
+    """'scheduler is running (since 06:00)'. The lock row's time is UTC
+    (database.try_lock_pipeline); it is shown in Bratislava time, as every
+    other time on the dashboard is."""
+    when = _parse(lock.get("acquired_at"))
+    local = when.astimezone(LOCAL_TZ).isoformat() if when else None
     return (f"{lock.get('holder') or 'Another run'} is running "
-            f"(since {_short_time(lock.get('acquired_at'))})")
+            f"(since {_short_time(local, now)})")
 
 
 class PipelineLock:

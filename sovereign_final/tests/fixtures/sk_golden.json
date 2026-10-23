@@ -26,7 +26,7 @@
   "max_price_yellow": 187000.0,
   "stress_surplus_sro": -558.89,
   "stress_ratio_sro": 0.5275,
-  "irr_sro": 0.0332,
+  "irr_sro": 0.0298,
   "irr_personal": 0.0693,
   "floor": 1867.5,
   "ceiling": 14940.0
@@ -58,7 +58,7 @@
   "max_price_yellow": 198500.0,
   "stress_surplus_sro": -394.53,
   "stress_ratio_sro": 0.6267,
-  "irr_sro": 0.0476,
+  "irr_sro": 0.0434,
   "irr_personal": 0.0872,
   "floor": 1842.5,
   "ceiling": 14740.0
@@ -69,8 +69,8 @@
   "size": 72,
   "rooms": 3,
   "classification": "YELLOW",
-  "market_discount": 0.1331,
-  "regional_median_m2": 3845.0,
+  "market_discount": 0.161,
+  "regional_median_m2": 3973.0,
   "estimated_rent": 894.24,
   "rent_key": "ružinov",
   "mortgage_monthly": 992.36,
@@ -86,14 +86,14 @@
   "optimal_structure": "SRO",
   "sro_break_even_months": 59,
   "tax_year": 2026,
-  "max_price_green": 221000.0,
-  "max_price_yellow": 249000.0,
+  "max_price_green": 228500.0,
+  "max_price_yellow": 257000.0,
   "stress_surplus_sro": -631.23,
   "stress_ratio_sro": 0.5862,
-  "irr_sro": 0.0435,
+  "irr_sro": 0.0407,
   "irr_personal": 0.0763,
-  "floor": 1922.5,
-  "ceiling": 15380.0
+  "floor": 1986.5,
+  "ceiling": 15892.0
  },
  {
   "district": "Staré Mesto, Košice",
@@ -122,7 +122,7 @@
   "max_price_yellow": 169000.0,
   "stress_surplus_sro": -344.78,
   "stress_ratio_sro": 0.6569,
-  "irr_sro": 0.0518,
+  "irr_sro": 0.0472,
   "irr_personal": 0.0932,
   "floor": 1598.0,
   "ceiling": 12784.0
@@ -154,7 +154,7 @@
   "max_price_yellow": 148500.0,
   "stress_surplus_sro": -146.8,
   "stress_ratio_sro": 0.798,
-  "irr_sro": 0.0708,
+  "irr_sro": 0.063,
   "irr_personal": 0.1276,
   "floor": 1332.0,
   "ceiling": 10656.0
@@ -186,7 +186,7 @@
   "max_price_yellow": 97000.0,
   "stress_surplus_sro": -226.43,
   "stress_ratio_sro": 0.6213,
-  "irr_sro": 0.0401,
+  "irr_sro": 0.0323,
   "irr_personal": 0.0972,
   "floor": 1233.5,
   "ceiling": 9868.0
@@ -218,7 +218,7 @@
   "max_price_yellow": 127000.0,
   "stress_surplus_sro": -187.99,
   "stress_ratio_sro": 0.7418,
-  "irr_sro": 0.0613,
+  "irr_sro": 0.054,
   "irr_personal": 0.1155,
   "floor": 1308.0,
   "ceiling": 10464.0
@@ -250,7 +250,7 @@
   "max_price_yellow": 119500.0,
   "stress_surplus_sro": -63.05,
   "stress_ratio_sro": 0.8708,
-  "irr_sro": 0.084,
+  "irr_sro": 0.0698,
   "irr_personal": 0.1649,
   "floor": 1241.0,
   "ceiling": 9928.0
@@ -282,7 +282,7 @@
   "max_price_yellow": 138000.0,
   "stress_surplus_sro": -271.73,
   "stress_ratio_sro": 0.6764,
-  "irr_sro": 0.0526,
+  "irr_sro": 0.0468,
   "irr_personal": 0.0993,
   "floor": 1180.5,
   "ceiling": 9444.0
@@ -314,7 +314,7 @@
   "max_price_yellow": null,
   "stress_surplus_sro": -130.31,
   "stress_ratio_sro": 0.7702,
-  "irr_sro": 0.0622,
+  "irr_sro": 0.0519,
   "irr_personal": 0.13,
   "floor": 800.0,
   "ceiling": 20000.0
@@ -346,7 +346,7 @@
   "max_price_yellow": null,
   "stress_surplus_sro": -305.52,
   "stress_ratio_sro": 0.5392,
-  "irr_sro": 0.0228,
+  "irr_sro": 0.0165,
   "irr_personal": 0.0761,
   "floor": 800.0,
   "ceiling": 20000.0
@@ -378,7 +378,7 @@
   "max_price_yellow": null,
   "stress_surplus_sro": -334.77,
   "stress_ratio_sro": 0.4926,
-  "irr_sro": 0.0137,
+  "irr_sro": 0.0077,
   "irr_personal": 0.0672,
   "floor": 800.0,
   "ceiling": 20000.0
@@ -410,7 +410,7 @@
   "max_price_yellow": 178000.0,
   "stress_surplus_sro": -601.87,
   "stress_ratio_sro": 0.4763,
-  "irr_sro": 0.0243,
+  "irr_sro": 0.021,
   "irr_personal": 0.061,
   "floor": 1413.5,
   "ceiling": 11308.0
@@ -442,7 +442,7 @@
   "max_price_yellow": 152500.0,
   "stress_surplus_sro": -424.3,
   "stress_ratio_sro": 0.5357,
-  "irr_sro": 0.0265,
+  "irr_sro": 0.022,
   "irr_personal": 0.0695,
   "floor": 1241.5,
   "ceiling": 9932.0
@@ -474,7 +474,7 @@
   "max_price_yellow": 103500.0,
   "stress_surplus_sro": -207.84,
   "stress_ratio_sro": 0.6461,
-  "irr_sro": 0.0398,
+  "irr_sro": 0.0314,
   "irr_personal": 0.1004,
   "floor": 1141.0,
   "ceiling": 9128.0

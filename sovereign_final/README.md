@@ -53,7 +53,7 @@ run).
 The start file serves the dashboard to this Mac only (`--server.address
 127.0.0.1`), as `docker-compose.yml` does. A bare `streamlit run app.py`
 listens on every network, so anyone on the same Wi-Fi could open it — see
-below.
+below. `restart.sh` also serves it to this computer only.
 
 Moving to a newer download of the project: copy the `data/` folder (the
 database: listings, deal stages, notes) and `.env` from the old folder into
@@ -136,7 +136,7 @@ before; Czechia is added next to it.
 | Rentals (comps) | Bazoš `/pronajmu/byt/`, Bezrealitky rental pages | `scraper/rentals_cz.py` → `engine/rent_comps_cz.py` |
 | Rent baseline | Deloitte Rent Index Q2 2026: Praha 462, Praha 7 493, Brno 390, Hradec Králové 318, Pardubice 314, Jihlava 257, Ostrava 254, Ústí nad Labem 221 Kč/m² | other towns: live comps only, or not scored |
 | Sale-price medians | none could be read whole — **the table is empty**, so every Czech listing is WHITE; `data/cz_regional_prices.csv` fills it (format in `engine/regional_prices_cz.py`) | gap |
-| Title deed (LV) | the flat's **výpis z LV, pasted on its card** (or, once rejected, in the REJECTED tab), screened with Czech vocabulary — PASS / REJECTED / UNVERIFIED as in Slovakia. PASS needs part C in the text, every entry of parts C–D to be one the screen knows, and the LV number and k.ú. to match the card's; a cooperative flat (its ad, or a družstvo owning it in part A) is never PASS | ČÚZK's free services give no LV contents to a program; nahlížení is CAPTCHA-guarded |
+| Title deed (LV) | the flat's **výpis z LV, pasted on its card** (or, once rejected, in the REJECTED tab), screened with Czech vocabulary — PASS / REJECTED / UNVERIFIED as in Slovakia. PASS needs part C in the text and the výpis to run on to part E (so a page cut off inside C or D can't pass), the flat's unit in part B, every entry of parts C–D to be one the screen knows, the LV number and k.ú. to match the card's, and a výpis no older than `CZ_LV_MAX_VYPIS_AGE_DAYS` (30 days, read from its "stav evidovaný k datu" line); the building's own LV (the number the card shows for the plot, with no units) is never taken as the flat's; a cooperative flat (its ad, or a družstvo owning it in part A) is never PASS | ČÚZK's free services give no LV contents to a program; nahlížení is CAPTCHA-guarded |
 | Cadastre lookups | ČÚZK API KN (free key: `CZ_CUZK_API_KEY`) + RÚIAN address points: the building under the pin, its LV and pending proceedings | never PASS on its own |
 | Flood | ÚÚR national map, VÚV T. G. M. Q100 flood areas (indicative) | `modules/risk_data_cz.py` |
 | Noise | OpenStreetMap proxy + 2022 strategic noise map of main roads (MZ ČR) | ≥65 dB flags the flat |
@@ -257,6 +257,9 @@ Each listing also gets a **composite deal grade (A–D)** blending financial
 (cap rate + discount to the regional median), location, energy class,
 condition and risk flags — so a GREEN deal in a poor location doesn't outrank
 a genuinely solid one. An LV that is verified clean scores above an unverified one.
+A listing with no regional median earns none of the discount points, so it
+can't outrank one that is measured against its market.
+A price below the sanity floor gets no grade ("—"): it is a data error, not a deal.
 
 ---
 
@@ -289,8 +292,10 @@ removed listing's URL serves.
 Runs automatically every morning at 06:00 CET via scheduler container. When
 the scheduler starts it runs the pipeline only if none has succeeded since the
 last 06:00 (first start, the PC was off at 06:00, or the run failed) —
-restarting Docker or the PC does not re-scrape a day that is already done. Or
-click buttons in sidebar to run manually anytime.
+restarting Docker or the PC does not re-scrape a day that is already done. A
+06:00 the computer slept through runs when it wakes, and a run that started
+before 06:00 and ended after it is followed by the new day's run. Or click
+buttons in sidebar to run manually anytime.
 
 A run **succeeds** when at least one portal was read. When all three scrapers
 fail (blocked, offline) the run is not counted as done: it is retried an hour
@@ -329,6 +334,7 @@ changes, or whose district's live rent moves, is re-scored automatically.
 - **IRR** — 10-year return on the cash put in: rent growth, appreciation,
   amortisation, selling costs and tax on the sale (a personal sale is exempt
   after 5 years; an s.r.o. sale is revenue and usually costs the 10% rate).
+  The s.r.o. also pays `SRO_SETUP_COST` once, in year 0.
   Assumptions in `config.py` (`HOLD_YEARS`, `APPRECIATION_RATE`, …).
 - **Rent source** — live prenájom comps when the district has enough of them,
   else the `RENT_PER_M2` baseline.
@@ -380,7 +386,8 @@ lists rank by that discount, then gross yield.
   with no city part named use their okres's median, weighted by the
   population of its city parts; Lamač, Vajnory, Rusovce, Jarovce, Čunovo,
   Devín and Záhorská Bystrica, which have no median of their own, use their
-  okres's. Plain "Bratislava" is still the city-wide figure. The card's
+  okres's. A city part named on its own ("Ružinov", without "Bratislava")
+  uses its own median too. Plain "Bratislava" is still the city-wide figure. The card's
   "vs Market" tooltip says which benchmark was used.
 - **Class is not cash flow.** At the median the rent covers only 60–75% of
   all costs, so most GREEN flats still cost money every month. A flat whose
@@ -431,7 +438,9 @@ How a check runs:
 3. **The flat's own LV verifies it.** Type the flat's LV number (from the
    seller's papers or the agent) and its katastrálne územie into the card and
    press RE-VERIFY LV — or enter many at once in the **LV TO-DO** tab, which
-   lists every GREEN / YELLOW deal still waiting for one. A shared LV with a
+   lists every GREEN / YELLOW deal still waiting for one. RE-VERIFY LV reads
+   the cadastre afresh; the daily run may use a copy read within
+   `CADASTRE_CACHE_TTL_DAYS` (30). A shared LV with a
    flag on it stays UNVERIFIED until you've checked part C against the flat's
    number.
 
@@ -441,8 +450,12 @@ rejects a flat only once its own LV has been read. Until then the flat is
 
 The screen (`modules/lv_screen.py`) reads each encumbrance separately: a lien
 passes only when its **own** creditor ("v prospech …") is a bank or ŠFRB, and
-an exekúcia / konkurz / súdny spor never passes — not even when the optional
-Claude read says otherwise. Matching is inflection-aware ("začatie exekúcie",
+an exekúcia / konkurz / súdny spor — or a dražba (from part C on), výkon
+záložného práva, predbežné opatrenie, zaistenie or a dispute over ownership —
+never passes, not even when the optional Claude read says otherwise. A
+leasing, insurance or factoring company of a banking group is not a bank. A report with no part C, or one cut short at
+the reader's length cap (`LV_TEXT_MAX_CHARS` in `kataster_scraper.py`), is
+never called clean: it stays UNVERIFIED. Matching is inflection-aware ("začatie exekúcie",
 "záložným právom"). An easement is read within its own entry (up to the next
 entry number), so a neighbouring entry's wording can't soften it.
 

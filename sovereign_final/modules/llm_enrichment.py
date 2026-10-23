@@ -291,9 +291,13 @@ _LV_SYSTEM_CZ = (
     "poznámka spornosti / soudní spor is HIGH risk. So is a věcné břemeno "
     "(služebnost) giving someone a lifetime right to use or live in the flat "
     "(doživotní užívání, výměnek), and a předkupní právo held by a private person "
-    "or company. A technical věcné břemeno (utility lines, pipes, access or right "
-    "of way) and a předkupní právo of the state, a kraj or a municipality are soft "
-    f"issues. {_SOFT_POLICY} A plomba (a change of rights pending in the cadastre) "
+    "or company. So are a registered nájem or pacht, a výhrada zpětné koupě, a "
+    "výhrada vlastnického práva or práva lepšího kupce, a koupě na zkoušku, an "
+    "užívací právo, and a zajišťovací převod práva or a zákaz zcizení nebo "
+    "zatížení not in favour of a bank. A technical věcné břemeno (utility lines, "
+    "pipes, access or right of way) and a předkupní právo of the state, a kraj or "
+    f"a municipality are soft issues. {_SOFT_POLICY} A plomba (a change of rights "
+    "pending in the cadastre) "
     "is at least MEDIUM. List each concrete issue in 'flags'. Set "
     "is_safe_to_proceed=false for any HIGH-risk encumbrance. Keep 'summary' concise "
     "and factual."
@@ -316,13 +320,13 @@ def lv_text_for_claude(lv_text, market: str = "sk") -> tuple[str, bool]:
         from modules.lv_screen import part_c_start
         raw = str(lv_text or "")
     else:
-        from modules.lv_screen_cz import part_c_start, _norm
+        from modules.lv_screen_cz import part_c_start, parts_c_d_whole, _norm
         raw = _norm(lv_text)
     # Judged before stripping: a report cut at the cap just after a space is
-    # still a cut report. A Czech výpis is pasted by hand, never cut — but
-    # holds part C only if its heading is there (page 1 of 2 does not).
+    # still a cut report. A Czech výpis is pasted by hand — it holds parts C–D
+    # whole only if it runs on to part E's heading (page 1 of 2 does not).
     complete = (len(raw) < LV_TEXT_MAX_CHARS if market == "sk"
-                else part_c_start(raw) is not None)
+                else parts_c_d_whole(raw))
     text = raw.strip()
     start = part_c_start(text)
     if start is not None and start > LV_HEAD_CHARS:

@@ -44,7 +44,7 @@ from database import (
     queue_lv_check,
 )
 from kataster_scraper import enrich_parcel, enrich_lv, parcel_at, fold
-from modules.lv_screen import screen_lv, describe
+from modules.lv_screen import screen_lv, describe, part_c_start
 from engine.regional_prices import kraj_for_district
 from modules.llm_enrichment import (
     is_enabled as claude_enabled, analyze_lv as claude_analyze_lv,
@@ -98,14 +98,40 @@ def _flat_numbers(lv_text) -> set:
 
 
 # ── Cadastre lookups (unofficial scraper — no API/key exists) ────────────────
-def check_flat_lv(area, lv_no) -> dict:
-    """Screen the flat's OWN LV — the only check that can PASS or REJECT."""
-    result = enrich_lv(str(area), str(lv_no))
+def _has_part_c(text: str) -> bool:
+    """The text has a part C heading: one modules/lv_screen.part_c_start
+    knows ("C. ŤARCHY" too), or a bare "ČASŤ C"."""
+    return part_c_start(text) is not None or bool(
+        re.search(r"(?<!\w)cast\s*c(?!\w)", fold(text)))
+
+
+def check_flat_lv(area, lv_no, refresh: bool = False) -> dict:
+    """Screen the flat's OWN LV — the only check that can PASS or REJECT.
+    refresh=True reads the cadastre now instead of a cached copy (up to
+    kataster_scraper.CACHE_TTL_DAYS old): a re-check must see a lien entered,
+    or struck off, since."""
+    result = (enrich_lv(str(area), str(lv_no), refresh=True) if refresh
+              else enrich_lv(str(area), str(lv_no)))
     if result["status"] != "OK" or not result.get("lv_text"):
         return _unverified(f"LV {lv_no} lookup {result['status'].lower()}: "
                            f"{result['detail']}")
     text = result["lv_text"]
     decision = _parse_lv(text)
+    if decision["status"] == "PASS":
+        # A clean title needs part C read whole: a report cut at the cap may
+        # have lost it (it comes last), and an error, maintenance or blocked
+        # page relayed with HTTP 200 has none.
+        from kataster_scraper import LV_TEXT_MAX_CHARS
+        if len(text) >= LV_TEXT_MAX_CHARS:
+            return _unverified(
+                f"LV {lv_no}: the cadastre report is longer than {LV_TEXT_MAX_CHARS:,} "
+                f"characters and was cut — part C (ťarchy) may be missing. Read the full "
+                f"LV on the cadastre before relying on it.")
+        if not _has_part_c(text):
+            return _unverified(
+                f"LV {lv_no}: the cadastre's answer has no part C ('ČASŤ C: ŤARCHY') — "
+                f"not a readable LV (an error or maintenance page?), so its "
+                f"encumbrances weren't read.")
     flats = _flat_numbers(text)
     if decision["status"] == "REJECT" and len(flats) > 1:
         # A shared LV: a lien on it may sit on another flat's share.
@@ -186,8 +212,9 @@ def check_plot(row: dict) -> dict:
                        f"{_VERIFY_HINT}", parcel=captured)
 
 
-def check_listing(row: dict) -> dict:
-    """LV verdict for one listing row (a get_pending_lv() row)."""
+def check_listing(row: dict, refresh: bool = False) -> dict:
+    """LV verdict for one listing row (a get_pending_lv() row). refresh=True
+    reads the flat's own Slovak LV from the cadastre, not the cache."""
     if (row.get("market") or "sk") != "sk":
         from modules import lv_cz
         return lv_cz.check_listing(row)
@@ -196,6 +223,8 @@ def check_listing(row: dict) -> dict:
         if not area:
             return _unverified(f"Flat LV {row['lv_number']} is set but its "
                                f"katastrálne územie is unknown — add it on the card.")
+        if refresh:
+            return check_flat_lv(area, row["lv_number"], refresh=True)
         return check_flat_lv(area, row["lv_number"])
     return check_plot(row)
 
@@ -278,16 +307,18 @@ def _decide_lv(api_result: dict) -> dict:
 _DB_STATUS = {"PASS": "PASS", "REJECT": "REJECTED", "UNVERIFIED": "UNVERIFIED"}
 
 
-def _check_and_store(row: dict, module: str = "debt_bot") -> dict:
-    result = check_listing(row)
+def _check_and_store(row: dict, module: str = "debt_bot", refresh: bool = False) -> dict:
+    result = check_listing(row, refresh=True) if refresh else check_listing(row)
     parcel = result.get("parcel")
     if parcel:
         set_parcel_data(row["id"], parcel["cadastral_area"], parcel["parcel_no"],
                         parcel["ku_code"], parcel["plot_lv"])
     # Claude-authoritative refinement (no-op when disabled / not the flat's LV).
     result = _decide_lv(result)
-    if result.get("llm_risk_level"):
-        set_lv_analysis(row["id"], result["llm_risk_level"], result.get("llm_analysis", ""))
+    # Every check replaces the last one's Claude read: one that Claude did not
+    # decide (UNVERIFIED, Claude off, the call failed) stores none, so an
+    # earlier "LOW … clean" never sits beside a new REJECTED or UNVERIFIED.
+    set_lv_analysis(row["id"], result.get("llm_risk_level"), result.get("llm_analysis", ""))
     # Soft flags are the flat's own only when its own LV was read; an
     # UNVERIFIED check carries none (a plot LV's are not the flat's).
     soft = ("; ".join(result.get("soft_flags") or [])
@@ -351,13 +382,14 @@ def reverify(listing_id: str, lv_number: str | None = None,
              cadastral_area: str = "") -> dict:
     """Re-check one listing's LV now — before committing to a purchase, or
     after entering the flat's own LV number (and its katastrálne územie).
-    lv_number=None keeps the stored one; "" clears it."""
+    lv_number=None keeps the stored one; "" clears it. The flat's own LV is
+    read from the cadastre, not the cache (run_debt_filter keeps the cache)."""
     if lv_number is not None:
         set_flat_lv(listing_id, lv_number, cadastral_area)
     row = get_lv_row(listing_id)
     if not row:
         return {"status": "ERROR", "detail": "Not found"}
-    return _check_and_store(row, module="debt_bot_reverify")
+    return _check_and_store(row, module="debt_bot_reverify", refresh=True)
 
 
 def save_flat_lvs(entries, verify: bool = False, progress_callback=None) -> dict:

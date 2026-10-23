@@ -10,7 +10,8 @@ build_memo_pdf(listing) takes a row shaped like database.get_all_active()'s
 and returns the PDF as bytes for st.download_button. It recomputes nothing
 the score already holds; only the year-by-year IRR cash flows are rebuilt
 (the score stores the IRR, not the flows) on the score's own rent and
-financing.
+financing. memo_fingerprint(listing) is a digest of what the memo prints:
+the dashboard rebuilds a memo it has kept once that changes.
 
 Slovak text needs a Unicode font. DejaVu Sans (Linux, the Docker image) or
 Arial (Windows/macOS) is used when found; failing both, the memo falls back
@@ -19,6 +20,7 @@ to Helvetica with diacritics folded away rather than not printing.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from datetime import datetime
 
@@ -131,10 +133,29 @@ def _flag(v, yes: str, no: str) -> str:
     return "unknown" if v is None else (yes if v else no)
 
 
+def memo_fingerprint(l: dict) -> str:
+    """A digest of everything build_memo_pdf prints for this card's row: the
+    row's own fields (price, score, LV result, location…), its deal stage,
+    price history and latest note with the note count (the "_stage", "_ph"
+    and "_vibe" the dashboard adds), and its other portals' copies. The
+    dashboard keeps a built memo only while this stays the same: a price
+    change, a rescore, a new note or a stage change used to leave the first
+    memo of the session on offer. The copies are summarised by what the memo
+    shows of them — each copy row carries the others, this one included."""
+    own = sorted((k, repr(v)) for k, v in l.items() if k != "_copies")
+    copies = [(c.get("id"), c.get("source"), c.get("price_eur"), c.get("url"),
+               c.get("scraped_at")) for c in (l.get("_copies") or [])]
+    return hashlib.sha1(repr((own, copies)).encode("utf-8", "replace")).hexdigest()
+
+
 def build_memo_pdf(l: dict, *, price_history: dict | None = None,
                    notes: list[dict] | None = None, stage: dict | None = None,
-                   portals: list[dict] | None = None) -> bytes:
+                   portals: list[dict] | None = None,
+                   generated_at: datetime | None = None) -> bytes:
+    """generated_at is the time printed on the memo (default: now); like the
+    contract draft, it is shown in Bratislava time (modules.contract_draft)."""
     from engine.financial import compute_deal_score, project_irr, is_cashflow_negative
+    from modules.contract_draft import doc_stamp, to_local
     from engine.regional_prices import benchmark_note
     from database import days_on_market
     import markets
@@ -161,7 +182,7 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
     pdf.h1(l.get("title") or l.get("district") or "Listing")
     pdf.para(f"{l.get('address_raw') or l.get('district') or ''}\n"
              f"{(l.get('source') or '').upper()} · {l.get('url') or ''}\n"
-             f"Memo generated {datetime.now():%Y-%m-%d %H:%M}", size=8, color=110)
+             f"Memo generated {doc_stamp(generated_at)}", size=8, color=110)
 
     pdf.h2("Verdict")
     verdict = (f"{cls} · deal grade {grade} ({score}/100) · best structure "
@@ -311,8 +332,12 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
     pdf.h2("Location & risk")
     precision = l.get("geo_precision")
     pdf.kv([
-        ("Location score", f"{l.get('location_score') or '—'}/100 {l.get('location_tier') or ''}"),
-        ("Nearest transit", f"{l['nearest_transit_m']:.0f} m" if l.get("nearest_transit_m") else "—"),
+        # As on the card: a real 0 is "0/100"; no score at all is "—".
+        ("Location score", ("—" if l.get("location_score") is None
+                            else f"{l['location_score']}/100")
+                           + (f" {l['location_tier']}" if l.get("location_tier") else "")),
+        ("Nearest transit", f"{l['nearest_transit_m']:.0f} m"
+                            if l.get("nearest_transit_m") is not None else "—"),
         ("Energy class", l.get("energy_class") or "—"),
         ("Geocode", precision or "—"),
     ])
@@ -356,13 +381,19 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
                 if l.get("lv_soft_flags") else "")
              + "\nRe-verify the LV 48 hours before signing.")
 
+    def day(stamp):
+        # Stored in UTC; dated in Bratislava time, like "Memo generated". A
+        # value that isn't a time is printed as stored.
+        ts = to_local(stamp)
+        return ts.strftime("%Y-%m-%d") if ts else str(stamp)[:10]
+
     if stage or notes:
         pdf.h2("Deal notes")
         if stage:
-            pdf.para(f"Stage: {stage.get('stage')} (since {str(stage.get('updated_at'))[:10]})"
+            pdf.para(f"Stage: {stage.get('stage')} (since {day(stage.get('updated_at'))})"
                      + (f" — {stage['note']}" if stage.get("note") else ""))
         for n in (notes or [])[:8]:
-            pdf.para(f"{str(n.get('created_at'))[:10]} · vibe {n.get('vibe_score') or '—'}/10 · "
+            pdf.para(f"{day(n.get('created_at'))} · vibe {n.get('vibe_score') or '—'}/10 · "
                      f"{n.get('note') or ''}")
 
     pdf.h2("Caveats")
