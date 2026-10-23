@@ -71,8 +71,11 @@ _RULES = (
     # ("poznámka o spornosti"), or proceedings to determine who owns it.
     ("súdny spor",     "distress",    r"sudn\w*\s+(?:spor|konan)\w*|(?<!\w)zalob\w*|"
                                       r"(?<!\w)spornost\w*|"
-                                      r"konan\w*\s+(?:o|vo\s+veci)\s+"
-                                      + _OWNERSHIP_RULING_RE.pattern),
+                                      r"(?<!\w)(?:konan\w*|spor(?:u|y|e|om|ov|och)?(?!\w)|navrh\w*|zalob\w*)"
+                                      r"\W+(?:\S+\s+){0,8}?"
+                                      + _OWNERSHIP_RULING_RE.pattern + "|"
+                                      + _OWNERSHIP_RULING_RE.pattern
+                                      + r"\W+(?:\S+\s+){0,3}?konan\w*"),
     # The determination itself, from part C on (compiled already: re.compile
     # hands this same object to _COMPILED, which part_c_only names).
     ("súdny spor",     "distress",    _OWNERSHIP_RULING_RE),
@@ -162,16 +165,23 @@ _SK_ENTRY_HEAD_RE = re.compile(
 # "2 Zmluva …"). A lien's creditor, or its back-reference, never reaches
 # past one.
 _SK_NEW_ENTRY_RE = re.compile(
-    r"(?<!\w)[VZPvzp]\s*-?\s*\d{1,6}/\d{2,4}\s*[-–]\s*(?=[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ])")
+    r"(?<!\w)(?<![Pp]odľa )(?<![Pp]odla )"     # "podľa V 2797/2013 - Zmluva …" cites
+    r"[VZPvzp]\s*-?\s*\d{1,6}/\d{2,4}\s*[-–]\s*(?=[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ])")
 _SK_LINE_ENTRY_RE = re.compile(
     r"^[ \t]*\d{1,3}\.?[ \t]+(?:[VZP][ \t]*-?[ \t]*\d{1,6}/\d{2,4}[ \t]*[-–]?[ \t]*)?"
     r"(?=[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ])", re.M)
 
 
+_SK_INLINE_ENTRY_RE = re.compile(
+    r"(?<![\w./])(?<!č\.\s)(?<!č\.)\d{1,3}\.?\s+(?:[VZP]\s*-?\s*\d{1,6}/\d{2,4}\s*[-–]?\s*)?"
+    r"(?=(?:Záložn|Zmluv|Zriaden|Vecn|Predkupn|Poznámk|Exeku|Zabezpečovac)\w*)")
+
+
 def _sk_next_entry(text: str, low: str, pos: int, endpos: int) -> int:
     """Where the next Slovak entry starts in [pos, endpos), else endpos."""
     found = [m.start() for m in (_SK_NEW_ENTRY_RE.search(text, pos, endpos),
-                                 _SK_LINE_ENTRY_RE.search(text, pos, endpos)) if m]
+                                 _SK_LINE_ENTRY_RE.search(text, pos, endpos),
+                                 _SK_INLINE_ENTRY_RE.search(text, pos, endpos)) if m]
     return min(found, default=endpos)
 
 
@@ -194,7 +204,8 @@ _HOLDER_BLOCK_RE = re.compile(
 # says what the easement serves. A person's surname ("Kabelková") says
 # nothing, nor does a form or an IČO further on in the holder's block — a
 # co-holder's, an address's, a sole trader's IČO.
-_LEGAL_FORM_RE = re.compile(r"(?<!\w)(?:a\.\s?s\.|s\.\s?r\.\s?o|s\.\s?p\.)(?!\w)")
+_LEGAL_FORM_RE = re.compile(r"(?<!\w)(?:a\.\s?s\.?|s\.\s?r\.\s?o|s\.\s?p\.|akciov\w*\s+spolocnost\w*|"
+                            r"spolocnost\w*\s+s\s+rucen\w*\s+obmedzen\w*|statn\w*\s+podnik\w*)(?!\w)")
 
 
 def _holder_is_company(entry_text: str) -> bool:
@@ -418,9 +429,17 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
                 # Slovak: close to the lien, and no new entry's heading
                 # ("2 V 200/2021 - Zmluva o zriadení záložného práva pre …")
                 # in between — that is a lien of its own.
+                own = {re.sub(r"\W", "", n.group()) for n in
+                       v.entry_no_re.finditer(low, max(0, last_lien_at - 60), last_lien_at)}
+
+                def _opens(m):
+                    n = v.entry_no_re.search(low, m.start(), m.end())
+                    return not (n and re.sub(r"\W", "", n.group()) in own)
+                heads = [m for rx, s in ((_SK_ENTRY_HEAD_RE, low), (_SK_NEW_ENTRY_RE, text),
+                                         (_SK_LINE_ENTRY_RE, text), (_SK_INLINE_ENTRY_RE, text))
+                         for m in rx.finditer(s, last_lien_at, start)]
                 same = (start - last_lien_at <= _ENTRY_SPAN
-                        and not _SK_ENTRY_HEAD_RE.search(low, last_lien_at, start)
-                        and _sk_next_entry(text, low, last_lien_at, start) == start)
+                        and not any(_opens(m) for m in heads))
             if same:
                 continue
         sk_stop = None

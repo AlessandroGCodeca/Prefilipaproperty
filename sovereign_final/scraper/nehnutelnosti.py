@@ -970,8 +970,14 @@ _HUB_CITIES = {"Bratislava", "Košice"}
 # where you drive to) or a person ("Maklér: Martin Horváth", "Kontakt: Ing.
 # Martin", "Volajte Martin", "pán Martin", "Ing. Martin …").
 _TITLE_BEFORE_NAME = r"(?:ing|mgr|bc|judr|mudr|phdr|rndr|dr|doc|prof)\.\s*"
+# "na <town>" after a way of getting there ("rýchly výjazd na Senec", "výhľad
+# na Nové Mesto", "autobus priamo na Malacky", "10 min na Senec") is a
+# direction; a bare "byt na Petržalka" in a hurried ad still names the place.
+_DIRECTION_NA = (r"(?:v[yý]jazd\w*|v[yý]h[lľ]ad\w*|dojazd\w*|odbo[cč]\w*|cest\w*"
+                 r"|spoj\w*|autobus\w*|vlak\w*|min(?:[uú]t\w*|\.)?|km)"
+                 r"(?:\s+[^\W\d_]+)?\s+na")
 _NOT_HERE_BEFORE_RE = re.compile(
-    r"(?:(?<!\w)(?:smer(?:om)?(?:\s+na)?|na|makl[eé]r(?:k[ay])?"
+    r"(?:(?<!\w)(?:smer(?:om)?(?:\s+na)?|" + _DIRECTION_NA + r"|makl[eé]r(?:k[ay])?"
     r"|kontakt(?:ujte|n[aá]\s+osoba)?|volajte|p[aá]n)\s*[:\-–]?\s*"
     r"|(?<!\w)" + _TITLE_BEFORE_NAME + r")(?:" + _TITLE_BEFORE_NAME + r")*$",
     re.IGNORECASE)
@@ -1132,7 +1138,9 @@ def _detail_district(address: str) -> str:
     found = _extract_location_from_text(address)
     own = _extract_location_from_text(last)
     if (own and found != own and not found.endswith(", " + own)
-            and found.split(", ")[0] != own.split(", ")[0]):
+            and found.split(", ")[0] != own.split(", ")[0]
+            and not any(p.strip().lower() == found.split(", ")[0].lower()
+                        for p in address.split(",")[:-1])):
         found = own
     if not found:
         return last

@@ -1720,6 +1720,9 @@ def upsert_listing(data: dict):
             # coordinates (a geocode, often just a district centroid, or the
             # pin before it moved): score it again at the pin.
             _drop_location_score(conn, data["id"])
+            # A pin needs no geocode: back to the front of Location IQ's queue.
+            conn.execute("UPDATE listings SET location_tried_at=NULL WHERE id=?",
+                         (data["id"],))
         # A district arriving for a row that had none: its score is stale.
         if (existing and not (existing[1] or "").strip()
                 and (data.get("district") or "").strip()):

@@ -594,8 +594,14 @@ def _run_new_slot(began: datetime) -> None:
 
 def run_daily() -> None:
     with _RUN_GUARD:
-        began = last_slot(datetime.now(TZ))
-        run_all_markets(trigger="06:00")
+        now = datetime.now(TZ)
+        began = last_slot(now)
+        # A retry that ran past 06:00 (this job waited on _RUN_GUARD) may
+        # already have run a market for this slot.
+        owed = due_markets(now)
+        if owed:
+            run_all_markets(trigger="06:00",
+                            which=None if owed == active_markets() else owed)
         _run_new_slot(began)
 
 

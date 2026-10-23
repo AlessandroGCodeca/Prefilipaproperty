@@ -143,7 +143,7 @@ _PERSONAL_USE_RE = re.compile(
     r"doziv|bydlen|(?<!\w)bydlet(?!\w)|(?<!\w)do\s+smrti(?!\w)|"
     r"(?<!\w)pozivan|(?<!\w)vymen(?:ek|ku|kem)(?!\w)|"
     r"uzivan\w*\s+(?:bytu|byt|jednotk|nemovit|stavb|domu|mistnost|pokoj)|"
-    r"(?<!\w)uzivat\s+(?:byt|jednotk|nemovit|stavb|dum|domu|mistnost|pokoj)|"
+    r"(?<!\w)uzivat\s+(?:byt|jednotk|dum|domu|mistnost|pokoj)|"
     r"(?:sluzebnost|bremen)\w*\s+bytu")
 _TECHNICAL_RE = re.compile(
     r"inzenyr|(?<!\w)sit(?:e|i|emi)?(?!\w)|vedeni|elektr|plyn|vodovod|vodn\w*\s+dil|"
@@ -235,7 +235,7 @@ _PLOMBA_ONLY = Vocabulary(
 _PART_C_RE = re.compile(
     r"(?<!\w)c\s*[-–:.]?\s*(?:omezeni\s+vlastnick\w*\s+prav\w*|"
     r"vecn\w*\s+prav\w*\s+zatezujic\w*(?:\s+nemovitost\w*)?(?:\s+v\s+cast\w*\s+b)?"
-    r"(?:\s+vcetne\s+souvisejic\w*\s+udaj\w*)?)")
+    r"(?:[\s,]+vcetne\s+souvisejic\w*\s+udaj\w*)?)")
 _PART_D_RE = re.compile(
     r"(?<!\w)d\s*[-–:.]?\s*(?:poznamk\w*\s+a\s+dals\w*\s+obdobn\w*\s+udaj\w*|jine\s+zapis\w*)")
 _PART_E_RE = re.compile(r"(?<!\w)e\s*[-–:.]?\s*nabyvac\w*\s+titul\w*")
@@ -342,6 +342,23 @@ _BULLET_LOOSE_RE = re.compile(
     r"(?:[ \t\u00a0]+|[ \t\u00a0]*\n[ \t\u00a0]*)"
     r"|\uf0b7[ \t\u00a0]*\n?[ \t\u00a0]*)"
     r"(?=[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ])", re.M)
+# A list under a line ending in ":" ("k zajištění pohledávek:" / " - Pohledávka
+# z úvěru …") is part of its entry, not entries behind dash bullets: its
+# dashes become a plain hyphen, which no bullet pattern reads.
+_LIST_ITEM_RE = re.compile(r"^([ \t\u00a0]*)[-–*](?=[ \t\u00a0])")
+
+
+def _protect_dash_lists(text: str) -> str:
+    out, in_list = [], False
+    for line in text.split("\n"):
+        if in_list and _LIST_ITEM_RE.match(line):
+            line = _LIST_ITEM_RE.sub("\\1\u2010", line, count=1)
+        else:
+            in_list = line.rstrip().endswith(":")
+        out.append(line)
+    return "\n".join(out)
+
+
 # A line that only goes on with the entry before it: its holder, what it
 # burdens, its deed ("Listina …") — after a register number the entry cited
 # ("… dle V-3333/2026-101") or a deed of its own.
@@ -363,7 +380,8 @@ def unrecognised_entries(lv_text) -> list[str]:
     gives, or none right under a part's heading) that no rule above names —
     a kind of burden this screen does not know, so it cannot call the title
     clean. Empty when the text has no recognisable part C."""
-    text = _BULLET_LOOSE_RE.sub("•", _CAPS_BULLET_RE.sub(r"\1o", _norm(lv_text)))
+    text = _BULLET_LOOSE_RE.sub(
+        "•", _CAPS_BULLET_RE.sub(r"\1o", _protect_dash_lists(_norm(lv_text))))
     low = fold(text)
     region, c, _ = _parts(text, low)
     if not c:

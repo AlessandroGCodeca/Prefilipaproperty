@@ -134,7 +134,8 @@ _GARDEN_FLAT_RE = re.compile(r"zahradn" + _FLAT_NOUN_AHEAD)
 # accessory ("4-izbový dom s garážou", "5i RD so záhradou").
 _ACCESSORY_STEMS = frozenset({"garaz", "zahrad", "statie", "pozem"})
 _ROOM_COUNT_RE = re.compile(
-    r"(?<![\w.,])[1-6](?:[.,]5)?(?:\s*[-–]?\s*izb[^\W\d_]*|[-–]?i)(?![^\W\d_])")
+    r"(?<![\w.,])[1-6](?:[.,]5)?(?:\s*[-–]?\s*izb[^\W\d_]*|[-–]?i)(?![^\W\d_])"
+    r"(?=\.?\s*(?:[,+]|$|(?:so?|a|v|vo)(?![^\W\d_])))")
 _HOUSE_NOUN_RE = re.compile(
     r"(?<![^\W\d_])(?:dom|domu|domom|domcek[^\W\d_]*|dvojdom[^\W\d_]*|rd"
     r"|bungalov[^\W\d_]*|chat[^\W\d_]*|chal[^\W\d_]*|vil[^\W\d_]*"
@@ -199,7 +200,10 @@ _SEP = r"[\s\-–]+"
 _NOT_LAND_OR_COMMON = (r"(?!\w)(?!" + _SEP + r"(?:\d{1,2}\s*/\s*\d{1,2}" + _SEP + r")?"
                        r"(?:na" + _SEP + r")?"
                        r"(?:pozem|spolocn|garaz|zahrad|dvor|parkov|stati|pivnic)"
-                       r"(?!" + _FLAT_NOUN_AHEAD + r"))")
+                       r"(?!" + _FLAT_NOUN_AHEAD + r")"
+                       # "… na parkovacom státí a byte" is a share of the flat too.
+                       r"(?![^\W\d_]*(?:[\s,]+[^\W\d_]+){0,2}[\s,]+(?:a|aj|i)[\s,]+"
+                       r"(?:na[\s,]+)?byt))")
 _SHARE_RE = re.compile(
     r"(?<![^\W\d_])(?:predaj\w*|preda[mv]\w*|ponuk\w*)" + _SEP +
     r"(?:(?:id\.?|idealn\w*|spoluvlastn\w*)" + _SEP + r")?"
@@ -217,10 +221,30 @@ _SHARE_RE = re.compile(
 _FRACTION_AFTER_RE = re.compile(r"\s*(\d{1,2})\s*/\s*(\d{1,2})(?!\d)")
 
 
+_NARROW_NOT_LAND = (r"(?!\w)(?!" + _SEP + r"(?:\d{1,2}\s*/\s*\d{1,2}" + _SEP + r")?"
+                    r"(?:na" + _SEP + r")?(?:pozem|spolocn))")
+_NARROW_SHARE_RE = re.compile(_SHARE_RE.pattern.replace(_NOT_LAND_OR_COMMON, _NARROW_NOT_LAND))
+
+
 def _is_share(folded: str) -> bool:
+    if (not _APARTMENT_NOUN_RE.search(folded) and not _ROOM_COUNT_RE.search(folded)
+            and _narrow_is_share(folded)):
+        return True
+    return _broad_is_share(folded)
+
+
+def _narrow_is_share(folded):
+    return _is_share_with(_NARROW_SHARE_RE, folded)
+
+
+def _broad_is_share(folded):
+    return _is_share_with(_SHARE_RE, folded)
+
+
+def _is_share_with(rx, folded: str) -> bool:
     """True when the folded text sells a share of a flat. A fraction n/n
     ("podiel 1/1") is the whole flat, not a share of it."""
-    for m in _SHARE_RE.finditer(folded):
+    for m in rx.finditer(folded):
         fractions = [(m.group(f"n{i}"), m.group(f"d{i}")) for i in (1, 2, 3)]
         after = _FRACTION_AFTER_RE.match(folded, m.end())
         if after:
@@ -269,6 +293,19 @@ _AREA_BARE_M_RE = re.compile(
     r"(?!\s*za\b(?!" + _PRICE_AHEAD + r"))", re.I)
 
 
+# A bare "N m" right after a parking space, garage, stop, shop, garden or
+# terrace named on its own is its size or a distance ("Parkovanie 100 m za
+# 30 €", "Terasa 40 m"), not the flat's — "byt so záhradou 72 m" (with a
+# garden) still gives the flat's.
+_NOT_FLAT_AREA_BEFORE_RE = re.compile(
+    r"(?<![^\W\d_])(?:garaz|parkov|stati|mhd|zastav|obchod|zahrad|pivnic|sklep|pozem|teras)"
+    r"(?![^\W\d_]*?(?:ou|om|im|ami)(?![^\W\d_]))[^\W\d_]*[\s:,-]*$")
+
+
+def _not_flat_area_before(text: str) -> bool:
+    return bool(_NOT_FLAT_AREA_BEFORE_RE.search(_fold(text)))
+
+
 def area_from_text(text: str, min_m2: float = APARTMENT_MIN_M2,
                    max_m2: float = APARTMENT_MAX_M2) -> float:
     """First plausible apartment area in `text`, or 0.0.
@@ -282,6 +319,9 @@ def area_from_text(text: str, min_m2: float = APARTMENT_MIN_M2,
         return 0.0
     for pattern in (_AREA_M2_RE, _AREA_BARE_M_RE):
         for m in pattern.finditer(text):
+            if pattern is _AREA_BARE_M_RE and _not_flat_area_before(
+                    text[max(0, m.start() - 30):m.start()]):
+                continue
             try:
                 v = float(m.group(1).replace(",", "."))
             except ValueError:

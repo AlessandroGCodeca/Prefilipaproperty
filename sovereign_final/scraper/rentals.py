@@ -108,6 +108,8 @@ def _same_part_named_city(location: str, own: str, found: str) -> bool:
     part of that city is meant. A location that names its city keeps it."""
     if not found or ", " not in own or found.split(", ")[0] != own.split(", ")[0]:
         return False
+    if found not in ("Staré Mesto, Košice",):
+        return False
     city = unicodedata.normalize("NFKD", own.split(", ", 1)[1]).encode("ascii", "ignore")
     loc = unicodedata.normalize("NFKD", location).encode("ascii", "ignore")
     return city.decode().lower()[:5] not in loc.decode().lower()
@@ -150,14 +152,16 @@ def build_rental(source: str, url: str, title: str, text: str, location: str = "
     # Bratislave", an agent called Martin) does not replace it.
     own = _extract_location_from_text(location)
     if not own and _names_a_place(location):
-        # The portal names a place the matcher does not know (a village): a
-        # town the title or text mentions ("pre ľudí pracujúcich v
-        # Bratislave", "10 min od Bratislava Vajnory") is not where the flat
-        # is, so there is no comp — as for the same ad without that sentence.
-        return None
-    found = _extract_location_from_text(f"{location} {title} {text}")
-    district = found if (not own or found == own or found.endswith(", " + own)
-                         or _same_part_named_city(location, own, found)) else own
+        # The portal names a place the matcher does not know (a village, a
+        # street, "Slovensko"): only the title may name the town ("…, Nitra").
+        # A town the text mentions ("pre ľudí pracujúcich v Bratislave", "10
+        # min od Bratislava Vajnory") is not where the flat is, so without one
+        # in the title there is no comp — as for the same ad without it.
+        district = _extract_location_from_text(title)
+    else:
+        found = _extract_location_from_text(f"{location} {title} {text}")
+        district = found if (not own or found == own or found.endswith(", " + own)
+                             or _same_part_named_city(location, own, found)) else own
     if not district:
         return None                      # a comp with no place is no comp
     now = now or datetime.now(timezone.utc).isoformat()

@@ -266,20 +266,35 @@ _PROPERTY_RE = re.compile(r"(?<![^\W\d_])(?:" + "|".join(CZ_PROPERTY_EXCLUDE) + 
 # pozemku", "podíl 1/4 na zahradě", "podíl 1/10 na společných částech domu",
 # "1/6 podíl na sklepě", "včetně podílu" — is no sale of a share and does not
 # count; nor is "se spoluvlastnickým podílem na pozemku" (_CO_OWNED_ACCESSORY_RE).
-_ACCESSORY_SHARE = (r"(?:pozem|zahrad|dvor|garaz|parkovac|sklep"
-                    r"|spolecn\w*[\s-]+(?:cast|prostor))")
-_SHARE_RE = re.compile(
-    r"(?<![^\W\d_])(?:prodej\w*|proda[mv]\w*|nabiz\w*)\s+(?:(?:id\.?|idealn\w*)\s*)?"
-    r"(?:\d{1,2}\s*/\s*\d{1,2}\s+)?podil"
-    r"|(?<![^\W\d_])(?:id\.|idealn\w*)\s*\d{1,2}\s*/\s*\d{1,2}(?!\d)"
-    r"|(?<![\w/])\d{1,2}\s*/\s*\d{1,2}\s+"
-    r"(?:podil\w*(?!\w)(?!\s+(?:na\s+)?" + _ACCESSORY_SHARE + r")"
-    r"|(?:na\s+)?(?:byt[ue]|jednotk))"
-    r"|(?<![^\W\d_])podil\w*\s+\d{1,2}\s*/\s*\d{1,2}(?![\d/])"
-    r"(?!\s+(?:na\s+)?" + _ACCESSORY_SHARE + r")")
+# "Sklepní byt" / "zahradní byt" is a flat, not its cellar or garden.
+_NOT_A_FLAT_AFTER = r"(?!\w*[\s-]+(?:byt|jednotk))"
+_ACCESSORY_SHARE = (r"(?:(?:pozem|zahrad|dvor|garaz|parkovac|sklep)" + _NOT_A_FLAT_AFTER
+                    + r"|spolecn\w*[\s-]+(?:cast|prostor))")
+# With no flat named, only the accessories a flat ad has always named (its
+# land, garden, yard, garage, parking) are no share of it; "1/2 podíl na
+# sklepě" alone sells the cellar.
+_NARROW_ACCESSORY_SHARE = r"(?:pozem|zahrad|dvor|garaz|parkovac)" + _NOT_A_FLAT_AFTER
+
+
+def _share_re(accessory: str) -> re.Pattern:
+    return re.compile(
+        r"(?<![^\W\d_])(?:prodej\w*|proda[mv]\w*|nabiz\w*)\s+(?:(?:id\.?|idealn\w*)\s*)?"
+        r"(?:\d{1,2}\s*/\s*\d{1,2}\s+)?podil"
+        r"|(?<![^\W\d_])(?:id\.|idealn\w*)\s*\d{1,2}\s*/\s*\d{1,2}(?!\d)"
+        r"|(?<![\w/])\d{1,2}\s*/\s*\d{1,2}\s+"
+        r"(?:podil\w*(?!\w)(?!\s+(?:na\s+)?" + accessory + r")"
+        r"|(?:na\s+)?(?:byt[ue]|jednotk))"
+        r"|(?<![^\W\d_])podil\w*\s+\d{1,2}\s*/\s*\d{1,2}(?![\d/])"
+        r"(?!\s+(?:na\s+)?" + accessory + r")")
+
+
+_SHARE_RE = _share_re(_ACCESSORY_SHARE)
+_NARROW_SHARE_RE = _share_re(_NARROW_ACCESSORY_SHARE)
+# A co-owned share of the land "and the flat" ("… podíl 1/2 na pozemku a bytě")
+# is a share of the flat.
 _CO_OWNED_ACCESSORY_RE = re.compile(
     r"spoluvlastnick\w*[\s-]+podil\w*[\s-]+(?:\d{1,2}\s*/\s*\d{1,2}[\s-]+)?(?:na[\s-]+)?"
-    + _ACCESSORY_SHARE)
+    + _ACCESSORY_SHARE + r"(?!\w*\s+(?:a|i)\s+(?:na\s+)?(?:byt|jednotk))")
 # A layout names the flat as "byt" does; a URL slug drops the "+" ("2kk"). It
 # keeps a flat sold with its garage, parking space or land share ("Prodej 2+kk
 # s garáží") — never a house, cottage, villa or office ("Prodej 4+1 rodinného
@@ -293,7 +308,12 @@ _SLUG_LAYOUT_RE = re.compile(r"(?<![^\W\d_])[1-9]-?kk(?![^\W\d_])")
 CZ_ACCESSORY_STEMS = ("garaz", "parkovac", "pozem")
 _HOUSE_NOUNS = r"(?:rd|dum|domu|domek|domku|domecek)(?![^\W\d_])"
 _HOUSE_NOUN_RE = re.compile(r"(?<![^\W_])(?<!(?<!\w)v[\s-])(?<!(?<!\w)ve[\s-])" + _HOUSE_NOUNS)
-_HOUSE_AFTER_LAYOUT_RE = re.compile(r"(?:\s+|-)" + _HOUSE_NOUNS)
+_HOUSE_AFTER_LAYOUT_RE = re.compile(r"(?:[\s(]+|-)" + _HOUSE_NOUNS)   # "4+kk (dům)"
+# Words that only ever name a house: RD / domek anywhere (but "v RD"), or dům
+# with a house-only adjective (řadový, samostatně stojící, patrový, dvougenerační).
+_HOUSE_ONLY_RE = re.compile(
+    r"(?<![^\W_])(?<!(?<!\w)v[\s-])(?<!(?<!\w)ve[\s-])(?:rd|domek|domku|domecek)(?![^\W\d_])"
+    r"|(?:radov|samostatn|stojic|patrov|dvougeneracn)\w*[\s-]+(?:dum|domu)(?![^\W\d_])")
 _STREET_ADJ_RE = re.compile(r"(?:hotel|penzion)ova(?![^\W\d_])")
 
 
@@ -302,7 +322,8 @@ def _flat_layout_before(folded: str, pos: int) -> bool:
     right after it."""
     lay = _LAYOUT_RE.search(folded, 0, pos) or _SLUG_LAYOUT_RE.search(folded, 0, pos)
     return bool(lay and not _HOUSE_NOUN_RE.search(folded, 0, lay.start())
-                and not _HOUSE_AFTER_LAYOUT_RE.match(folded, lay.end()))
+                and not _HOUSE_AFTER_LAYOUT_RE.match(folded, lay.end())
+                and not _HOUSE_ONLY_RE.search(folded, 0, pos))
 
 
 def is_excluded_cz(*texts: str) -> bool:
@@ -310,7 +331,10 @@ def is_excluded_cz(*texts: str) -> bool:
     from scraper.textparse import _APARTMENT_NOUN_RE, _is_street_name
     for t in texts:
         folded = fold(t)
-        if _SHARE_RE.search(folded):
+        if _SHARE_RE.search(folded) or (
+                _NARROW_SHARE_RE.search(folded)
+                and not _APARTMENT_NOUN_RE.search(folded)
+                and not _flat_layout_before(folded, len(folded))):
             return True
         for m in _ALWAYS_RE.finditer(folded):
             # A street named after one ("Hotelová", Ostrava-Hrabůvka) is no hotel;
