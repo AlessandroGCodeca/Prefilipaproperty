@@ -102,13 +102,14 @@ def rent_from_text(text: str) -> float:
 _POSTCODE_OR_REGION_RE = re.compile(r"\d{3}\s?\d{2}|.*(?<!\w)kraj(?!\w).*", re.I)
 
 
-def _same_part_named_city(location: str, own: str, found: str) -> bool:
+def _same_part_named_city(location: str, own: str, found: str, title: str = "") -> bool:
     """A bare city part in the location ("Staré Mesto") is placed in
     Bratislava by default; when the ad names the city ("… Košice"), the same
     part of that city is meant. A location that names its city keeps it."""
     if not found or ", " not in own or found.split(", ")[0] != own.split(", ")[0]:
         return False
-    if found not in ("Staré Mesto, Košice",):
+    if (found != "Staré Mesto, Košice"
+            and _extract_location_from_text(f"{location} {title}") != found):
         return False
     city = unicodedata.normalize("NFKD", own.split(", ", 1)[1]).encode("ascii", "ignore")
     loc = unicodedata.normalize("NFKD", location).encode("ascii", "ignore")
@@ -158,10 +159,14 @@ def build_rental(source: str, url: str, title: str, text: str, location: str = "
         # min od Bratislava Vajnory") is not where the flat is, so without one
         # in the title there is no comp — as for the same ad without it.
         district = _extract_location_from_text(title)
+        if district and re.search(r"(?<!\d)\d{3}\s?\d{2}(?!\d)", location):
+            loc = strip_diacritics(location).lower()
+            if not any(strip_diacritics(p).lower()[:5] in loc for p in district.split(", ")):
+                district = ""
     else:
         found = _extract_location_from_text(f"{location} {title} {text}")
         district = found if (not own or found == own or found.endswith(", " + own)
-                             or _same_part_named_city(location, own, found)) else own
+                             or _same_part_named_city(location, own, found, title)) else own
     if not district:
         return None                      # a comp with no place is no comp
     now = now or datetime.now(timezone.utc).isoformat()

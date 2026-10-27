@@ -174,14 +174,23 @@ _SK_LINE_ENTRY_RE = re.compile(
 
 _SK_INLINE_ENTRY_RE = re.compile(
     r"(?<![\w./])(?<!č\.\s)(?<!č\.)\d{1,3}\.?\s+(?:[VZP]\s*-?\s*\d{1,6}/\d{2,4}\s*[-–]?\s*)?"
-    r"(?=(?:Záložn|Zmluv|Zriaden|Vecn|Predkupn|Poznámk|Exeku|Zabezpečovac)\w*)")
+    r"(?=(?:Z(?i:áložn|mluv|riaden|abezpečovac)|V(?i:ecn)|P(?i:redkupn|oznámk)|E(?i:xeku))\w*)")
+# The ordinal right before a lien phrase (folded): "1 V 2797/2013 - ", "1 ".
+_SK_ORDINAL_BEFORE_RE = re.compile(
+    r"(?<![\w./])(\d{1,3})\.?\s+(?:[vzp]\s*-?\s*\d{1,6}/\d{2,4}\s*[-–]?\s*)?$")
 
 
-def _sk_next_entry(text: str, low: str, pos: int, endpos: int) -> int:
-    """Where the next Slovak entry starts in [pos, endpos), else endpos."""
+def _sk_next_entry(text: str, low: str, pos: int, endpos: int,
+                   next_no: str | None = None) -> int:
+    """Where the next Slovak entry starts in [pos, endpos), else endpos. With
+    `next_no` (the entry after this lien's own), an ordinal inside a line
+    opens it only when it is that number: "vchod 1 Zmluva …", "Bratislava 1
+    Zmluva …" are part of the entry."""
+    inline = next((m for m in _SK_INLINE_ENTRY_RE.finditer(text, pos, endpos)
+                   if next_no is None
+                   or re.match(r"\s*(\d{1,3})", m.group()).group(1) == next_no), None)
     found = [m.start() for m in (_SK_NEW_ENTRY_RE.search(text, pos, endpos),
-                                 _SK_LINE_ENTRY_RE.search(text, pos, endpos),
-                                 _SK_INLINE_ENTRY_RE.search(text, pos, endpos)) if m]
+                                 _SK_LINE_ENTRY_RE.search(text, pos, endpos), inline) if m]
     return min(found, default=endpos)
 
 
@@ -290,6 +299,19 @@ class Vocabulary:
 _PART_C_RE = re.compile(r"cast\s*c\s*[:.\-–]?\s*tarch|(?<!\w)c\s*[.:]\s*tarch")
 
 
+# Before part C, proceedings on who owns the flat named in the owner's title
+# ("Titul nadobudnutia: Rozsudok … v spore o určenie vlastníckeho práva") are
+# the case the owner won; after a note ("Poznámka", "Iné údaje") a pending one.
+_TITLE_OR_NOTE_RE = re.compile(r"titul\w*\s+nadobud\w*|(?<!\w)poznamk\w*|ine\s+udaj\w*")
+
+
+def _in_title_of_acquisition(low: str, at: int) -> bool:
+    last = None
+    for last in _TITLE_OR_NOTE_RE.finditer(low, 0, at):
+        pass
+    return bool(last and last.group().startswith("titul"))
+
+
 def part_c_start(lv_text) -> int | None:
     """Index of part C's heading in an LV text, or None when there is none to
     recognise. Part C runs to the end of the report (notes and "Iné údaje"
@@ -325,7 +347,9 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
         for label, kind, rx in v.rules
         for m in rx.finditer(low)
         if c_at is None or m.start() >= c_at
-        or (label not in v.part_c_only and rx not in v.part_c_only)
+        or (label not in v.part_c_only and rx not in v.part_c_only
+            and not (_OWNERSHIP_RULING_RE.search(m.group())
+                     and _in_title_of_acquisition(low, m.start())))
     )
     entries: list[dict] = []
     last_lien_at = None
@@ -365,10 +389,12 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
             continue
         nxt = hits[i + 1][0] if i + 1 < len(hits) else len(low)
         window_end = min(nxt, end + _MARKER_SPAN)
+        own_no = _SK_ORDINAL_BEFORE_RE.search(low, max(0, start - 30), start)
+        next_no = str(int(own_no.group(1)) + 1) if own_no else None
         if not v.reference_needs_same_entry:
             # Slovak: the next entry's "… v prospech Tatra banka" is not this
             # lien's creditor.
-            window_end = _sk_next_entry(text, low, end, window_end)
+            window_end = _sk_next_entry(text, low, end, window_end, next_no)
         window = low[end:window_end]
         ref_from = max(0, start - 40)
         if not v.reference_needs_same_entry:
@@ -431,15 +457,32 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
                 # in between — that is a lien of its own.
                 own = {re.sub(r"\W", "", n.group()) for n in
                        v.entry_no_re.finditer(low, max(0, last_lien_at - 60), last_lien_at)}
+                # The lien's own entry's ordinal ("1 V 2797/2013 - Záložné
+                # právo"): the next entry's is the next number.
+                o = _SK_ORDINAL_BEFORE_RE.search(low, max(0, last_lien_at - 30), last_lien_at)
+                next_no = str(int(o.group(1)) + 1) if o else None
 
-                def _opens(m):
+                def _opens(m, rx):
                     n = v.entry_no_re.search(low, m.start(), m.end())
-                    return not (n and re.sub(r"\W", "", n.group()) in own)
-                heads = [m for rx, s in ((_SK_ENTRY_HEAD_RE, low), (_SK_NEW_ENTRY_RE, text),
-                                         (_SK_LINE_ENTRY_RE, text), (_SK_INLINE_ENTRY_RE, text))
+                    if n and re.sub(r"\W", "", n.group()) not in own:
+                        return True
+                    k = re.match(r"\s*(\d{1,3})", low[m.start():m.end()])
+                    if n:
+                        # Its own contract cited ("… 25 V 2797/2013 - zmluva
+                        # …"), unless the next ordinal opens it with a capital:
+                        # a new entry under the same number.
+                        return bool(k and k.group(1) == next_no
+                                    and text[m.end():m.end() + 1].isupper())
+                    # An ordinal alone ("2 Zmluva …") is the next entry's only
+                    # when it is the next number: "Bratislava 1", "Hodžovo
+                    # námestie 3", an IČO's "930" are an address.
+                    return (rx is _SK_LINE_ENTRY_RE or next_no is None or not k
+                            or k.group(1) == next_no)
+                heads = [(m, rx) for rx, s in ((_SK_ENTRY_HEAD_RE, low), (_SK_NEW_ENTRY_RE, text),
+                                               (_SK_LINE_ENTRY_RE, text), (_SK_INLINE_ENTRY_RE, text))
                          for m in rx.finditer(s, last_lien_at, start)]
                 same = (start - last_lien_at <= _ENTRY_SPAN
-                        and not any(_opens(m) for m in heads))
+                        and not any(_opens(m, rx) for m, rx in heads))
             if same:
                 continue
         sk_stop = None
@@ -466,7 +509,7 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
             sep = v.entry_no_re.search(low, at, stop)
             if sep:
                 stop = sep.start()
-            stop = _sk_next_entry(text, low, end, stop)
+            stop = _sk_next_entry(text, low, end, stop, next_no)
             marker = v.creditor_markers[0].search(low[end:stop])
             if marker is not None:
                 sk_stop = stop

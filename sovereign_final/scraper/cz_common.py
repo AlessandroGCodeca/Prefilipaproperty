@@ -294,7 +294,7 @@ _NARROW_SHARE_RE = _share_re(_NARROW_ACCESSORY_SHARE)
 # is a share of the flat.
 _CO_OWNED_ACCESSORY_RE = re.compile(
     r"spoluvlastnick\w*[\s-]+podil\w*[\s-]+(?:\d{1,2}\s*/\s*\d{1,2}[\s-]+)?(?:na[\s-]+)?"
-    + _ACCESSORY_SHARE + r"(?!\w*\s+(?:a|i)\s+(?:na\s+)?(?:byt|jednotk))")
+    + _ACCESSORY_SHARE + r"(?!\w*\s+(?:a|i)\s+(?:na\s+)?(?:byt[eu]?(?!\w)|(?:bytov\w*\s+)?jednotk))")
 # A layout names the flat as "byt" does; a URL slug drops the "+" ("2kk"). It
 # keeps a flat sold with its garage, parking space or land share ("Prodej 2+kk
 # s garáží") — never a house, cottage, villa or office ("Prodej 4+1 rodinného
@@ -314,6 +314,8 @@ _HOUSE_AFTER_LAYOUT_RE = re.compile(r"(?:[\s(]+|-)" + _HOUSE_NOUNS)   # "4+kk (d
 _HOUSE_ONLY_RE = re.compile(
     r"(?<![^\W_])(?<!(?<!\w)v[\s-])(?<!(?<!\w)ve[\s-])(?:rd|domek|domku|domecek)(?![^\W\d_])"
     r"|(?:radov|samostatn|stojic|patrov|dvougeneracn)\w*[\s-]+(?:dum|domu)(?![^\W\d_])")
+# "v přízemí RD", "v 1. patře RD": a flat in the house — not "ve Zlíně, RD".
+_IN_A_HOUSE_RE = re.compile(r"(?<![^\W\d_])ve?[\s-]+(?:[^\s,-]+[\s-]+){0,2}$")
 _STREET_ADJ_RE = re.compile(r"(?:hotel|penzion)ova(?![^\W\d_])")
 
 
@@ -323,7 +325,8 @@ def _flat_layout_before(folded: str, pos: int) -> bool:
     lay = _LAYOUT_RE.search(folded, 0, pos) or _SLUG_LAYOUT_RE.search(folded, 0, pos)
     return bool(lay and not _HOUSE_NOUN_RE.search(folded, 0, lay.start())
                 and not _HOUSE_AFTER_LAYOUT_RE.match(folded, lay.end())
-                and not _HOUSE_ONLY_RE.search(folded, 0, pos))
+                and not any(not _IN_A_HOUSE_RE.search(folded, 0, h.start())
+                            for h in _HOUSE_ONLY_RE.finditer(folded, 0, pos)))
 
 
 def is_excluded_cz(*texts: str) -> bool:

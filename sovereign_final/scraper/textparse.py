@@ -135,7 +135,10 @@ _GARDEN_FLAT_RE = re.compile(r"zahradn" + _FLAT_NOUN_AHEAD)
 _ACCESSORY_STEMS = frozenset({"garaz", "zahrad", "statie", "pozem"})
 _ROOM_COUNT_RE = re.compile(
     r"(?<![\w.,])[1-6](?:[.,]5)?(?:\s*[-–]?\s*izb[^\W\d_]*|[-–]?i)(?![^\W\d_])"
-    r"(?=\.?\s*(?:[,+]|$|(?:so?|a|v|vo)(?![^\W\d_])))")
+    # "4-izbová drevostavba / novostavba / radovka / usadlosť / kúria", "4-izbový
+    # murovaný objekt" is a house; "3-izbový v novostavbe" is a flat in one.
+    r"(?![\s\-–.]*(?:(?!(?:v|vo|na|s|so|a|po|pri|pred|za)[\s\-–.])[^\W\d_]+[\s\-–.]+)?"
+    r"(?:drevostavb|novostavb|stavb|radovk|usadlost|kuri|objekt|nehnutel|dvojgener))")
 _HOUSE_NOUN_RE = re.compile(
     r"(?<![^\W\d_])(?:dom|domu|domom|domcek[^\W\d_]*|dvojdom[^\W\d_]*|rd"
     r"|bungalov[^\W\d_]*|chat[^\W\d_]*|chal[^\W\d_]*|vil[^\W\d_]*"
@@ -203,7 +206,9 @@ _NOT_LAND_OR_COMMON = (r"(?!\w)(?!" + _SEP + r"(?:\d{1,2}\s*/\s*\d{1,2}" + _SEP 
                        r"(?!" + _FLAT_NOUN_AHEAD + r")"
                        # "… na parkovacom státí a byte" is a share of the flat too.
                        r"(?![^\W\d_]*(?:[\s,]+[^\W\d_]+){0,2}[\s,]+(?:a|aj|i)[\s,]+"
-                       r"(?:na[\s,]+)?byt))")
+                       r"(?:na[\s,]+)?byt(?:e|u|om)?(?![^\W\d_])"
+                       # "… na pozemku a byt je / má …" starts a new sentence.
+                       r"(?![\s,]+(?:je|ma|bol|bola|bude|sa|presiel)(?![^\W\d_]))))")
 _SHARE_RE = re.compile(
     r"(?<![^\W\d_])(?:predaj\w*|preda[mv]\w*|ponuk\w*)" + _SEP +
     r"(?:(?:id\.?|idealn\w*|spoluvlastn\w*)" + _SEP + r")?"
@@ -298,8 +303,8 @@ _AREA_BARE_M_RE = re.compile(
 # 30 €", "Terasa 40 m"), not the flat's — "byt so záhradou 72 m" (with a
 # garden) still gives the flat's.
 _NOT_FLAT_AREA_BEFORE_RE = re.compile(
-    r"(?<![^\W\d_])(?:garaz|parkov|stati|mhd|zastav|obchod|zahrad|pivnic|sklep|pozem|teras)"
-    r"(?![^\W\d_]*?(?:ou|om|im|ami)(?![^\W\d_]))[^\W\d_]*[\s:,-]*$")
+    r"(?<![^\W\d_])(?:garaz|parkovanie|parkovani|parkovisko|statie|stani|mhd|zastavka"
+    r"|obchod|zahrada|zahradka|pivnica|sklep|pozemok|pozemek|terasa)[\s:-]*$")
 
 
 def _not_flat_area_before(text: str) -> bool:

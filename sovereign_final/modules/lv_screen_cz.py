@@ -182,11 +182,19 @@ def _holder_evidence(block) -> str:
     return " "
 
 
+# "právo užívat nemovitost / stavbu" held by a person is a home; held by a
+# company ("ČEZ Distribuce, a. s.") it is the company's line or pipe.
+_PERSONAL_VERB_RE = re.compile(r"(?<!\w)uzivat\s+(?:nemovit|stavb)")
+
+
 def _tier(label: str, entry_text: str, holder: str) -> tuple[str, str]:
     """("hard" | "soft", why) for an encumbrance, from its own entry's text
     (folded) and its holder's name."""
     if label == "věcné břemeno":
-        if _PERSONAL_USE_RE.search(entry_text):
+        block = _HOLDER_BLOCK_RE.search(entry_text)
+        company = bool(block and _holder_evidence(block).strip())
+        if _PERSONAL_USE_RE.search(entry_text) or (
+                not company and _PERSONAL_VERB_RE.search(entry_text)):
             return "hard", "lifetime right to use or live in it"
         if _TECHNICAL_RE.search(_HOLDER_BLOCK_RE.sub(_holder_evidence, entry_text)):
             return "soft", "utility / access easement"
@@ -348,12 +356,23 @@ _BULLET_LOOSE_RE = re.compile(
 _LIST_ITEM_RE = re.compile(r"^([ \t\u00a0]*)[-–*](?=[ \t\u00a0])")
 
 
+# An entry's bullet at a line's start, whatever its glyph.
+_LINE_BULLET_RE = re.compile(r"^([ \t\u00a0]*)(?:[oO•◦○▪●·*\-–](?=[ \t\u00a0])|\uf0b7)")
+
+
 def _protect_dash_lists(text: str) -> str:
-    out, in_list = [], False
+    # Only items indented deeper than their entry's bullet: a dash at the
+    # bullet's own depth (or in a paste that lost its indents) may be the
+    # next entry's.
+    out, in_list, bullet_at = [], False, None
     for line in text.split("\n"):
-        if in_list and _LIST_ITEM_RE.match(line):
+        item = _LIST_ITEM_RE.match(line)
+        if in_list and item and bullet_at is not None and len(item.group(1)) > bullet_at:
             line = _LIST_ITEM_RE.sub("\\1\u2010", line, count=1)
         else:
+            bullet = _LINE_BULLET_RE.match(line)
+            if bullet:
+                bullet_at = len(bullet.group(1))
             in_list = line.rstrip().endswith(":")
         out.append(line)
     return "\n".join(out)
