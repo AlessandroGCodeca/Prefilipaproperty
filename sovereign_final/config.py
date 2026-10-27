@@ -8,6 +8,23 @@ from datetime import date
 from dotenv import load_dotenv
 load_dotenv()
 
+
+def _env_float(name: str, default: float) -> float:
+    """A numeric setting from the environment / .env. A key left blank
+    ("KEY=", which load_dotenv and docker-compose's env_file both pass on as
+    an empty string) means the default, exactly as an unset key does — it
+    used to mean 0 for some settings. Any other value is read as it is (an
+    explicit 0 stays 0); a value that is not a number still stops the app."""
+    raw = (os.getenv(name) or "").strip()
+    return float(raw) if raw else float(default)
+
+
+def _env_int(name: str, default: int) -> int:
+    """_env_float for a whole-number setting."""
+    raw = (os.getenv(name) or "").strip()
+    return int(raw) if raw else int(default)
+
+
 # ── Database ──────────────────────────────────────────────────────────────────
 # SQLite only — see SQLITE_PATH below. DATABASE_URL is ignored: the old
 # PostgreSQL mode never worked (see the database.py docstring).
@@ -29,7 +46,7 @@ INVESTOR_LTV_FROM      = "2026-10-01"   # date the 70% cap takes effect
 # How many residential properties you already own. At 2 or more, the next
 # purchase is your 3rd+, so scoring uses LTV_RATIO_INVESTOR instead of
 # LTV_RATIO (see engine.financial.default_ltv). Set in .env.
-PROPERTIES_OWNED       = int(os.getenv("PROPERTIES_OWNED", "0") or 0)
+PROPERTIES_OWNED       = _env_int("PROPERTIES_OWNED", 0)
 
 # Rate-shock stress test. NBS makes banks test affordability (DSTI) at the
 # offered rate + 2 percentage points; a fixation ending in a higher-rate market
@@ -102,7 +119,7 @@ TAX_YEAR_RULES = {
 }
 # The tax year scoring uses. Defaults to the calendar year; set TAX_YEAR in .env
 # to model another year (e.g. next year's, once its table is added above).
-TAX_YEAR = int(os.getenv("TAX_YEAR", "0") or 0) or date.today().year
+TAX_YEAR = _env_int("TAX_YEAR", 0) or date.today().year
 
 
 def tax_rules(year: int | None = None) -> dict:
@@ -462,13 +479,13 @@ SRO_SETUP_COST = 2_500  # Notary + registry + first year accounting
 # deductible from its taxable profit. An estimate — use your účtovník's quote
 # (a one-flat s.r.o. typically runs €50–100/month), and add any minimum tax
 # the company owes for the year.
-SRO_ANNUAL_RUNNING_COST = float(os.getenv("SRO_ANNUAL_RUNNING_COST", "1200") or 0)
+SRO_ANNUAL_RUNNING_COST = _env_float("SRO_ANNUAL_RUNNING_COST", 1200)
 # A company borrows on commercial terms, not a hypotéka: banks usually price
 # an s.r.o.'s property loan above the retail mortgage rate and lend a lower
 # share of the price. The s.r.o. scenario uses the personal rate + this
 # premium, and at most this LTV. Estimates — replace both with a bank's quote.
-SRO_RATE_PREMIUM_PP = float(os.getenv("SRO_RATE_PREMIUM_PP", "0.01") or 0)
-SRO_LTV_RATIO       = float(os.getenv("SRO_LTV_RATIO", "0.70") or 0.70)
+SRO_RATE_PREMIUM_PP = _env_float("SRO_RATE_PREMIUM_PP", 0.01)
+SRO_LTV_RATIO       = _env_float("SRO_LTV_RATIO", 0.70)
 
 # ── Cash-flow flag ────────────────────────────────────────────────────────────
 # The class (GREEN / YELLOW / WHITE) is price against the regional median, not
@@ -476,7 +493,7 @@ SRO_LTV_RATIO       = float(os.getenv("SRO_LTV_RATIO", "0.70") or 0.70)
 # GREEN flats still cost money every month. A listing whose monthly surplus is
 # below this (€/mo, after the mortgage and tax) is flagged as cash-flow
 # negative next to its class, and the "cash-flow positive only" filter hides it.
-CASHFLOW_MIN_SURPLUS = float(os.getenv("CASHFLOW_MIN_SURPLUS", "0") or 0)
+CASHFLOW_MIN_SURPLUS = _env_float("CASHFLOW_MIN_SURPLUS", 0)
 
 # ── Scraper sale-price floor ──────────────────────────────────────────────────
 # A € figure on a listing page below this is a deposit, a fee or a monthly
@@ -486,7 +503,7 @@ CASHFLOW_MIN_SURPLUS = float(os.getenv("CASHFLOW_MIN_SURPLUS", "0") or 0)
 # pass applies after every scrape. €30,000 used to be hard-coded here, which
 # dropped genuine small flats in eastern and southern towns before that check
 # ever saw them.
-SALE_PRICE_MIN_EUR = int(float(os.getenv("SALE_PRICE_MIN_EUR", "15000") or 15000))
+SALE_PRICE_MIN_EUR = int(_env_float("SALE_PRICE_MIN_EUR", 15000))
 
 # ── Markets and currency ──────────────────────────────────────────────────────
 # Slovakia ("sk") and Czechia ("cz") run side by side; every figure above that
@@ -494,7 +511,7 @@ SALE_PRICE_MIN_EUR = int(float(os.getenv("SALE_PRICE_MIN_EUR", "15000") or 15000
 # Czech listings keep their CZK prices. For ranking and the "All markets"
 # view they are converted to EUR with this one rate — the ČNB fixing for the
 # date below. Update both together (or set them in .env).
-CZK_PER_EUR    = float(os.getenv("CZK_PER_EUR", "24.355") or 24.355)
+CZK_PER_EUR    = _env_float("CZK_PER_EUR", 24.355)
 FX_RATE_DATE   = os.getenv("FX_RATE_DATE", "2026-10-14")
 FX_RATE_SOURCE = os.getenv("FX_RATE_SOURCE", "ČNB kurzy devizového trhu")
 
@@ -510,4 +527,4 @@ LOGS_DIR       = os.path.join(BASE_DIR, "logs")
 # Daily database copies and data exports (modules/backup). In Docker this is
 # a folder on the host (docker-compose.yml), outside the sovereign_data volume.
 BACKUP_DIR     = os.path.join(BASE_DIR, "backups")
-BACKUP_KEEP    = int(os.getenv("BACKUP_KEEP", "14") or 14)   # days of each kept
+BACKUP_KEEP    = _env_int("BACKUP_KEEP", 14)   # days of each kept

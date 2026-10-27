@@ -110,7 +110,8 @@ _CREDITOR_MARKERS = (
 # bullet ("o ") between, only refers back ("Listina Smlouva o zřízení
 # zástavního práva"). Each entry ends with its "Listina …" line, so a word on
 # an earlier line must not make the next entry's lien a reference.
-_REFERENCE_BEFORE = re.compile(r"(?:smlouv|zrizen|zanik|vymaz|zrus|listin)[^\n•]*$")
+_REFERENCE_BEFORE = re.compile(
+    r"(?:smlouv|zrizen|zanik|vymaz|zrus|listin)[^\n•]*(?:\n[^\S\n]*)?$")
 # A non-bank company of a banking group (leasing, insurance, car finance,
 # factoring, an investment firm) or a credit union is no bank, whatever its
 # name shares with one.
@@ -133,9 +134,17 @@ _NAME_END = re.compile(
     r"(?<!\w)na\s+(?:byt|jednotk|nebyt|nemovit|parc|pozem|stavb|podil)"
 )
 
+# "Služebnost bytu" / "Věcné břemeno bytu" is a right to live in it. The
+# generic type "Věcné břemeno užívání" is not on its own: its entry says what
+# is used (a flat — "užívání bytu", "užívání pokoje" — or a strip of land for
+# a cable). Hard even beside an access or upkeep word: the noun or the verb
+# ("právo užívat byt", "bydlet", "do smrti"), as the Slovak screen reads it.
 _PERSONAL_USE_RE = re.compile(
-    r"doziv|bydlen|(?<!\w)pozivan|(?<!\w)vymen(?:ek|ku|kem)(?!\w)|"
-    r"uzivan\w*\s+(?:bytu|byt|jednotk|nemovit|stavb|domu|mistnost)")
+    r"doziv|bydlen|(?<!\w)bydlet(?!\w)|(?<!\w)do\s+smrti(?!\w)|"
+    r"(?<!\w)pozivan|(?<!\w)vymen(?:ek|ku|kem)(?!\w)|"
+    r"uzivan\w*\s+(?:bytu|byt|jednotk|nemovit|stavb|domu|mistnost|pokoj)|"
+    r"(?<!\w)uzivat\s+(?:byt|jednotk|dum|domu|mistnost|pokoj)|"
+    r"(?:sluzebnost|bremen)\w*\s+bytu")
 _TECHNICAL_RE = re.compile(
     r"inzenyr|(?<!\w)sit(?:e|i|emi)?(?!\w)|vedeni|elektr|plyn|vodovod|vodn\w*\s+dil|"
     r"kanaliz|rozvod|energet|distribuc|telekom|trafostanic|teplovod|potrub|pripojk|"
@@ -147,13 +156,47 @@ _PUBLIC_HOLDER_RE = re.compile(
     r"stat|statn\w*|kraj|kraje|hlavn\w*\s+mest\w*|statutarn\w*\s+mest\w*)(?!\w)")
 
 
+# The holder's block ("Oprávnění pro Kabelková Marie, Plynární 12, …") up to
+# "Povinnost k": a surname or a street is no utility line.
+_HOLDER_BLOCK_RE = re.compile(
+    r"(?:opravnen\w*\s+pro|ve\s+prospech\w*)[\s\S]*?(?=(?<!\w)povinnost\w*\s+k(?!\w)|$)")
+_HOLDER_MARKER_RE = re.compile(r"(?:opravnen\w*\s+pro|ve\s+prospech\w*)\s*:?\s*")
+# A company's legal form, in its name ("Testovací teplárna a.s.") or right
+# after it (", a. s.", ", s.r.o.", ", spol. s r.o.") — folded text.
+_COMPANY_FORM_RE = re.compile(r"(?<!\w)(?:a\.\s*s\.|s\.\s*r\.\s*o\.|spol\.\s*s\s*r\.\s*o\.)")
+
+
+def _holder_evidence(block) -> str:
+    """What of a holder's block may say what an easement is for: the name of a
+    company ("ČEZ Distribuce, a. s." — a distribution company's easement is a
+    line or a pipe, whatever the deed calls it), never a person's name nor
+    anyone's address."""
+    rest = block.group()[_HOLDER_MARKER_RE.match(block.group()).end():]
+    cut = _NAME_END.search(rest)
+    name = rest[:cut.start()] if cut else rest
+    form = _COMPANY_FORM_RE.search(name)
+    if form:                    # "… a.s. Plynární 5": the street is not the name
+        return f" {name[:form.end()]} "
+    if _COMPANY_FORM_RE.match(rest[len(name):].lstrip(" \t,")):
+        return f" {name} "
+    return " "
+
+
+# "právo užívat nemovitost / stavbu" held by a person is a home; held by a
+# company ("ČEZ Distribuce, a. s.") it is the company's line or pipe.
+_PERSONAL_VERB_RE = re.compile(r"(?<!\w)uzivat\s+(?:nemovit|stavb)")
+
+
 def _tier(label: str, entry_text: str, holder: str) -> tuple[str, str]:
     """("hard" | "soft", why) for an encumbrance, from its own entry's text
     (folded) and its holder's name."""
     if label == "věcné břemeno":
-        if _PERSONAL_USE_RE.search(entry_text):
+        block = _HOLDER_BLOCK_RE.search(entry_text)
+        company = bool(block and _holder_evidence(block).strip())
+        if _PERSONAL_USE_RE.search(entry_text) or (
+                not company and _PERSONAL_VERB_RE.search(entry_text)):
             return "hard", "lifetime right to use or live in it"
-        if _TECHNICAL_RE.search(entry_text):
+        if _TECHNICAL_RE.search(_HOLDER_BLOCK_RE.sub(_holder_evidence, entry_text)):
             return "soft", "utility / access easement"
         return "hard", "kind of easement not recognised"
     if label == "předkupní právo":
@@ -200,7 +243,7 @@ _PLOMBA_ONLY = Vocabulary(
 _PART_C_RE = re.compile(
     r"(?<!\w)c\s*[-–:.]?\s*(?:omezeni\s+vlastnick\w*\s+prav\w*|"
     r"vecn\w*\s+prav\w*\s+zatezujic\w*(?:\s+nemovitost\w*)?(?:\s+v\s+cast\w*\s+b)?"
-    r"(?:\s+vcetne\s+souvisejic\w*\s+udaj\w*)?)")
+    r"(?:[\s,]+vcetne\s+souvisejic\w*\s+udaj\w*)?)")
 _PART_D_RE = re.compile(
     r"(?<!\w)d\s*[-–:.]?\s*(?:poznamk\w*\s+a\s+dals\w*\s+obdobn\w*\s+udaj\w*|jine\s+zapis\w*)")
 _PART_E_RE = re.compile(r"(?<!\w)e\s*[-–:.]?\s*nabyvac\w*\s+titul\w*")
@@ -221,6 +264,31 @@ def _norm(lv_text) -> str:
     text = unicodedata.normalize("NFC", str(lv_text or ""))
     text = "".join(c for c in text if unicodedata.category(c) != "Mn")
     return _BULLET_IN_RE.sub("•", text)
+
+
+_AS_OF_RE = re.compile(r"stav\w*\s+evidovan\w*\s+k\s+datu\s*:?\s*(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})")
+
+
+def vypis_date(lv_text):
+    """The date whose register state a výpis certifies ("prokazující stav
+    evidovaný k datu 15.10.2026 08:00:00"), or None."""
+    from datetime import date
+    m = _AS_OF_RE.search(fold(_norm(lv_text)))
+    if not m:
+        return None
+    try:
+        return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    except ValueError:
+        return None
+
+
+def parts_c_d_whole(lv_text) -> bool:
+    """True when the text runs from part C's heading on to part E's — a
+    whole výpis prints "E Nabývací tituly…" even when C and D are "Bez
+    zápisu"; page 1 of 2 stops before it."""
+    low = fold(_norm(lv_text))
+    c = _PART_C_RE.search(low)
+    return bool(c and _PART_E_RE.search(low, c.end()))
 
 
 def part_c_start(lv_text) -> int | None:
@@ -267,22 +335,126 @@ def screen_lv_cz(lv_text) -> list[dict]:
 
 _BULLET_RE = re.compile(r"•[ \t]*([^\s•][^\n•]*)")
 _RULE_RES = tuple(rx for _, _, rx in VOCABULARY.rules)
+# For finding entries only (the screen keeps _norm's bullets): a bullet in
+# capitals ("O NAŘÍZENÍ …" — only at a line's start, so the "O" of "POZNÁMKA
+# O UZAVŘENÍ SMLOUVY" is no bullet), copied as "○" or "·", as the
+# Symbol-font bullet of a PDF copy (U+F0B7, a private-use glyph never found
+# inside a word, so no space need follow it), as a dash or "*" at a line's
+# start (a dash inside a line is part of a name: "Raiffeisen - Leasing"),
+# followed by a non-breaking space, or left on a line of its own by a PDF
+# copy.
+_CAPS_BULLET_RE = re.compile(
+    r"^([ \t\u00a0]*)O(?=(?:[ \t\u00a0]+|[ \t\u00a0]*\n[ \t\u00a0]*)[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ])", re.M)
+_BULLET_LOOSE_RE = re.compile(
+    r"(?:(?:(?:(?<=\s)|^)[o◦○▪●•·]|^[ \t\u00a0]*[-–*])"
+    r"(?:[ \t\u00a0]+|[ \t\u00a0]*\n[ \t\u00a0]*)"
+    r"|\uf0b7[ \t\u00a0]*\n?[ \t\u00a0]*)"
+    r"(?=[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ])", re.M)
+# A list under a line ending in ":" ("k zajištění pohledávek:" / " - Pohledávka
+# z úvěru …") is part of its entry, not entries behind dash bullets: its
+# dashes become a plain hyphen, which no bullet pattern reads.
+_LIST_ITEM_RE = re.compile(r"^([ \t\u00a0]*)[-–*](?=[ \t\u00a0])")
+
+
+# An entry's bullet at a line's start, whatever its glyph.
+_LINE_BULLET_RE = re.compile(r"^([ \t\u00a0]*)(?:[oO•◦○▪●·*\-–](?=[ \t\u00a0])|\uf0b7)")
+
+
+def _protect_dash_lists(text: str) -> str:
+    # Only items indented deeper than their entry's bullet: a dash at the
+    # bullet's own depth (or in a paste that lost its indents) may be the
+    # next entry's.
+    out, in_list, bullet_at = [], False, None
+    for line in text.split("\n"):
+        item = _LIST_ITEM_RE.match(line)
+        if in_list and item and bullet_at is not None and len(item.group(1)) > bullet_at:
+            line = _LIST_ITEM_RE.sub("\\1\u2010", line, count=1)
+        else:
+            bullet = _LINE_BULLET_RE.match(line)
+            if bullet:
+                bullet_at = len(bullet.group(1))
+            in_list = line.rstrip().endswith(":")
+        out.append(line)
+    return "\n".join(out)
+
+
+# A line that only goes on with the entry before it: its holder, what it
+# burdens, its deed ("Listina …") — after a register number the entry cited
+# ("… dle V-3333/2026-101") or a deed of its own.
+_CONTINUATION_RE = re.compile(
+    r"\W*(?:povinnost\w*\s+k(?!\w)|opravnen\w*\s+pro|ve\s+prospech|listin)")
+_NOT_A_TYPE_LINE_RE = re.compile(r"\W*(?:typ\s+vztahu|poradi)")
+
+
+def _first_line(seg: str) -> str:
+    """The first line of a (folded) segment that could name an entry: two
+    letters or more, not the "Typ vztahu" header nor a "Pořadí k …" stamp."""
+    return next((ln for ln in seg.splitlines()
+                 if len(re.findall(r"[^\W\d_]", ln)) >= 2
+                 and not _NOT_A_TYPE_LINE_RE.match(ln)), "")
 
 
 def unrecognised_entries(lv_text) -> list[str]:
-    """The entries of parts C–D ("o <Typ>" bullets) that no rule above names —
+    """The entries of parts C–D ("o <Typ>" bullets, or another glyph a copy
+    gives, or none right under a part's heading) that no rule above names —
     a kind of burden this screen does not know, so it cannot call the title
     clean. Empty when the text has no recognisable part C."""
-    text = _norm(lv_text)
+    text = _BULLET_LOOSE_RE.sub(
+        "•", _CAPS_BULLET_RE.sub(r"\1o", _protect_dash_lists(_norm(lv_text))))
     low = fold(text)
     region, c, _ = _parts(text, low)
     if not c:
         return []
     out = []
-    for m in _BULLET_RE.finditer(fold(region)):
-        if not any(rx.search(m.group(1)) for rx in _RULE_RES):
+    flow = fold(region)
+    for m in _BULLET_RE.finditer(flow):
+        if not any(rx.search(m.group(1)) for rx in _RULE_RES) \
+                and not _NO_ENTRY_RE.match(m.group(1)):      # "- Bez zápisu"
             out.append(re.sub(r"\s+", " ", text[m.start(1):m.end(1)]).strip()[:80])
+    # A bullet copied as another glyph, lost, or in capitals hides the entry
+    # from the pass above: read every entry body ("Oprávnění pro" /
+    # "Povinnost k") between register numbers and bullets too. A segment
+    # after a register number that only goes on with the entry before it
+    # (its "Povinnost k", another "Listina") is read as part of that entry.
+    # Right after part C's or D's heading, a line is an entry's type even
+    # with no bullet and no body — unless it is "Bez zápisu" or a page's
+    # header (elsewhere such a line can't be told from a page's header).
+    parts_read = region is not text
+    seps = sorted([(m.start(), m.end(), m.group() != "•", False)
+                   for m in _ENTRY_NO_CZ_RE.finditer(flow)]
+                  + [(m.start(), m.end(), False, parts_read and m.start() >= c.end())
+                     for m in _PART_D_RE.finditer(low)])
+    spans, pos, after_number, after_heading = [], 0, False, parts_read
+    for s, e, number, heading in seps + [(len(flow), len(flow), False, False)]:
+        if spans and after_number and _CONTINUATION_RE.match(_first_line(flow[pos:s])):
+            spans[-1][1] = s
+        else:
+            spans.append([pos, s, after_heading])
+        pos, after_number, after_heading = e, number, heading
+    for start, end, after_heading in spans:
+        seg = flow[start:end]
+        if any(rx.search(seg) for rx in _RULE_RES):
+            continue
+        if not _ENTRY_BODY_RE.search(seg) and (not after_heading
+                                               or _NO_ENTRY_RE.search(seg)):
+            continue
+        names = (re.sub(r"\s+", " ", re.sub(r"^\W*(?:[oO](?=\W|$))?\W*", "", ln)).strip()
+                 for ln in region[start:end].splitlines()
+                 if not re.match(r"\W*(?:typ\s+vztahu|poradi)", fold(ln)))
+        name = next((n for n in names if len(re.findall(r"[^\W\d_]", n)) >= 2), "")[:80]
+        if name and name not in out:
+            out.append(name)
     return out
+
+
+_ENTRY_BODY_RE = re.compile(r"opravnen\w*\s+pro|(?<!\w)povinnost\w*\s+k(?!\w)")
+# Nothing to read as an entry under a part's heading: "Bez zápisu", or the
+# header a page break repeats ("Výpis z katastru nemovitostí", "stav
+# evidovaný k datu", "List vlastnictví:", "Katastrální území:").
+_NO_ENTRY_RE = re.compile(
+    r"(?<!\w)bez\s+zapis\w*|vypis\w*\s+z\s+katastr\w*\s+nemovitost|"
+    r"stav\w*\s+evidovan\w*\s+k\s+datu|list\w*\s+vlastnictvi\s*:|"
+    r"kat(?:astraln\w*)?\.?\s*uzemi\s*:")
 
 
 # Part A, the owners: "A Vlastník, jiný oprávněný" up to "B Nemovitosti".
@@ -298,7 +470,9 @@ def owner_is_cooperative(lv_text) -> bool:
     if not a:
         return False
     b = _PART_B_RE.search(low, a.end())
-    return "druzstv" in low[a.end():b.start() if b else a.end() + 600]
+    # "Bytové družstvo Testov" — not the owner's street "U Družstva Ideál".
+    return bool(re.search(r"(?<!\w)druzstvo(?!\w)",
+                          low[a.end():b.start() if b else a.end() + 600]))
 
 
 _LV_NO_RE = re.compile(r"list\w*\s+vlastnictvi\s*(?:c\.|cislo|:)?\s*:?\s*(\d{1,6})")
@@ -306,9 +480,15 @@ _UNIT_RE = re.compile(r"jednotk\w*\s*:?\s*(?:c\.|cislo)?\s*:?\s*(\d{1,5}/\d{1,5}
 # "Katastrální území: 727440 Žižkov" (or "Kat.území:"), the name running to a
 # wide gap, the "List vlastnictví" beside it, or the line's end.
 _KU_RE = re.compile(
-    r"kat(?:astraln\w*)?\.?\s*uzemi\s*:?[ \t]*(\d{6})?[ \t]*"
+    r"kat(?:astraln\w*)?\.?\s*uzemi\s*:?[ \t]*(\d{6})?[ \t]*(?:[-–,][ \t]*)?"
     r"([^\W\d][^\n]*?)?(?=[ \t]{2,}|[ \t]*list\w*\s+vlastnictvi|[ \t]*\n|[ \t]*$)")
 _PART_B1_RE = re.compile(r"(?<!\w)b1(?!\w)")
+# Part B as a table: a "Jednotky" heading or its "Č.p./Č.jednotky" ("Číslo
+# jednotky") column, then a row per unit — its number and its use ("1567/12
+# byt  6543/123456"). A share alone on its line ("6543/123456") is no row.
+_UNIT_TABLE_RE = re.compile(
+    r"(?<!\w)(?:c\.?\s*|cislo\s+)jednotk\w*|^[ \t]*jednotky[ \t]*$", re.M)
+_UNIT_ROW_RE = re.compile(r"^[ \t]*(\d{1,5}/\d{1,5})(?=[ \t]+[^\W\d_])", re.M)
 
 
 def lv_number_in(lv_text) -> str | None:
@@ -320,21 +500,34 @@ def lv_number_in(lv_text) -> str | None:
 def ku_in(lv_text) -> tuple[str, str] | None:
     """(code, name) of the katastrální území a výpis names — either may be
     "" — or None when it names none."""
-    m = _KU_RE.search(fold(_norm(lv_text)))
-    if not m or not (m.group(1) or m.group(2)):
-        return None
-    return m.group(1) or "", (m.group(2) or "").strip()
+    # Every space but a line break read as a plain one (a non-breaking space
+    # copied from a web page or a PDF), one for one.
+    low = re.sub(r"[^\S\n]", " ", fold(_norm(lv_text)))
+    for m in _KU_RE.finditer(low):
+        # "V kat. území jsou pozemky vedeny v jedné číselné řadě" is the
+        # standard line under the header, not a k.ú.
+        if re.search(r"(?<!\w)v $", low[max(0, m.start() - 2):m.start()]):
+            continue
+        if not (m.group(1) or m.group(2)):
+            return None
+        return m.group(1) or "", (m.group(2) or "").strip()
+    return None
 
 
 def unit_numbers(lv_text) -> set:
-    """The units ("Jednotka č. 101/5") part B of a výpis lists — the whole
-    text when it has no part B heading. More than one means its encumbrances
-    may be another unit's. A unit named in B1, C or E (an easement's
-    beneficiary, a declaration's range) is not one of the LV's."""
+    """The units ("Jednotka č. 101/5", or a row of the "Jednotky" table) part
+    B of a výpis lists — the whole text when it has no part B heading. More
+    than one means its encumbrances may be another unit's. A unit named in
+    B1, C or E (an easement's beneficiary, a declaration's range) is not one
+    of the LV's."""
     low = fold(_norm(lv_text))
     b = _PART_B_RE.search(low)
     if b:
         ends = [m.start() for m in (_PART_B1_RE.search(low, b.end()),
                                     _PART_C_RE.search(low, b.end())) if m]
         low = low[b.start():min(ends) if ends else len(low)]
-    return set(_UNIT_RE.findall(low))
+    units = set(_UNIT_RE.findall(low))
+    table = _UNIT_TABLE_RE.search(low)
+    if table:
+        units |= set(_UNIT_ROW_RE.findall(low, table.end()))
+    return units

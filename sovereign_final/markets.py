@@ -380,9 +380,14 @@ CZ = Market(
     # Creditors a lien may be in favour of as ordinary housing finance. The
     # words "banka" and "spořitelna" already count; these are names that
     # don't contain them, and the state housing fund (SFPI, formerly SFRB).
+    # The last six: banks whose name glues "bank" to another word, some no
+    # longer lending but still named on old liens ("Sberbank CZ, a.s. v
+    # likvidaci"). Spellings not checked against ČNB's list of banks from
+    # here (UNVERIFIED).
     lv_bank_names=("čsob", "raiffeisenbank", "unicredit", "moneta", "mbank", "oberbank",
                    "wüstenrot", "hypoteční banka", "státní fond podpory investic",
-                   "sfpi", "státní fond rozvoje bydlení", "sfrb"),
+                   "sfpi", "státní fond rozvoje bydlení", "sfrb",
+                   "sberbank", "volksbank", "ebanka", "expobank", "citibank", "commerzbank"),
 )
 
 MARKETS = {"sk": SK, "cz": CZ}

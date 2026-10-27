@@ -120,17 +120,51 @@ def _is_street_name(text: str, start: int) -> bool:
                 or _STREET_BEFORE_RE.search(text, 0, start))
 
 
+# "záhradný byt" — a garden flat, an ordinary flat for sale: the adjective
+# followed by the flat's own noun, with at most a few room/layout tokens in
+# between ("Záhradný 2-izbový byt", "3i záhradný byt", "záhradného bytu").
+_FLAT_NOUN_AHEAD = (r"[^\W\d_]*[\s\-–]+(?:[^\s\-–]*(?:\d|izb)[^\s\-–]*[\s\-–]+){0,3}"
+                    r"(?=" + _APARTMENT_NOUN_RE.pattern + r")")
+_GARDEN_FLAT_RE = re.compile(r"zahradn" + _FLAT_NOUN_AHEAD)
+
+# A free-text title (Bazoš) often names the flat by its room count alone:
+# "Predám 3-izbový s garážou", "2i so záhradkou", "2,5 izbový + parkovacie
+# státie". A room count before a garage, garden, parking space or plot names
+# the flat as "byt" does — unless a house or cottage is named before the
+# accessory ("4-izbový dom s garážou", "5i RD so záhradou").
+_ACCESSORY_STEMS = frozenset({"garaz", "zahrad", "statie", "pozem"})
+_ROOM_COUNT_RE = re.compile(
+    r"(?<![\w.,])[1-6](?:[.,]5)?(?:\s*[-–]?\s*izb[^\W\d_]*|[-–]?i)(?![^\W\d_])"
+    # "4-izbová drevostavba / novostavba / radovka / usadlosť / kúria", "4-izbový
+    # murovaný objekt" is a house; "3-izbový v novostavbe" is a flat in one.
+    r"(?![\s\-–.]*(?:(?!(?:v|vo|na|s|so|a|po|pri|pred|za)[\s\-–.])[^\W\d_]+[\s\-–.]+)?"
+    r"(?:drevostavb|novostavb|stavb|radovk|usadlost|kuri|objekt|nehnutel|dvojgener))")
+_HOUSE_NOUN_RE = re.compile(
+    r"(?<![^\W\d_])(?:dom|domu|domom|domcek[^\W\d_]*|dvojdom[^\W\d_]*|rd"
+    r"|bungalov[^\W\d_]*|chat[^\W\d_]*|chal[^\W\d_]*|vil[^\W\d_]*"
+    r"|rodinn[^\W\d_]*)(?![^\W\d_])")
+
+
 def _excludes(text: str, m: "re.Match[str]") -> bool:
     """Whether one keyword hit in `text` (folded) makes it a non-apartment.
 
     A property keyword after the flat's own noun describes the flat — "3-izbový
     byt s garážou", "byt so záhradou", "2-izb. byt, Obchodná" — while one before
     it is what the listing is: "Garáž pri byte", "Rodinný dom s 2 bytmi". A
-    street name ("Obchodná ulica", "ul. Skladová", "Záhradnícka 45") is never
-    the property. ALWAYS_EXCLUDE_KEYWORDS count wherever they are."""
+    room count names the flat too when a garage, garden, parking space or plot
+    follows it ("Predám 3-izbový s garážou"), but not a house ("4-izbový dom s
+    garážou"). A street name ("Obchodná ulica", "ul. Skladová", "Záhradnícka
+    45") is never the property, nor is "záhradný" when it describes the flat
+    ("Záhradný 2-izbový byt"). ALWAYS_EXCLUDE_KEYWORDS count wherever they are."""
     if m.group(0) in _ALWAYS_STEMS:
         return True
+    if m.group(0) == "zahrad" and _GARDEN_FLAT_RE.match(text, m.start()):
+        return False
     if _APARTMENT_NOUN_RE.search(text, 0, m.start()):
+        return False
+    if (m.group(0) in _ACCESSORY_STEMS
+            and _ROOM_COUNT_RE.search(text, 0, m.start())
+            and not _HOUSE_NOUN_RE.search(text, 0, m.start())):
         return False
     return not _is_street_name(text, m.start())
 
@@ -153,16 +187,93 @@ def matches_keywords(pattern: "re.Pattern[str]", *texts: str) -> bool:
 
 _EXCLUDE_RE = keyword_pattern(EXCLUDE_KEYWORDS)
 
+# A share of a flat, not the flat (the Slovak twin of cz_common._SHARE_RE):
+# "Predaj spoluvlastníckeho podielu 1/2 na byte", "Predám podiel na byte",
+# "Predaj 2/3 podielu bytu", "Predám 1/2 bytu", "id. 1/2". The price is for
+# part of the flat while its size is the whole flat's, so €/m² reads cheap.
+# A flat's share of the land, of the common parts or of an accessory ("s
+# podielom na pozemku", "spoluvlastnícky podiel na spoločných častiach domu",
+# "s 1/2 podielom na garáži", "1/4 podielom na záhrade", "1/6 podielu na
+# dvore", "1/8 podiel na parkovacom státí", "1/2 podiel na pivnici") is no
+# sale of a share of the flat — unless the word describes the flat itself
+# ("1/2 podielu záhradného bytu"). A floor ("1/2 poschodia", "2/2 podlažie")
+# is no fraction of the flat. Words may be joined by hyphens, as in a URL slug
+# ("predaj-podielu-na-byte").
+_SEP = r"[\s\-–]+"
+_NOT_LAND_OR_COMMON = (r"(?!\w)(?!" + _SEP + r"(?:\d{1,2}\s*/\s*\d{1,2}" + _SEP + r")?"
+                       r"(?:na" + _SEP + r")?"
+                       r"(?:pozem|spolocn|garaz|zahrad|dvor|parkov|stati|pivnic)"
+                       r"(?!" + _FLAT_NOUN_AHEAD + r")"
+                       # "… na parkovacom státí a byte" is a share of the flat too.
+                       r"(?![^\W\d_]*(?:[\s,]+[^\W\d_]+){0,2}[\s,]+(?:a|aj|i)[\s,]+"
+                       r"(?:na[\s,]+)?byt(?:e|u|om)?(?![^\W\d_])"
+                       # "… na pozemku a byt je / má …" starts a new sentence.
+                       r"(?![\s,]+(?:je|ma|bol|bola|bude|sa|presiel)(?![^\W\d_]))))")
+_SHARE_RE = re.compile(
+    r"(?<![^\W\d_])(?:predaj\w*|preda[mv]\w*|ponuk\w*)" + _SEP +
+    r"(?:(?:id\.?|idealn\w*|spoluvlastn\w*)" + _SEP + r")?"
+    r"(?:(?P<n1>\d{1,2})\s*/\s*(?P<d1>\d{1,2})" + _SEP + r")?"
+    r"podiel\w*" + _NOT_LAND_OR_COMMON +
+    r"|(?<![^\W\d_])(?:id\.|idealn\w*)\s*(?P<n2>\d{1,2})\s*/\s*(?P<d2>\d{1,2})(?!\d)"
+    r"|(?<![\w/])(?P<n3>\d{1,2})\s*/\s*(?P<d3>\d{1,2})" + _SEP +
+    r"(?:podiel\w*" + _NOT_LAND_OR_COMMON +
+    r"|(?:(?:z|na)" + _SEP + r")?byt(?:u|e)?(?!\w))"
+    r"|(?<![^\W\d_])spoluvlastnick\w*" + _SEP + r"podiel\w*" + _NOT_LAND_OR_COMMON +
+    r"|(?<![^\W\d_])podiel\w*" + _NOT_LAND_OR_COMMON + _SEP + r"(?:na|z)" + _SEP +
+    r"(?:[\w.]+" + _SEP + r"){0,2}byt(?:u|e|om)?(?!\w)")
+
+
+_FRACTION_AFTER_RE = re.compile(r"\s*(\d{1,2})\s*/\s*(\d{1,2})(?!\d)")
+
+
+_NARROW_NOT_LAND = (r"(?!\w)(?!" + _SEP + r"(?:\d{1,2}\s*/\s*\d{1,2}" + _SEP + r")?"
+                    r"(?:na" + _SEP + r")?(?:pozem|spolocn))")
+_NARROW_SHARE_RE = re.compile(_SHARE_RE.pattern.replace(_NOT_LAND_OR_COMMON, _NARROW_NOT_LAND))
+
+
+def _is_share(folded: str) -> bool:
+    if (not _APARTMENT_NOUN_RE.search(folded) and not _ROOM_COUNT_RE.search(folded)
+            and _narrow_is_share(folded)):
+        return True
+    return _broad_is_share(folded)
+
+
+def _narrow_is_share(folded):
+    return _is_share_with(_NARROW_SHARE_RE, folded)
+
+
+def _broad_is_share(folded):
+    return _is_share_with(_SHARE_RE, folded)
+
+
+def _is_share_with(rx, folded: str) -> bool:
+    """True when the folded text sells a share of a flat. A fraction n/n
+    ("podiel 1/1") is the whole flat, not a share of it."""
+    for m in rx.finditer(folded):
+        fractions = [(m.group(f"n{i}"), m.group(f"d{i}")) for i in (1, 2, 3)]
+        after = _FRACTION_AFTER_RE.match(folded, m.end())
+        if after:
+            fractions.append(after.groups())
+        if any(n and d and int(n) >= int(d) for n, d in fractions):
+            continue
+        return True
+    return False
+
 
 def is_excluded_listing(*texts: str) -> bool:
     """True when any of the given strings (title, URL, …) names a
-    non-apartment listing per EXCLUDE_KEYWORDS (see matches_keywords)."""
+    non-apartment listing per EXCLUDE_KEYWORDS (see matches_keywords), or
+    the sale of a share of a flat (_SHARE_RE)."""
+    if any(_is_share(_fold(t)) for t in texts):
+        return True
     return matches_keywords(_EXCLUDE_RE, *texts)
 
 
 # "3-izbový", "3 izbový", "3-izb.", "3izb", "3 - izbovy" … (diacritics stripped
 # before matching, so izbový/izbovy both hit).
-_IZB_RE = re.compile(r"\b([1-6])\s*[-–]?\s*izb", re.I)
+# "1,5-izbový" is a room and a half — never 5 rooms. A half room counts as a
+# room (the conservative side of both the rent and the median multipliers).
+_IZB_RE = re.compile(r"(?<![\d.,])([1-6])(?:\s*[.,]\s*(5))?\s*[-–]?\s*izb", re.I)
 # Garsónka / garzónka == studio == 1 room.
 _GARSONKA_RE = re.compile(r"\bgar[sz]onk", re.I)
 
@@ -176,7 +287,28 @@ APARTMENT_MAX_M2 = 500.0
 _AREA_M2_RE = re.compile(r"(\d{1,4}(?:[.,]\d+)?)\s*m(?:²|2)\b", re.I)
 # "58 m" with no superscript. Also matches "s 6m logiou" — a 6 m² loggia, not
 # a 6 m² flat — so this form is only consulted after the one above fails.
-_AREA_BARE_M_RE = re.compile(r"(\d{1,4}(?:[.,]\d+)?)\s*m\b", re.I)
+# A distance in metres is no area: "300 m od zastávky", "200 m k lesu",
+# "100 m do centra", "150 m pešo", "200 m za rohom". But "za" before a price
+# is "for": "byt 58 m za 129 000 €", "2+kk 54 m za 15 000 Kč".
+_PRICE_AHEAD = (r"\s*(?:cenu\s*)?\d[\d\s\xa0.,]*(?:(?:tis|mil)[^\W\d_]*\.?\s*)?"
+                r"(?:€|eur|kč|czk|,-)")
+_AREA_BARE_M_RE = re.compile(
+    r"(\d{1,4}(?:[.,]\d+)?)\s*m\b"
+    r"(?!\s*(?:od|k|ku|do|pred|chodze|chôdze|pesi|peši|peso|pešo)\b)"
+    r"(?!\s*za\b(?!" + _PRICE_AHEAD + r"))", re.I)
+
+
+# A bare "N m" right after a parking space, garage, stop, shop, garden or
+# terrace named on its own is its size or a distance ("Parkovanie 100 m za
+# 30 €", "Terasa 40 m"), not the flat's — "byt so záhradou 72 m" (with a
+# garden) still gives the flat's.
+_NOT_FLAT_AREA_BEFORE_RE = re.compile(
+    r"(?<![^\W\d_])(?:garaz|parkovanie|parkovani|parkovisko|statie|stani|mhd|zastavka"
+    r"|obchod|zahrada|zahradka|pivnica|sklep|pozemok|pozemek|terasa)[\s:-]*$")
+
+
+def _not_flat_area_before(text: str) -> bool:
+    return bool(_NOT_FLAT_AREA_BEFORE_RE.search(_fold(text)))
 
 
 def area_from_text(text: str, min_m2: float = APARTMENT_MIN_M2,
@@ -192,6 +324,9 @@ def area_from_text(text: str, min_m2: float = APARTMENT_MIN_M2,
         return 0.0
     for pattern in (_AREA_M2_RE, _AREA_BARE_M_RE):
         for m in pattern.finditer(text):
+            if pattern is _AREA_BARE_M_RE and _not_flat_area_before(
+                    text[max(0, m.start() - 30):m.start()]):
+                continue
             try:
                 v = float(m.group(1).replace(",", "."))
             except ValueError:
@@ -213,7 +348,18 @@ def rooms_from_title(title: str) -> int | None:
     text = _strip_diacritics(title)
     m = _IZB_RE.search(text)
     if m:
-        return int(m.group(1))
+        return min(int(m.group(1)) + (1 if m.group(2) else 0), 6)
     if _GARSONKA_RE.search(text):
         return 1
     return None
+
+
+def bazos_title_link(card):
+    """A Bazoš result card's title link. The card's first link is its photo
+    (`<a><img class="obrazek"></a>`, no text), so the h2/h3 title link comes
+    first, then any listing link with text, the photo link only as a last
+    resort."""
+    return (card.select_one("h2.nadpis a, h2 a, h3 a")
+            or next((a for a in card.select("div.inzeratynadpis a, a[href*='/inzerat/']")
+                     if a.get_text(strip=True)), None)
+            or card.select_one("a[href*='/inzerat/']"))
