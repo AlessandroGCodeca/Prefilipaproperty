@@ -95,7 +95,9 @@ def catch_up_due(now: datetime, last_run: datetime | None) -> bool:
     """Whether a run is owed at startup: none has succeeded since the last
     06:00. A run interrupted before it finished (the PC shut down mid-run) or
     one that failed left no record, so it is owed too."""
-    return last_run is None or last_run < last_slot(now)
+    # A success recorded in the future was written while the clock was
+    # ahead: it says nothing about the 06:00s since.
+    return last_run is None or last_run < last_slot(now) or last_run > now
 
 
 # A failed run is tried again RETRY_AFTER later, up to MAX_ATTEMPTS a day
@@ -474,7 +476,8 @@ def _record_failure(market: str, trigger: str, holder: str | None, error: str) -
 
 
 def run_all_markets(trigger: str = "06:00", holder: str | None = None,
-                    call=call_here, progress=None, which=None) -> dict[str, bool]:
+                    call=call_here, progress=None, which=None,
+                    owed_at: datetime | None = None) -> dict[str, bool]:
     """Every market's pipeline, one after the other, under the one shared
     pipeline lock: {market: success}. A market whose run fails — or raises —
     is recorded as failed and the next market runs anyway. `which` (a list
@@ -491,6 +494,14 @@ def run_all_markets(trigger: str = "06:00", holder: str | None = None,
     def run_them():
         offset = 0
         for m in todo:
+            # The scheduler's run (owed_at: the time it found m owed) may have
+            # waited out a ▶ RUN EVERYTHING that ran m since that 06:00.
+            if owed_at and not catch_up_due(max(owed_at, datetime.now(TZ)), read_last_run(m)):
+                log.info(f"   [{m.upper()}] ran since the last 06:00 while this run "
+                         f"waited — not run again.")
+                results[m] = True
+                offset += step_count(m)
+                continue
             def market_progress(i, n, note="", _o=offset, _m=m):
                 if progress:
                     progress(_o + i, total, f"{_m.upper()} · {note}" if note else _m.upper())
@@ -598,10 +609,13 @@ def run_daily() -> None:
         began = last_slot(now)
         # A retry that ran past 06:00 (this job waited on _RUN_GUARD) may
         # already have run a market for this slot.
-        owed = due_markets(now)
+        # APScheduler fires this at 06:00: a wall clock stepped back just
+        # after its due check reads 05:59:5x, and that is still this 06:00.
+        owed = due_markets(max(now, last_slot(now + timedelta(minutes=1))))
         if owed:
             run_all_markets(trigger="06:00",
-                            which=None if owed == active_markets() else owed)
+                            which=None if owed == active_markets() else owed,
+                            owed_at=max(now, last_slot(now + timedelta(minutes=1))))
         _run_new_slot(began)
 
 
@@ -611,7 +625,7 @@ def retry_failed_run() -> None:
     try:
         due = due_markets(datetime.now(TZ), "retry")
         if due:
-            run_all_markets(trigger="retry", which=due)
+            run_all_markets(trigger="retry", which=due, owed_at=datetime.now(TZ))
     finally:
         _RUN_GUARD.release()
 
