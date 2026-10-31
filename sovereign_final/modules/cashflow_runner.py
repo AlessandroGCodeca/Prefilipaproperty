@@ -25,14 +25,16 @@ def _mkw(market: str) -> dict:
 
 def run_scoring(progress_callback=None, market: str | None = None) -> int:
     """Score every unscored listing — of `market` only, or of every market
-    (None) — and return how many were scored."""
-    requeued = requeue_scores_without_benchmark()
+    (None) — and return how many were scored. The stale scores it drops first
+    are of the same market only: a run scoped to one market re-scores only
+    that market, so another market's scores must be left as they are."""
+    requeued = requeue_scores_without_benchmark(market=market)
     if requeued:
         log.info(f"♻️  {requeued} listings now have a regional median — re-scoring them.")
-    stale = requeue_scores_with_stale_class()
+    stale = requeue_scores_with_stale_class(market=market)
     if stale:
         log.info(f"♻️  {stale} scores no longer match the current class rules — re-scoring them.")
-    older = requeue_scores_from_older_model()
+    older = requeue_scores_from_older_model(market=market)
     if older:
         log.info(f"♻️  {older} scores came from an older model or tax table — re-scoring them.")
     listings = get_unscored_cashflow(market=market)

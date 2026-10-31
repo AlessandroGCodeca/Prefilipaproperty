@@ -65,6 +65,9 @@ class TestRegistry:
 
 
 # ── Slovak figures are the ones the code produced before markets existed ─────
+# (plus two corrections from the second review: the s.r.o.'s setup cost is
+# paid in the IRR's year 0, and a Bratislava city part named alone —
+# "Ružinov" — takes its own median, not the kraj's)
 def _golden():
     with open(os.path.join(HERE, "fixtures", "sk_golden.json"), encoding="utf-8") as f:
         return json.load(f)
