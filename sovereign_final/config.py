@@ -149,8 +149,7 @@ DIVIDEND_TAX_RATE      = _RULES["dividend_tax"]
 HEALTH_LEVY_PERSONAL   = _RULES["health_levy_personal"]
 HEALTH_LEVY_SRO        = 0.00   # company exempt
 
-# Property tax
-PROPERTY_TAX_RATE_PA   = 0.004  # ~0.4% of value annually
+# Property tax: daň z bytov per m², by municipality — engine/property_tax_sk.py.
 
 # Operating cost estimates.
 # HOA = správa + fond opráv. By Act 182/1993 §10 the fond opráv already funds
