@@ -511,12 +511,28 @@ own by VZN. The 2026 rates used:
 | Prešov | 0.953 |
 | Trenčín | 0.88 |
 | Nitra | 0.75 |
+| Pezinok · Modra · Poprad | 1.00 |
+| Piešťany | 0.75 |
+| Trebišov | 0.71 |
+| Dunajská Streda | 0.68 (Mliečany 0.61) |
+| Prievidza | 0.675 |
+| Malacky | 0.67 |
+| Senec · Stupava · Michalovce · Bardejov | 0.60 |
+| Ružomberok | 0.40 |
+| Spišská Nová Ves | 0.398 |
+| Humenné | 0.32 |
 | anywhere else | 1.35 (UNVERIFIED: the highest rate above, not a legal ceiling) |
+
+Martin, Zvolen, Liptovský Mikuláš, Považská Bystrica, Nové Zámky, Levice,
+Lučenec, Topoľčany, Čadca and Rimavská Sobota are not in the table: their
+sites block automated requests (a CAPTCHA, a refused connection or "Access
+Forbidden"). Šamorín's and Komárno's current flat rates could not be pinned to
+an adopted ordinance.
 
 Each figure was read from the act and the city's own ordinance or tax page in
 November 2026; `property_tax_sk.SOURCE` names each document. Prešov's comes
 from its tax page as quoted by web search, because presov.sk answers automated
-requests with a CAPTCHA. A 60 m² flat pays €45–81 a year at these rates; until
+requests with a CAPTCHA. A 60 m² flat pays €19–81 a year at these rates; until
 October 2026 the engine charged 0.4 % of the price, roughly ten times as much.
 
 The s.r.o. is recommended only when it nets more than personal ownership

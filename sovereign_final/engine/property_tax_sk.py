@@ -10,7 +10,7 @@ o miestnych daniach, § 14–16):
 The act's own rate, 0.033 €/m² (§ 16 ods. 1), is only the default: each
 municipality sets its rate by VZN (§ 16 ods. 2), and the act limits it only
 relative to the municipality's other flat rates (its highest at most 10× its
-lowest). The cities below charge 0.75–1.35 €/m², 20–40 times the default.
+lowest). The towns below charge 0.32–1.35 €/m², 10–40 times the default.
 
 Bratislava's rate depends on the cadastral area's pásmo (A–D). A city part is
 taxed at the highest pásmo among its areas: Ružinov at Nivy's 1.35 (its
@@ -19,8 +19,8 @@ dearest city part's. Košice and Žilina also rate by cadastral area: a listing
 that names one of their areas pays its rate, any other part of the city the
 city's highest. A place not in the table is taxed at the highest rate in it,
 1.35 €/m². That is not a legal ceiling (a municipality may set more), so such
-a listing's tax is UNVERIFIED. A 60 m² flat pays about €45–81 a year in the
-cities below, so the approximation hardly moves a cash flow.
+a listing's tax is UNVERIFIED. A 60 m² flat pays about €19–81 a year in the
+towns below, so the approximation hardly moves a cash flow.
 """
 
 from __future__ import annotations
@@ -76,12 +76,33 @@ CITY_RATE_PER_M2 = {
     "prešov":          (0.953, "Prešov"),
     "trenčín":         (0.88, "Trenčín"),
     "nitra":           (0.75, "Nitra"),
+    # Towns beyond the kraj seats, each from its own 2026 ordinance (SOURCE).
+    "pezinok":         (1.00, "Pezinok"),
+    "modra":           (1.00, "Modra"),
+    "poprad":          (1.00, "Poprad"),
+    "piešťany":        (0.75, "Piešťany"),
+    "trebišov":        (0.71, "Trebišov"),
+    "dunajská streda": (0.68, "Dunajská Streda — its main areas (Mliečany 0.61)"),
+    "prievidza":       (0.675, "Prievidza"),
+    "malacky":         (0.67, "Malacky"),
+    "senec":           (0.60, "Senec"),
+    "stupava":         (0.60, "Stupava"),
+    "michalovce":      (0.60, "Michalovce"),
+    "bardejov":        (0.60, "Bardejov"),
+    "ružomberok":      (0.40, "Ružomberok"),
+    "spišská nová ves": (0.398, "Spišská Nová Ves"),
+    "humenné":         (0.32, "Humenné"),
 }
 CITY_RATE_PER_M2.update({
     "kosice": CITY_RATE_PER_M2["košice"], "zilina": CITY_RATE_PER_M2["žilina"],
     "banska bystrica": CITY_RATE_PER_M2["banská bystrica"],
     "presov": CITY_RATE_PER_M2["prešov"], "trencin": CITY_RATE_PER_M2["trenčín"],
     "zilinska lehota": CITY_RATE_PER_M2["žilinská lehota"],
+    "piestany": CITY_RATE_PER_M2["piešťany"], "trebisov": CITY_RATE_PER_M2["trebišov"],
+    "dunajska streda": CITY_RATE_PER_M2["dunajská streda"],
+    "ruzomberok": CITY_RATE_PER_M2["ružomberok"],
+    "spisska nova ves": CITY_RATE_PER_M2["spišská nová ves"],
+    "humenne": CITY_RATE_PER_M2["humenné"],
 })
 _CITIES_BY_LENGTH = sorted(CITY_RATE_PER_M2, key=len, reverse=True)
 
@@ -106,6 +127,8 @@ CITY_AREA_RATE_PER_M2 = {
                          "povazsky chlmec", "strazov", "trnove", "vranie", "zadubnie",
                          "zastranie"), 1.10),
     },
+    # The city's 2026 table: Dunajská Streda and Malé Blahovo 0.68, Mliečany 0.61.
+    "dunajska streda": {"mliecany": 0.61},
 }
 # City parts whose name contains an area's without being it: Košice's
 # Sídlisko Ťahanovce is not the Ťahanovce cadastral area.
@@ -156,6 +179,25 @@ SOURCE = {
         "0.88; VZN 26/2026 leaves it alone (trencin.sk). Prešov: 0.953 per VZN "
         "11/2024, unchanged for 2026 per the city's tax page — read via web "
         "search, as presov.sk answers automated requests with a CAPTCHA. "
+        "Other towns, each from its own site: Pezinok VZN 10/2023 (from 2024; "
+        "VZN 3/2026 changes only the public-space tax) 1.00; Modra VZN 6/2012, "
+        "consolidated from 1.1.2026, 1.00; Poprad VZN 17/2023 (from 2024, listed "
+        "in force) 1.000; Piešťany VZN 16/2022 (from 2023; VZN 6/2026 amends "
+        "another ordinance) 0.75; Trebišov VZN 191/2024 (from 2025; its 2026 "
+        "Dodatok 1 changes only the public-space tax) 0.710; Dunajská Streda the "
+        "city's 2026 rate table, 0.68 (Mliečany and ulica Čótfa 0.61); Prievidza "
+        "VZN 11/2019, consolidated from 1.1.2025, 0.675, and its mid-2026 report: "
+        "no rate changes in 2026; Malacky the city's 2026 rate page 0.67; Senec "
+        "VZN 12/2025 (from 1.1.2026) 0.60; Stupava VZN 5/2023 (from 2024) 0.60 — "
+        "no later ordinance found; Michalovce VZN 10/2024 (from 2025, listed in "
+        "force, no amendment) 0.60; Bardejov the city's tax page citing VZN "
+        "195/2024, 0.60; Ružomberok VZN 10/2025 (from 1.1.2026) 0.40; Spišská "
+        "Nová Ves the city's tax page (VZN 2/2024, no change for 2026) 0.398; "
+        "Humenné VZN 203/2024 (from 2025; VZN 206/2025 changes only the land "
+        "tax) 0.320. Not added — their sites block automated requests or give "
+        "only a draft: Martin, Zvolen, Liptovský Mikuláš, Považská Bystrica, "
+        "Nové Zámky, Levice, Lučenec, Topoľčany, Čadca, Rimavská Sobota, "
+        "Šamorín, Komárno. "
         "UNVERIFIED: Prešov's ordinance text; which cadastral areas make up a "
         "Košice city part named without one (taxed at category I); any place not "
         "in the table (taxed at 1.35)."),

@@ -53,23 +53,35 @@ class TestRates:
     def test_kosice_and_zilina_by_cadastral_area(self, district, rate):
         assert _rate(district) == rate
 
+    @pytest.mark.parametrize("district, rate", [
+        ("Pezinok", 1.00), ("Modra", 1.00), ("Poprad", 1.00), ("Piestany", 0.75),
+        ("Trebišov", 0.71), ("Dunajská Streda", 0.68), ("Dunajská Streda - Mliečany", 0.61),
+        ("Prievidza", 0.675), ("Malacky", 0.67), ("Senec", 0.60), ("Stupava", 0.60),
+        ("Michalovce", 0.60), ("Bardejov", 0.60), ("Ruzomberok", 0.40),
+        ("Spišská Nová Ves", 0.398), ("Humenné", 0.32),
+    ])
+    def test_other_towns(self, district, rate):
+        assert _rate(district) == rate
+
     @pytest.mark.parametrize("district", [
         "Barca",                  # also a village near Rimavská Sobota
+        "Modrany",                # not Modra
+        "Martin",                 # its rate could not be read from martin.sk
         "Staré Mesto",            # Košice has one too: not Bratislava's on its own
         "Nové Mesto nad Váhom",   # a town, not Bratislava's Nové Mesto
         "Nitra nad Ipľom",        # a village, not Nitra
         "Košice-okolie",          # the villages around Košice
-        "Dúbravka, Michalovce",   # a Bratislava name beside another town
-        "Poprad", "", None,
+        "Dúbravka, Lučenec",      # a Bratislava name beside another town
+        "Šurany", "", None,
     ])
     def test_a_place_not_in_the_table_is_unverified_at_the_highest_rate(self, district):
         rate, where = ptax.rate_source(district)
         assert rate == ptax.UNKNOWN_PLACE_RATE_PER_M2 == 1.35
         assert where.startswith("UNVERIFIED")
 
-    def test_the_act_default_is_far_below_every_city(self):
+    def test_the_act_default_is_far_below_every_town(self):
         assert ptax.STATUTORY_RATE_PER_M2 == 0.033
-        assert all(r > 20 * ptax.STATUTORY_RATE_PER_M2
+        assert all(r > 9 * ptax.STATUTORY_RATE_PER_M2
                    for r, _ in ptax.CITY_RATE_PER_M2.values())
 
 
