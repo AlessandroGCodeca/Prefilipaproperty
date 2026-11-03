@@ -212,6 +212,7 @@ sovereign_final/
 │   ├── regional_prices_cz.py ← Czech kraj / okres / Prague / Brno lookup (medians empty)
 │   ├── rent_cz.py            ← Czech rent baseline (Deloitte Rent Index Q2 2026)
 │   ├── rent_comps_cz.py      ← Live Kč/m² rents from Czech rentals
+│   ├── property_tax_sk.py    ← Daň z bytov on a Slovak flat (€/m² by town)
 │   ├── property_tax_cz.py    ← Daň z nemovitých věcí on a flat
 │   └── duplicates.py         ← Same flat listed on several portals
 ├── modules/
@@ -495,6 +496,27 @@ Slovak IP — skgeodesy.sk geo-blocks many foreign ones.
 | Dividend tax on distribution | n/a | 10% (→ effective double taxation) |
 | Loan | hypotéka 3.8% p.a., 80% LTV (70% for a 3rd+ flat) | company loan: rate + `SRO_RATE_PREMIUM_PP` (1 pp), at most `SRO_LTV_RATIO` (70%) |
 | Running cost | — | `SRO_ANNUAL_RUNNING_COST` €1,200/yr (bookkeeping, accounts, office), deductible |
+
+**Property tax** (daň z bytov, `engine/property_tax_sk.py`) is charged on the
+flat's floor area, not its price: every started m² × the municipality's rate.
+The act's default is 0.033 €/m² (zákon 582/2004 § 16), but each town sets its
+own by VZN. The 2026 rates used:
+
+| Place | €/m² a year |
+|--|--|
+| Bratislava, by pásmo | A 1.20 (Vajnory, Podunajské Biskupice, Vrakuňa, Devínska Nová Ves) · B 1.20 (Dúbravka, Karlova Ves, Lamač, Devín, Rača, Záhorská Bystrica, Jarovce, Rusovce, Čunovo) · C 1.25 (Nové Mesto, Petržalka) · D 1.35 (Staré Mesto; Ružinov, for its Nivy area) |
+| Košice | 1.27 (its highest category; the others pay 1.207 and 1.143) |
+| Žilina | 1.20 (Žilina and Závodie; elsewhere 1.10) |
+| Trnava · Banská Bystrica | 1.00 |
+| Prešov | 0.953 |
+| Trenčín | 0.88 |
+| Nitra | 0.75 |
+| anywhere else | 1.35 (UNVERIFIED: the highest rate above, not a legal ceiling) |
+
+Each figure's source is in `property_tax_sk.SOURCE`. They were read via web
+search, as the ordinances themselves could not be fetched from here. A 60 m²
+flat pays €45–81 a year at these rates; until October 2026 the engine charged
+0.4 % of the price, roughly ten times as much.
 
 The s.r.o. is recommended only when it nets more than personal ownership
 after its running cost and loan terms **and** that gain repays

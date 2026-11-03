@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
     MORTGAGE_RATE_PA, LOAN_TERM_YEARS, LTV_RATIO,
     tax_rules, TAX_YEAR,
-    PROPERTY_TAX_RATE_PA, VACANCY_RATE, OWNER_RESERVE_RATE, PROPERTY_MGMT_RATE,
+    VACANCY_RATE, OWNER_RESERVE_RATE, PROPERTY_MGMT_RATE,
     ACQUISITION_COST_RATE,
     HOA_SMALL, HOA_MEDIUM, HOA_LARGE, HOA_PREMIUM,
     GREEN_DISCOUNT, YELLOW_DISCOUNT, NEAR_FLOOR_DISCOUNT, SRO_SETUP_COST,
@@ -70,7 +70,7 @@ def _need(value, what: str, market, where: str = "markets.py"):
 # the room-adjusted benchmark, the rent fallbacks). A stored score from an
 # older model is redone on the next scoring run
 # (database.requeue_scores_from_older_model).
-SCORING_MODEL_VERSION = 3   # 3: s.r.o. setup cost in the IRR; Bratislava city parts named alone
+SCORING_MODEL_VERSION = 4   # 4: Slovak property tax per m² by municipality (was 0.4 % of the price)
 
 
 @dataclass
@@ -232,12 +232,14 @@ def calc_hoa(size_m2: float, market: str = "sk") -> float:
 
 def property_tax_annual(price: float, size_m2: float, district: str = "",
                         market: str = "sk") -> float:
-    """Yearly property tax. Slovakia: a share of the price
-    (config.PROPERTY_TAX_RATE_PA). Czechia: daň z nemovitých věcí on a flat
+    """Yearly property tax on the flat's floor area; the price plays no part.
+    Slovakia: daň z bytov — every started m² × the municipality's rate per m²
+    (engine.property_tax_sk). Czechia: daň z nemovitých věcí on a flat
     (jednotka) — floor area × 1.22 × the rate per m² × the municipality's
     coefficients (markets.py; engine.property_tax_cz)."""
     if _sk(market):
-        return price * PROPERTY_TAX_RATE_PA
+        from engine import property_tax_sk
+        return property_tax_sk.annual_tax(size_m2, district)
     from engine import property_tax_cz
     return property_tax_cz.annual_tax(size_m2, district)
 
