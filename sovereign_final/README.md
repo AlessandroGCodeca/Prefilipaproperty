@@ -141,7 +141,7 @@ before; Czechia is added next to it.
 | Flood | ÚÚR national map, VÚV T. G. M. Q100 flood areas (indicative) | `modules/risk_data_cz.py` |
 | Noise | OpenStreetMap proxy + 2022 strategic noise map of main roads (MZ ČR) | ≥65 dB flags the flat |
 | Place names | RÚIAN okres names, Prague 1–22, Brno's districts; Czech locatives ("v Praze 2", "ve Zlíně"); every obec when `data/cz_obce.csv` (a RÚIAN export) is present | `scraper/czech_cases.py` |
-| Tax, mortgage, costs | ZDP 2026, ČNB limits (LTV 80 % / 70 % for investment mortgages from 1 Apr 2026), Swiss Life Hypoindex rate, SVJ fond oprav, daň z nemovitých věcí, katastr fee | `markets.py`, each with its source and date |
+| Tax, mortgage, costs | ZDP 2026, ČNB limits (LTV 80 % / 70 % for investment mortgages from 1 Apr 2026), Swiss Life Hypoindex rate, SVJ fond oprav, daň z nemovitých věcí (zákon 338/1992 Sb.; Prague's and the 26 statutory cities' coefficients from their 2026 ordinances in sbirkapp.gov.cz), katastr fee | `markets.py`, `engine/property_tax_cz.py`, each with its source and date |
 | Contract | a Czech **kupní smlouva NÁVRH** for a Czech advokát or notář to review — not legal advice | `modules/contract_draft_cz.py` |
 
 No Czech host could be reached from the container this was built in. Every
@@ -156,7 +156,7 @@ named here override them.
 
 1. Czech sale-price medians: none (table empty); the rooms multiplier for them is 1.0.
 2. Deloitte Rent Index: whether its figures are asking or achieved rents.
-3. Property tax: each municipality's local coefficient (1.0, `CZ_PROPERTY_TAX_LOCAL_COEF`) and the size coefficient outside Prague (3.5, the upper bound).
+3. Property tax outside Prague and the 26 statutory cities: the size coefficient (3.5, the highest outside Prague) and the local coefficient (1.0, `CZ_PROPERTY_TAX_LOCAL_COEF`). Prague's and the statutory cities' coefficients are read from their 2026 ordinances (`engine/property_tax_cz.SOURCE`).
 4. Personal tax: whether an SVJ fond oprav payment is deductible when paid (modelled) or only when spent; the 40 mil. Kč cap on an exempt sale (not modelled).
 5. Lending: a ČNB stress add-on (the engine's +2 pp is used).
 6. SVJ správa fee per flat (0, `CZ_SVJ_SPRAVA_PER_UNIT`); fond oprav 20 Kč/m² (`CZ_SVJ_FOND_OPRAV_PER_M2`).
