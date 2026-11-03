@@ -41,7 +41,20 @@ class TestRates:
     def test_cities(self, district, rate):
         assert _rate(district) == rate
 
+    @pytest.mark.parametrize("district, rate", [
+        ("Košice - Šaca", 1.143), ("Kosice - Saca", 1.143), ("Košice IV, Barca", 1.143),
+        ("Košice-Ťahanovce", 1.143), ("Košice - Luník IX", 1.143),   # category III
+        ("Košice - Nové Ťahanovce", 1.207), ("Košice - Terasa", 1.207),  # II
+        ("Košice - Sídlisko Ťahanovce", 1.27),   # a city part, not the Ťahanovce area
+        ("Košice - Juh", 1.27),                  # a city part named without its area
+        ("Žilina - Bánová", 1.10), ("Žilinská Lehota", 1.10),
+        ("Žilina, Závodie", 1.20), ("Žilina - Vlčince", 1.20),
+    ])
+    def test_kosice_and_zilina_by_cadastral_area(self, district, rate):
+        assert _rate(district) == rate
+
     @pytest.mark.parametrize("district", [
+        "Barca",                  # also a village near Rimavská Sobota
         "Staré Mesto",            # Košice has one too: not Bratislava's on its own
         "Nové Mesto nad Váhom",   # a town, not Bratislava's Nové Mesto
         "Nitra nad Ipľom",        # a village, not Nitra
@@ -89,4 +102,4 @@ def test_the_market_records_its_source():
 
 
 def test_older_scores_are_redone():
-    assert fin.SCORING_MODEL_VERSION >= 4
+    assert fin.SCORING_MODEL_VERSION >= 5

@@ -505,18 +505,19 @@ own by VZN. The 2026 rates used:
 | Place | €/m² a year |
 |--|--|
 | Bratislava, by pásmo | A 1.20 (Vajnory, Podunajské Biskupice, Vrakuňa, Devínska Nová Ves) · B 1.20 (Dúbravka, Karlova Ves, Lamač, Devín, Rača, Záhorská Bystrica, Jarovce, Rusovce, Čunovo) · C 1.25 (Nové Mesto, Petržalka) · D 1.35 (Staré Mesto; Ružinov, for its Nivy area) |
-| Košice | 1.27 (its highest category; the others pay 1.207 and 1.143) |
-| Žilina | 1.20 (Žilina and Závodie; elsewhere 1.10) |
+| Košice, by cadastral area | I 1.27 (Stredné Mesto) · II 1.207 (Terasa, Grunt, Furča, Južné Mesto, Nové Ťahanovce, Severné Mesto, …) · III 1.143 (Šaca, Myslava, Barca, Ťahanovce, Luník, Kavečany, …); a city part named without its area (Juh, Západ, KVP) 1.27 |
+| Žilina, by cadastral area | 1.20 (Žilina, Závodie) · 1.10 (Bánová, Budatín, Žilinská Lehota and the other areas) |
 | Trnava · Banská Bystrica | 1.00 |
 | Prešov | 0.953 |
 | Trenčín | 0.88 |
 | Nitra | 0.75 |
 | anywhere else | 1.35 (UNVERIFIED: the highest rate above, not a legal ceiling) |
 
-Each figure's source is in `property_tax_sk.SOURCE`. They were read via web
-search, as the ordinances themselves could not be fetched from here. A 60 m²
-flat pays €45–81 a year at these rates; until October 2026 the engine charged
-0.4 % of the price, roughly ten times as much.
+Each figure was read from the act and the city's own ordinance or tax page in
+November 2026; `property_tax_sk.SOURCE` names each document. Prešov's comes
+from its tax page as quoted by web search, because presov.sk answers automated
+requests with a CAPTCHA. A 60 m² flat pays €45–81 a year at these rates; until
+October 2026 the engine charged 0.4 % of the price, roughly ten times as much.
 
 The s.r.o. is recommended only when it nets more than personal ownership
 after its running cost and loan terms **and** that gain repays
