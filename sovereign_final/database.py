@@ -298,6 +298,45 @@ CREATE TABLE IF NOT EXISTS lv_documents (
     lv_text       TEXT NOT NULL,
     added_at      TEXT NOT NULL
 );
+
+-- Flat rates (daň z bytov, €/m² a year) read from the towns' own sites by the
+-- dashboard's update button (modules/tax_rates). engine/property_tax_sk uses
+-- them on top of its table. One per town and first tax year it applies to.
+CREATE TABLE IF NOT EXISTS property_tax_rates (
+    town          TEXT NOT NULL,       -- folded: 'banska bystrica'
+    name          TEXT NOT NULL,       -- 'Banská Bystrica'
+    tax_year      INTEGER NOT NULL,
+    rate          REAL NOT NULL,
+    source_url    TEXT,
+    document      TEXT,
+    excerpt       TEXT,                -- the words the rate was read from
+    origin        TEXT NOT NULL,       -- scraped / accepted / upload
+    saved_at      TEXT NOT NULL,
+    PRIMARY KEY (town, tax_year)
+);
+
+-- The last check of each town: what its site said and what was done with it.
+CREATE TABLE IF NOT EXISTS property_tax_checks (
+    town          TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    status        TEXT NOT NULL,       -- confirmed / applied / upcoming / new / review /
+                                       -- kept / not_found / blocked
+    message       TEXT,
+    rates         TEXT,                -- JSON list: the flat rates the source states
+    tax_year      INTEGER,
+    source_url    TEXT,
+    document      TEXT,
+    excerpt       TEXT,
+    detail        TEXT,                -- JSON: problems, pages read, an upcoming rate
+    checked_at    TEXT NOT NULL
+);
+
+-- Towns a user added, with the page the search starts from.
+CREATE TABLE IF NOT EXISTS property_tax_sources (
+    name          TEXT PRIMARY KEY,
+    start_url     TEXT NOT NULL,
+    added_at      TEXT NOT NULL
+);
 """
 
 # Detect dev-project listings (multi-unit projects, not individual buyable
@@ -1376,6 +1415,35 @@ def requeue_scores_with_stale_class(market: str | None = None) -> int:
                 != r["max_price_yellow"])
         ]
         n = sum(_drop_cashflow_score(conn, lid) for lid in stale)
+        conn.commit()
+    finally:
+        conn.close()
+    return n
+
+
+def requeue_scores_with_stale_property_tax() -> int:
+    """Drop the Slovak scores whose property tax is no longer what
+    engine.property_tax_sk charges — a town's rate was updated from its site
+    (modules/tax_rates) — so the next scoring run redoes them. Compares each
+    score's stored property_tax_monthly with the tax at today's rates, so it
+    drops only the listings the change reaches. Returns how many it dropped."""
+    from engine import property_tax_sk
+    conn = get_conn()
+    try:
+        if not _has_table(conn, "cashflow_scores"):
+            return 0
+        only, params = _market_sql(conn, "sk", "l.")
+        rows = conn.execute(f"""
+            SELECT l.id, l.size_m2, l.district, c.property_tax_monthly
+            FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
+            WHERE l.is_active = 1 AND l.price_eur > 0 AND l.size_m2 > 0
+              AND l.lv_status != 'REJECTED'{only}
+        """, params).fetchall()
+        n = 0
+        for r in rows:
+            now = round(property_tax_sk.annual_tax(r["size_m2"], r["district"] or "") / 12, 2)
+            if r["property_tax_monthly"] is None or abs(now - r["property_tax_monthly"]) > 0.011:
+                n += _drop_cashflow_score(conn, r["id"])
         conn.commit()
     finally:
         conn.close()

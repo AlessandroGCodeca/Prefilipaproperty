@@ -101,7 +101,7 @@ def test_empty_database_renders_the_demo_view(db):
 def test_populated_database_renders_every_tab(populated_db):
     at = run_app()
     assert not at.exception, [e.value for e in at.exception]
-    assert len(at.tabs) == 10
+    assert len(at.tabs) == 11
 
 
 def test_stats_bar_counts_the_listings_on_the_page(populated_db):
@@ -733,12 +733,12 @@ def test_password_gate(db, monkeypatch):
     at.text_input(key="login_pw").input("s3cret")
     at.button[0].click().run()
     assert not at.exception, [e.value for e in at.exception]
-    assert len(at.tabs) == 10   # with LV TO-DO (audit A8)
+    assert len(at.tabs) == 11   # with LV TO-DO (audit A8) and TAX RATES
 
 
 def test_no_password_set_means_no_gate(db):
     at = run_app()
-    assert len(at.tabs) == 10   # with LV TO-DO (audit A8)
+    assert len(at.tabs) == 11   # with LV TO-DO (audit A8) and TAX RATES
 
 
 def test_sidebar_shows_the_last_scheduled_run(db):

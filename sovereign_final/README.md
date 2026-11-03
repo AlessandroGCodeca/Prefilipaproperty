@@ -173,7 +173,7 @@ named here override them.
 
 ```
 sovereign_final/
-├── app.py                    ← Streamlit dashboard (9 tabs)
+├── app.py                    ← Streamlit dashboard (11 tabs)
 ├── scheduler.py              ← Daily 06:00 CET automation, retries a failed run
 ├── config.py                 ← All 2026 Slovak tax rates
 ├── markets.py                ← Market registry: the SK and CZ profiles
@@ -197,6 +197,8 @@ sovereign_final/
 │   ├── geo.py                ← A listing's own map pin (JSON-LD / API / meta)
 │   ├── slovak_cases.py       ← Locative place names ("v Nitre", "v Košiciach")
 │   ├── rentals.py            ← Prenájom (to-let) listings for live rent comps
+│   ├── property_tax_rates.py ← Each town's flat property-tax rate, read from its
+│   │                           own ordinance or rate page (🏛️ UPDATE TAX RATES)
 │   ├── cz_common.py          ← Czech scrapers' shared parts: robots.txt, Kč, places
 │   ├── bezrealitky.py        ← Bezrealitky.cz (sitemap + listing pages)
 │   ├── idnes.py              ← Reality.iDNES.cz
@@ -230,6 +232,7 @@ sovereign_final/
 │   ├── contract_draft.py     ← ONE-CLICK CLOSE contract draft + internal analysis
 │   ├── pipeline_state.py     ← Pipeline lock + last full run's status
 │   ├── jobs.py               ← Runs the sidebar buttons in the background
+│   ├── tax_rates.py          ← 🏛️ UPDATE TAX RATES: apply, confirm or hold for review
 │   └── backup.py             ← Daily database copy + export of your data
 └── dev/                      ← Debug probes: LV check, nehnutelnosti, topreality
 ```
@@ -249,6 +252,7 @@ sovereign_final/
 | REJECTED | Every LV rejection with its reason, detail and LV risk read; re-verify from here |
 | LV TO-DO | Every GREEN / YELLOW deal whose title deed isn't verified, with what the plot check found; type the flats' own LV numbers in bulk, then save (checked on the next LV run) or save & verify now (in the background, like the pipeline buttons) |
 | RENT COMPS | Live €/m² per district from prenájom listings vs the baseline table |
+| TAX RATES | Each town's flat property-tax rate: what the engine charges, what the town's own site says, and the source; one click re-reads them all, a doubtful reading waits here to be accepted or turned down, and a town whose site blocks automated requests takes an uploaded ordinance |
 | ONE-CLICK CLOSE | Pre-filled Slovak notary contract draft with download; the deal's numbers are a separate download, not part of the draft |
 
 A 🔻 banner above the tabs lists price cuts from the last 14 days, and says
@@ -284,6 +288,12 @@ scored, and the daily scrape doesn't open its page again, so without this it
 stays PENDING. The pipeline does it for up to 100 listings a run — and skips
 it when nehnutelnosti blocked that run's scrape, as every read would only time
 out — the button for up to 200. Bazos and Topreality listings aren't re-read.
+
+**🏛️ UPDATE TAX RATES** re-reads every Slovak town's flat property-tax rate
+from its own site and re-scores the listings whose tax moved — see "Updating
+the rates with one click" below. It is not part of the daily run: rates change
+once a year (most ordinances take effect on 1 January), so a click in December
+or January, or after a town adopts a new ordinance, is enough.
 
 Housekeeping = deactivate stale listings (>21d unseen) + flag dev projects.
 (Skipped on a day no portal could be read: "unseen" then says nothing.)
@@ -528,6 +538,44 @@ Lučenec, Topoľčany, Čadca and Rimavská Sobota are not in the table: their
 sites block automated requests (a CAPTCHA, a refused connection or "Access
 Forbidden"). Šamorín's and Komárno's current flat rates could not be pinned to
 an adopted ordinance.
+
+**Updating the rates with one click.** 🏛️ UPDATE TAX RATES (sidebar, or the
+TAX RATES tab) reads every town's rate from its own site, in the background:
+it starts at the town's tax page or list of ordinances
+(`scraper/property_tax_rates.TOWNS`), follows the links to the property-tax
+ordinance or rate sheet (skipping drafts, repealed ordinances and tax-return
+forms), reads the PDF, Word file or page, and finds the flat rate — "0,60 € za
+byty", "a) byty 0,675" under an "eur/m2" header, "… podlahovej plochy bytu
+1,000 €" and the other ways towns write it — with the tax year it applies from
+(the ordinance's účinnosť; a rate in force from any day but 1 January is first
+charged the next year). What it does with a reading (`modules/tax_rates`):
+
+| The site says | What happens |
+|--|--|
+| the rate the engine charges | ✅ confirmed |
+| a new rate in a dated ordinance for a later year than the table's (2026) | 🔄 / 📅 stored, and charged from that year |
+| a rate for a town the table lacks | ➕ stored and charged, instead of the 1.35 fallback |
+| another rate for a year the table covers, several flat rates, two documents that disagree, an undated ordinance for a new town, or a newer ordinance about flats it can't read | ⚠️ waits on the TAX RATES tab: accept it (it is then charged even over the table) or keep the table's figure |
+| a change in a town rated by area (Bratislava, Košice, Žilina, Dunajská Streda) | ⚠️ review only — the areas are mapped by hand in `engine/property_tax_sk.py` |
+| nothing readable, or the site refuses the request | ❔ / ⛔ with the reasons; save the ordinance in your browser and upload it on the tab |
+
+Then the listings whose tax moved are re-scored; the others keep their score.
+The stored rates live in `property_tax_rates` (with the document and the words
+each was read from); ↩️ Undo on the tab forgets a town's and charges the table's
+figure again, and ➕ Add a town adds any other town with the page its search
+starts from.
+
+Run from a data centre in November 2026, it read every reachable town in the
+table at the table's own rate, and added Šamorín (0.85 €/m², VZN 7/2024; its
+amendment 5/2025 changes only other taxes). Prešov, Zvolen, Považská Bystrica,
+Levice, Lučenec, Topoľčany and Rimavská Sobota answer automated requests with a
+CAPTCHA there, and Martin and Nové Zámky reset the connection — from a home
+connection these usually open; if not, upload the ordinance. Stupava, Čadca,
+Komárno and Liptovský Mikuláš gave no readable current rate (their sites link
+older ordinances, or none). A scanned PDF can't be read: Malacky's newest
+consolidated text and Spišská Nová Ves's ordinance are scans (their tax pages
+state the rate). `python -m scraper.property_tax_rates [town …] -v` prints
+what it reads, page by page.
 
 Each figure was read from the act and the city's own ordinance or tax page in
 November 2026; `property_tax_sk.SOURCE` names each document. Prešov's comes

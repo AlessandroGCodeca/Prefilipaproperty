@@ -16,6 +16,16 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+@pytest.fixture(autouse=True)
+def _no_stored_tax_rates(monkeypatch):
+    """The engine charges a town's property tax from its table plus the rates
+    the dashboard's 🏛️ UPDATE TAX RATES stored (engine.property_tax_sk). A
+    test sees the table alone, whatever a real data/sovereign.db holds; one
+    about stored rates sets them itself."""
+    from engine import property_tax_sk
+    monkeypatch.setattr(property_tax_sk, "_stored", {})
+
+
 @pytest.fixture
 def full_db(monkeypatch):
     import database as db

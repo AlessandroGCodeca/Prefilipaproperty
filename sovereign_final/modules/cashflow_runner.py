@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from database import (
     get_unscored_cashflow, upsert_cashflow, init_db, requeue_scores_without_benchmark,
     requeue_scores_with_stale_class, requeue_scores_from_older_model,
+    requeue_scores_with_stale_property_tax,
 )
 from engine.financial import analyse, result_to_db_dict, deal_extras, base_rent_rate
 import markets
@@ -37,6 +38,14 @@ def run_scoring(progress_callback=None, market: str | None = None) -> int:
     older = requeue_scores_from_older_model(market=market)
     if older:
         log.info(f"♻️  {older} scores came from an older model or tax table — re-scoring them.")
+    if market in (None, "sk"):
+        # Property-tax rates updated from the towns' sites, possibly by the
+        # other process (the dashboard's button while the scheduler scores).
+        from engine import property_tax_sk
+        property_tax_sk.reload()
+        taxed = requeue_scores_with_stale_property_tax()
+        if taxed:
+            log.info(f"♻️  {taxed} scores used an older property-tax rate — re-scoring them.")
     listings = get_unscored_cashflow(market=market)
     if not listings:
         log.info("✅ No new listings to score.")
