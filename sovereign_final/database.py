@@ -298,6 +298,105 @@ CREATE TABLE IF NOT EXISTS lv_documents (
     lv_text       TEXT NOT NULL,
     added_at      TEXT NOT NULL
 );
+
+-- Flat rates (daň z bytov, €/m² a year) read from the towns' own sites by the
+-- dashboard's update button (modules/tax_rates). engine/property_tax_sk uses
+-- them on top of its table. One per town and first tax year it applies to.
+CREATE TABLE IF NOT EXISTS property_tax_rates (
+    town          TEXT NOT NULL,       -- folded: 'banska bystrica'
+    name          TEXT NOT NULL,       -- 'Banská Bystrica'
+    tax_year      INTEGER NOT NULL,
+    rate          REAL NOT NULL,
+    source_url    TEXT,
+    document      TEXT,
+    excerpt       TEXT,                -- the words the rate was read from
+    origin        TEXT NOT NULL,       -- scraped / accepted / upload
+    saved_at      TEXT NOT NULL,
+    PRIMARY KEY (town, tax_year)
+);
+
+-- The last check of each town: what its site said and what was done with it.
+CREATE TABLE IF NOT EXISTS property_tax_checks (
+    town          TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    status        TEXT NOT NULL,       -- confirmed / applied / upcoming / new / review /
+                                       -- kept / not_found / blocked
+    message       TEXT,
+    rates         TEXT,                -- JSON list: the flat rates the source states
+    tax_year      INTEGER,
+    source_url    TEXT,
+    document      TEXT,
+    excerpt       TEXT,
+    detail        TEXT,                -- JSON: problems, pages read, an upcoming rate
+    checked_at    TEXT NOT NULL
+);
+
+-- Every Slovak municipality with its official website (Wikidata), for the
+-- rates of the ones not in TOWNS — refreshed once a month.
+CREATE TABLE IF NOT EXISTS sk_municipalities (
+    key           TEXT PRIMARY KEY,    -- its name, or "Porúbka (okres Žilina)" when shared
+    name          TEXT NOT NULL,
+    okres         TEXT,
+    web           TEXT,
+    population    INTEGER,
+    refreshed_at  TEXT NOT NULL
+);
+
+-- Towns a user added, with the page the search starts from.
+CREATE TABLE IF NOT EXISTS property_tax_sources (
+    name          TEXT PRIMARY KEY,
+    start_url     TEXT NOT NULL,
+    added_at      TEXT NOT NULL
+);
+
+-- Czechia (modules/tax_rates_cz): every municipality's population on
+-- 1 January (Czech Statistical Office), …
+CREATE TABLE IF NOT EXISTS cz_population (
+    code          TEXT NOT NULL,       -- kód obce
+    year          INTEGER NOT NULL,
+    name          TEXT NOT NULL,
+    okres         TEXT,                -- its district: tells same-named ones apart
+    population    INTEGER NOT NULL,
+    PRIMARY KEY (code, year)
+);
+
+-- … each ordinance on the coefficients read from sbirkapp.gov.cz once (a
+-- published ordinance never changes), …
+CREATE TABLE IF NOT EXISTS cz_ordinances (
+    id            TEXT PRIMARY KEY,    -- the collection's id, SPP…
+    ico           TEXT,
+    publisher     TEXT,
+    number        TEXT,
+    title         TEXT,
+    published     TEXT,
+    effective     TEXT,
+    parsed        TEXT,                -- JSON: what it sets for flats
+    problem       TEXT,                -- why it couldn't be read
+    fetched_at    TEXT NOT NULL
+);
+
+-- … the municipality behind each publisher's IČO (ARES), …
+CREATE TABLE IF NOT EXISTS cz_ico (
+    ico           TEXT PRIMARY KEY,
+    code          TEXT,
+    name          TEXT,
+    district      TEXT
+);
+
+-- … and what a flat pays there: the size and local coefficients by area
+-- ("" for the municipality's main part), per tax year.
+CREATE TABLE IF NOT EXISTS property_tax_cz (
+    code          TEXT NOT NULL,
+    tax_year      INTEGER NOT NULL,
+    name          TEXT NOT NULL,
+    okres         TEXT,
+    population    INTEGER,
+    size          TEXT NOT NULL,       -- JSON {area: coefficient}
+    local         TEXT NOT NULL,       -- JSON {area: coefficient}
+    sources       TEXT,                -- JSON list of the ordinances used
+    computed_at   TEXT NOT NULL,
+    PRIMARY KEY (code, tax_year)
+);
 """
 
 # Detect dev-project listings (multi-unit projects, not individual buyable
@@ -508,6 +607,9 @@ _ENRICHMENT_COLUMNS = {
     # The soft flags (utility easement, a municipality's pre-emption right)
     # on the flat's own LV at its last check — shown, not rejected.
     "lv_soft_flags":      "TEXT",
+    # When Location IQ last failed to geocode the listing (no row written):
+    # get_unscored_location puts it behind every listing not yet tried.
+    "location_tried_at":  "TEXT",
 }
 
 
@@ -1306,23 +1408,26 @@ def _has_table(conn, name: str) -> bool:
     ).fetchone() is not None
 
 
-def requeue_scores_without_benchmark() -> int:
+def requeue_scores_without_benchmark(market: str | None = None) -> int:
     """Drop the scores worked out with no regional median for a district that
     has one now, so the next scoring run classifies them against it.
 
     A district engine.regional_prices didn't know scored WHITE ("no regional
     price benchmark"), and get_unscored_cashflow() never looks at a scored row
     again — so a town added to the price tables later would stay WHITE for
-    good. Returns the number of scores dropped."""
+    good. `market` keeps it to one market's listings (None: all) — a run
+    scoped to one market must not drop another's scores it won't redo.
+    Returns the number of scores dropped."""
     from engine.regional_prices import regional_median_price
     conn = get_conn()
     try:
         _ensure_market_columns(conn)
-        rows = conn.execute("""
+        only, params = _market_sql(conn, market, "l.")
+        rows = conn.execute(f"""
             SELECT l.id, l.district, l.market FROM listings l
             JOIN cashflow_scores c ON c.listing_id = l.id
-            WHERE c.regional_median_m2 IS NULL AND l.is_active = 1
-        """).fetchall()
+            WHERE c.regional_median_m2 IS NULL AND l.is_active = 1{only}
+        """, params).fetchall()
         n = sum(_drop_cashflow_score(conn, r["id"]) for r in rows
                 if regional_median_price(r["district"] or "",
                                          **_market_kw(r["market"])) is not None)
@@ -1332,14 +1437,15 @@ def requeue_scores_without_benchmark() -> int:
     return n
 
 
-def requeue_scores_with_stale_class() -> int:
+def requeue_scores_with_stale_class(market: str | None = None) -> int:
     """Drop the scores whose class or max offers no longer match what the
     engine gives for the listing's price, size and district today — a
     regional median that moved, or a class rule that changed (classify()
     judging at 4 decimals, so a flat exactly 20% under the median is GREEN
     now, not YELLOW). get_unscored_cashflow() never looks at a scored row
-    again, so without this they would keep the old answer for good. Returns
-    the number of scores dropped."""
+    again, so without this they would keep the old answer for good.
+    `market` keeps it to one market's listings (None: all). Returns the
+    number of scores dropped."""
     from engine.financial import class_at_price, max_offer_price
     conn = get_conn()
     try:
@@ -1347,14 +1453,15 @@ def requeue_scores_with_stale_class() -> int:
             return 0
         _ensure_cashflow_columns(conn)
         _ensure_market_columns(conn)
-        rows = conn.execute("""
+        only, params = _market_sql(conn, market, "l.")
+        rows = conn.execute(f"""
             SELECT l.id, l.price_eur, l.size_m2, l.district, l.rooms, l.market,
                    c.classification, c.max_price_green, c.max_price_yellow
             FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
             -- Only what get_unscored_cashflow() would score again.
             WHERE l.is_active = 1 AND l.price_eur > 0 AND l.size_m2 > 0
-              AND l.lv_status != 'REJECTED'
-        """).fetchall()
+              AND l.lv_status != 'REJECTED'{only}
+        """, params).fetchall()
         stale = [
             r["id"] for r in rows
             if (class_at_price(r["price_eur"], r["size_m2"], r["district"] or "",
@@ -1374,13 +1481,45 @@ def requeue_scores_with_stale_class() -> int:
     return n
 
 
-def requeue_scores_from_older_model() -> int:
+def requeue_scores_with_stale_property_tax(market: str = "sk") -> int:
+    """Drop the scores of `market` whose property tax is no longer what the
+    engine charges — a rate or coefficient was updated from the official
+    sources (modules/tax_rates, modules/tax_rates_cz) — so the next scoring
+    run redoes them. Compares each score's stored property_tax_monthly with
+    the tax at today's figures, so it drops only the listings the change
+    reaches. Returns how many it dropped."""
+    from engine.financial import property_tax_annual
+    conn = get_conn()
+    try:
+        if not _has_table(conn, "cashflow_scores"):
+            return 0
+        only, params = _market_sql(conn, market, "l.")
+        rows = conn.execute(f"""
+            SELECT l.id, l.price_eur, l.size_m2, l.district, c.property_tax_monthly
+            FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
+            WHERE l.is_active = 1 AND l.price_eur > 0 AND l.size_m2 > 0
+              AND l.lv_status != 'REJECTED'{only}
+        """, params).fetchall()
+        n = 0
+        for r in rows:
+            now = round(property_tax_annual(r["price_eur"], r["size_m2"], r["district"] or "",
+                                            market=market) / 12, 2)
+            if r["property_tax_monthly"] is None or abs(now - r["property_tax_monthly"]) > 0.011:
+                n += _drop_cashflow_score(conn, r["id"])
+        conn.commit()
+    finally:
+        conn.close()
+    return n
+
+
+def requeue_scores_from_older_model(market: str | None = None) -> int:
     """Drop the scores worked out by an older version of the engine
     (engine.financial.SCORING_MODEL_VERSION) or under another year's tax
     table than the one scoring uses now (config.tax_rules), so the next
     scoring run redoes them. A new tax year's table, or a change to how the
     figures are worked out, would otherwise reach only listings scored after
-    it. Returns the number of scores dropped."""
+    it. `market` keeps it to one market's listings (None: all). Returns the
+    number of scores dropped."""
     import markets
     from engine.financial import SCORING_MODEL_VERSION
     conn = get_conn()
@@ -1389,13 +1528,14 @@ def requeue_scores_from_older_model() -> int:
             return 0
         _ensure_cashflow_columns(conn)
         _ensure_market_columns(conn)
-        rows = conn.execute("""
-            SELECT l.id, l.market, c.model_version, c.tax_year
+        only, params = _market_sql(conn, market, "l.")
+        rows = conn.execute(f"""
+            SELECT l.id, l.market, c.model_version, c.tax_year, c.ltv_used
             FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
             -- Only what get_unscored_cashflow() would score again.
             WHERE l.is_active = 1 AND l.price_eur > 0 AND l.size_m2 > 0
-              AND l.lv_status != 'REJECTED'
-        """).fetchall()
+              AND l.lv_status != 'REJECTED'{only}
+        """, params).fetchall()
         # Each market has its own tax tables, so its own current year.
         years: dict[str, int | None] = {}
 
@@ -1407,10 +1547,26 @@ def requeue_scores_from_older_model() -> int:
                 except LookupError:          # no table yet: nothing to compare
                     years[m] = None
             return years[m]
+        # ... and the LTV a bank lends at today: it moves with the date (the
+        # investor cap from INVESTOR_LTV_FROM) and with PROPERTIES_OWNED.
+        ltvs: dict[str, float | None] = {}
+
+        def ltv_now(market):
+            from engine.financial import default_ltv
+            m = markets.normalize(market)
+            if m not in ltvs:
+                try:
+                    ltvs[m] = default_ltv(**_market_kw(m))
+                except LookupError:
+                    ltvs[m] = None
+            return ltvs[m]
         n = sum(_drop_cashflow_score(conn, r["id"]) for r in rows
                 if r["model_version"] is None
                 or r["model_version"] != SCORING_MODEL_VERSION
-                or r["tax_year"] is None or r["tax_year"] != tax_year(r["market"]))
+                or r["tax_year"] is None or r["tax_year"] != tax_year(r["market"])
+                or (ltv_now(r["market"]) is not None
+                    and (r["ltv_used"] is None
+                         or abs(r["ltv_used"] - ltv_now(r["market"])) > 1e-9)))
         conn.commit()
     finally:
         conn.close()
@@ -1694,6 +1850,9 @@ def upsert_listing(data: dict):
             # coordinates (a geocode, often just a district centroid, or the
             # pin before it moved): score it again at the pin.
             _drop_location_score(conn, data["id"])
+            # A pin needs no geocode: back to the front of Location IQ's queue.
+            conn.execute("UPDATE listings SET location_tried_at=NULL WHERE id=?",
+                         (data["id"],))
         # A district arriving for a row that had none: its score is stale.
         if (existing and not (existing[1] or "").strip()
                 and (data.get("district") or "").strip()):
@@ -2191,6 +2350,17 @@ def update_description_features(listing_id: str, features: dict):
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
+        # What the rent estimate reads: when the parse changes it, the score
+        # made without it is dropped and redone by the scoring that follows.
+        def rent_inputs():
+            r = conn.execute("SELECT has_parking, has_balcony, furnished, rooms FROM listings "
+                             "WHERE id = ?", (listing_id,)).fetchone()
+            if not r:
+                return None
+            furn = (r["furnished"] or "").lower()
+            return (bool(r["has_parking"]), bool(r["has_balcony"]),
+                    furn if furn in ("furnished", "semi") else "", r["rooms"])
+        before = rent_inputs()
         conn.execute("""
             UPDATE listings SET
                 has_parking = ?, has_balcony = ?,
@@ -2216,6 +2386,8 @@ def update_description_features(listing_id: str, features: dict):
             features.get("floor"),
             listing_id,
         ))
+        if before is not None and rent_inputs() != before:
+            _drop_cashflow_score(conn, listing_id)
         conn.commit()
     finally:
         conn.close()
@@ -2293,6 +2465,11 @@ def update_address(listing_id: str, district: str, city: str):
 
 
 def get_unscored_location():
+    """The listings Location IQ still has to locate: listings never tried
+    first (oldest first, as before), then the ones whose geocode failed,
+    least recently tried first. Without that order the same listings that
+    never geocode came first on every run and filled its per-run limit, and
+    the listings behind them were never located."""
     conn = get_conn()
     try:
         _ensure_enrichment_columns(conn)
@@ -2304,10 +2481,24 @@ def get_unscored_location():
             LEFT JOIN location_scores lc ON l.id = lc.listing_id
             WHERE l.lv_status IN ('PASS', 'UNVERIFIED')
               AND lc.listing_id IS NULL AND l.is_active=1
+            ORDER BY l.location_tried_at IS NOT NULL, l.location_tried_at, l.rowid
         """).fetchall()
     finally:
         conn.close()
     return [dict(r) for r in rows]
+
+
+def mark_location_tried(listing_id: str) -> None:
+    """Record that Location IQ could not geocode the listing just now, so the
+    next run tries it after every listing not yet tried."""
+    conn = get_conn()
+    try:
+        _ensure_enrichment_columns(conn)
+        conn.execute("UPDATE listings SET location_tried_at=? WHERE id=?",
+                     (datetime.now(timezone.utc).isoformat(), listing_id))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def save_contract_draft(listing_id: str, ownership_type: str, agreed_price: float,

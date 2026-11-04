@@ -128,9 +128,9 @@ SK = Market(
         "checked": "2026-05",
     },
     tax_year_rules=config.TAX_YEAR_RULES,
-    property_tax={"kind": "rate_of_value", "rate": config.PROPERTY_TAX_RATE_PA,
-                  "source": "config.PROPERTY_TAX_RATE_PA (~0.4% of value)",
-                  "checked": "2026-05"},
+    property_tax={"kind": "per_m2", "module": "engine.property_tax_sk",
+                  "source": "see engine/property_tax_sk.SOURCE",
+                  "checked": "2026-10-31 (web search)"},
     hoa={"kind": "bands",
          "bands": ((40, config.HOA_SMALL), (70, config.HOA_MEDIUM),
                    (120, config.HOA_LARGE), (None, config.HOA_PREMIUM)),
@@ -280,7 +280,7 @@ CZ = Market(
     tax_year_rules=CZ_TAX_YEAR_RULES,
     property_tax={"kind": "per_m2", "module": "engine.property_tax_cz",
                   "source": "see engine/property_tax_cz.SOURCE",
-                  "checked": "2026-10-16 (web search)"},
+                  "checked": "2026-11-04 (sbirkapp.gov.cz, zakonyprolidi.cz, csu.gov.cz, vdp.cuzk.gov.cz)"},
     # SVJ: fond oprav per m² plus the správa (management) fee per flat. The
     # tenant pays the services (water, heating, lift) through zálohy; the
     # owner pays these two. No national statistic exists: sources give a
@@ -380,9 +380,14 @@ CZ = Market(
     # Creditors a lien may be in favour of as ordinary housing finance. The
     # words "banka" and "spořitelna" already count; these are names that
     # don't contain them, and the state housing fund (SFPI, formerly SFRB).
+    # The last six: banks whose name glues "bank" to another word, some no
+    # longer lending but still named on old liens ("Sberbank CZ, a.s. v
+    # likvidaci"). Spellings not checked against ČNB's list of banks from
+    # here (UNVERIFIED).
     lv_bank_names=("čsob", "raiffeisenbank", "unicredit", "moneta", "mbank", "oberbank",
                    "wüstenrot", "hypoteční banka", "státní fond podpory investic",
-                   "sfpi", "státní fond rozvoje bydlení", "sfrb"),
+                   "sfpi", "státní fond rozvoje bydlení", "sfrb",
+                   "sberbank", "volksbank", "ebanka", "expobank", "citibank", "commerzbank"),
 )
 
 MARKETS = {"sk": SK, "cz": CZ}

@@ -50,6 +50,7 @@ from database import (
 )
 from scraper._http import get, make_session
 from scraper.cz_common import (
+    warmup_url,
     PortalBlocked, require_robots, robots_allows, listing_record, sale_price, rooms_cz, layout_cz,
     area_cz, energy_cz, is_excluded_cz, cleanup, fold,
 )
@@ -235,7 +236,7 @@ def _fetch_json(url: str, session, params=None):
 def run(max_pages: int = 10) -> int:
     require_robots(SEARCH_API)
     log.info(f"🔍 Sreality.cz ({max_pages} pages)...")
-    session = make_session(BASE)
+    session = make_session(warmup_url(BASE))
     session.headers.update(HEADERS)
     fresh = get_fresh_detail_urls(SOURCE, max_age_days=DETAIL_REFRESH_DAYS)
     total = touched = 0

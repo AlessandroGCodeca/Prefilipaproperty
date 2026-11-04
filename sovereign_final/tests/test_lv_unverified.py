@@ -280,14 +280,14 @@ class TestRunDebtFilter:
     def test_flat_lv_entered_on_the_card_verifies(self, temp_db, monkeypatch):
         _insert(temp_db, "l1", lv_status="UNVERIFIED")
         monkeypatch.setattr(debt_bot, "enrich_lv",
-                            lambda area, lv: _lookup(lv_text=BANK_LV))
+                            lambda area, lv, **kw: _lookup(lv_text=BANK_LV))
         res = debt_bot.reverify("l1", lv_number="777", cadastral_area="Nitra")
         assert res["status"] == "PASS"
         row = _get(temp_db, "l1")
         assert (row["lv_status"], row["lv_number"]) == ("PASS", "777")
 
         monkeypatch.setattr(debt_bot, "enrich_lv",
-                            lambda area, lv: _lookup(lv_text=PRIVATE_LV))
+                            lambda area, lv, **kw: _lookup(lv_text=PRIVATE_LV))
         assert debt_bot.reverify("l1")["status"] == "REJECT"   # stored number reused
         assert _get(temp_db, "l1")["lv_status"] == "REJECTED"
 

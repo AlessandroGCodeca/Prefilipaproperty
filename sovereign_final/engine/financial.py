@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
     MORTGAGE_RATE_PA, LOAN_TERM_YEARS, LTV_RATIO,
     tax_rules, TAX_YEAR,
-    PROPERTY_TAX_RATE_PA, VACANCY_RATE, OWNER_RESERVE_RATE, PROPERTY_MGMT_RATE,
+    VACANCY_RATE, OWNER_RESERVE_RATE, PROPERTY_MGMT_RATE,
     ACQUISITION_COST_RATE,
     HOA_SMALL, HOA_MEDIUM, HOA_LARGE, HOA_PREMIUM,
     GREEN_DISCOUNT, YELLOW_DISCOUNT, NEAR_FLOOR_DISCOUNT, SRO_SETUP_COST,
@@ -70,7 +70,7 @@ def _need(value, what: str, market, where: str = "markets.py"):
 # the room-adjusted benchmark, the rent fallbacks). A stored score from an
 # older model is redone on the next scoring run
 # (database.requeue_scores_from_older_model).
-SCORING_MODEL_VERSION = 2
+SCORING_MODEL_VERSION = 5   # 5: property tax by area in Košice and Žilina; Czech coefficients by city, town and population
 
 
 @dataclass
@@ -232,12 +232,14 @@ def calc_hoa(size_m2: float, market: str = "sk") -> float:
 
 def property_tax_annual(price: float, size_m2: float, district: str = "",
                         market: str = "sk") -> float:
-    """Yearly property tax. Slovakia: a share of the price
-    (config.PROPERTY_TAX_RATE_PA). Czechia: daň z nemovitých věcí on a flat
+    """Yearly property tax on the flat's floor area; the price plays no part.
+    Slovakia: daň z bytov — every started m² × the municipality's rate per m²
+    (engine.property_tax_sk). Czechia: daň z nemovitých věcí on a flat
     (jednotka) — floor area × 1.22 × the rate per m² × the municipality's
     coefficients (markets.py; engine.property_tax_cz)."""
     if _sk(market):
-        return price * PROPERTY_TAX_RATE_PA
+        from engine import property_tax_sk
+        return property_tax_sk.annual_tax(size_m2, district)
     from engine import property_tax_cz
     return property_tax_cz.annual_tax(size_m2, district)
 
@@ -384,9 +386,11 @@ def _furnished_multiplier(furnished, market: str = "sk") -> float:
     return 1.0
 
 
+# Longest first — but a named city part ("Vrakuňa, Bratislava II") before the
+# Bratislava / Košice okres it lies in, whatever their lengths.
 _KEYS_BY_SPECIFICITY = sorted(
     (k for k in RENT_PER_M2 if k != "default" and k not in _CITY_ONLY_KEYS),
-    key=len, reverse=True,
+    key=lambda k: (bool(re.fullmatch(r"(?:bratislava|košice) [iv]+", k)), -len(k)),
 )
 # A key matches only as whole words, and with or without diacritics:
 # "rača" is not in "Kráčany", "bratislava i" is not the start of
@@ -1093,11 +1097,13 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
     if ltv is None:
         ltv = default_ltv(**_mkw(mkt))
     rules = tax_rules(tax_year) if sk else markets.tax_rules(tax_year, mkt)
-    running = 0.0
+    running = setup = 0.0
     if structure == "SRO":
         ltv, rate = sro_financing(ltv, rate, sro_ltv, sro_rate_premium, **_mkw(mkt))
         running = pick(sro_running_cost, SRO_ANNUAL_RUNNING_COST,
                        "sro_annual_running_cost", "s.r.o. running cost")
+        # The company is set up once, at the start: a cost only it pays.
+        setup = pick(None, SRO_SETUP_COST, "sro_setup_cost", "s.r.o. setup cost")
     if rent is None:
         rent = get_rent_estimate(district, size_m2, rooms, parking, furnished,
                                  balcony, rates=rent_rates, **_mkw(mkt))
@@ -1105,7 +1111,7 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
 
     loan = price_eur * ltv
     acquisition = acquisition_costs(price_eur, **_mkw(mkt))
-    equity_in = price_eur * (1 - ltv) + acquisition
+    equity_in = price_eur * (1 - ltv) + acquisition + setup
     payment_y = calc_mortgage(loan, rate, term_years) * 12
     schedule = amortization_schedule(loan, rate, term_years)
     prop_tax_y = property_tax_annual(price_eur, size_m2, district, **_mkw(mkt))
@@ -1206,6 +1212,8 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
     Each component contributes points out of its own max; only components with
     data are counted, and the score is rescaled to 100 over the available maxima
     so a missing location score (no Google API) doesn't unfairly sink the grade.
+    The discount to the regional median is the exception: a listing with no
+    benchmark earns 0 of its 25 rather than being graded without it.
 
     Components & weights:
       Financial (50): cap rate (25) + discount to the regional median (25)
@@ -1220,6 +1228,10 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
     """
     points = 0.0
     max_pts = 0.0
+    # A price below the sanity floor is a misread, not a bargain (classify()
+    # makes it WHITE): it earns no score, never the top of the ranking.
+    if below_sanity_floor(row.get("market_discount")):
+        return 0, "—"
 
     # ── Financial (yield + discount) ──
     # The self-funding ratio used to be the second half. It sits at 0.60–0.75
@@ -1231,10 +1243,14 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
         if cap is not None:
             points += max(0.0, min(cap / 0.06, 1.0)) * 25   # 6%+ cap = full marks
             max_pts += 25
+        # The discount's 25 always count. With no regional median (WHITE "no
+        # benchmark" — every Czech listing until a sale-price CSV fills the
+        # medians) it earns none of them: leaving it out of the maximum graded
+        # the flat on cap rate alone, above one that is cheap against its median.
+        max_pts += 25
         if discount is not None:
             # At or above the median → 0 pts, 30%+ below → full 25
             points += max(0.0, min(discount / 0.30, 1.0)) * 25
-            max_pts += 25
     else:
         return 0, "—"
 

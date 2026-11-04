@@ -90,7 +90,7 @@ class TestSoftFlagsAreStored:
         from tests.conftest import make_listing
         db.upsert_listing(make_listing("f1"))
         db.set_flat_lv("f1", "4321", "Nitra")
-        monkeypatch.setattr(debt_bot, "enrich_lv", lambda area, lv: {
+        monkeypatch.setattr(debt_bot, "enrich_lv", lambda area, lv, **kw: {
             "status": "OK", "detail": "",
             "lv_text": "ČASŤ C: ŤARCHY Vecné bremeno - právo uloženia plynovej prípojky"})
         monkeypatch.setattr(debt_bot, "claude_enabled", lambda: False)
@@ -100,7 +100,7 @@ class TestSoftFlagsAreStored:
         row = c.execute("SELECT lv_status, lv_soft_flags FROM listings WHERE id='f1'").fetchone()
         assert row["lv_status"] == "PASS" and "utility / access easement" in row["lv_soft_flags"]
         # The next check replaces it.
-        monkeypatch.setattr(debt_bot, "enrich_lv", lambda area, lv: {
+        monkeypatch.setattr(debt_bot, "enrich_lv", lambda area, lv, **kw: {
             "status": "OK", "detail": "", "lv_text": "ČASŤ C: ŤARCHY: Bez zápisu."})
         debt_bot.reverify("f1")
         row = c.execute("SELECT lv_soft_flags FROM listings WHERE id='f1'").fetchone()

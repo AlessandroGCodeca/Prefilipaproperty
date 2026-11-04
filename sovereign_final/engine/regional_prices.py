@@ -328,6 +328,34 @@ _BA_PART_NO_MEDIAN_BY_LENGTH = sorted(
     (p for p in _OKRES_OF_PART if p not in BA_DISTRICT_MEDIAN_PRICE_PER_M2),
     key=len, reverse=True)
 
+# A key counts only as a whole place name: "rača" is not in "Kračany", "modra"
+# not in "Modrany", and "Nitra nad Ipľom" or "Trnava pri Laborci" are other
+# villages, not Nitra or Trnava.
+_NAME_TAIL = r"(?!\w)(?!\s+(?:nad|pri|pod|na)\s)"
+# ... and a city's median is not its okolie's: "Košice-okolie" is the villages
+# around Košice (its kraj's median), not the city.
+_CITY_TAIL = _NAME_TAIL + r"(?!\s*[-–]?\s*okolie)"
+
+
+def _has_place(needle: str, key: str, tail: str = _NAME_TAIL) -> bool:
+    return re.search(rf"(?<!\w){re.escape(needle)}{tail}", key) is not None
+
+
+# Bratislava city parts named without "Bratislava": the unambiguous ones
+# (Petržalka, Vrakuňa, Rača, …) are Bratislava's; "Staré / Nové Mesto" also
+# name parts of Košice and other towns, so they still need "Bratislava".
+_GENERIC_BA_PARTS = {"staré mesto", "stare mesto", "nové mesto", "nove mesto"}
+
+
+def _names_non_ba_town(key: str) -> bool:
+    """True when the string names a non-Bratislava place besides any
+    Bratislava city part ("Dúbravka, Michalovce")."""
+    rest = key
+    for part in list(_BA_DISTRICT_KEYS_BY_LENGTH) + list(_BA_PART_NO_MEDIAN_BY_LENGTH):
+        rest = re.sub(rf"(?<!\w){re.escape(part)}(?!\w)", " ", rest)
+    return any(_DISTRICT_TO_KRAJ[n] != "BA" and _has_place(n, rest)
+               for n in _DISTRICT_KEYS_BY_LENGTH)
+
 
 def kraj_for_district(district: str, market: str = "sk") -> str | None:
     """Return the kraj code (BA/TT/...) for a district string, or None if
@@ -339,7 +367,7 @@ def kraj_for_district(district: str, market: str = "sk") -> str | None:
         return None
     key = district.lower()
     for needle in _DISTRICT_KEYS_BY_LENGTH:
-        if needle in key:
+        if _has_place(needle, key):
             return _DISTRICT_TO_KRAJ[needle]
     return None
 
@@ -360,19 +388,24 @@ def median_source(district: str, market: str = "sk") -> tuple[float | None, str]
     if not district:
         return None, ""
     key = district.lower()
+    ba = "bratislava" in key
 
-    if "bratislava" in key:
+    if ba or not _names_non_ba_town(key):
         for needle in _BA_DISTRICT_KEYS_BY_LENGTH:
-            if needle in key:
+            # With "Bratislava" named, as before; without, a whole word only.
+            if (needle in key if ba else
+                    needle not in _GENERIC_BA_PARTS and _has_place(needle, key)):
                 return (BA_DISTRICT_MEDIAN_PRICE_PER_M2[needle],
                         f"{_title(needle)}, Bratislava")
         for needle in _BA_PART_NO_MEDIAN_BY_LENGTH:
-            if re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", key):
+            if re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", key) \
+                    and (ba or needle not in _GENERIC_BA_PARTS):
                 okres = _OKRES_OF_PART[needle]
                 return (BA_OKRES_MEDIAN_PRICE_PER_M2[okres],
                         f"{_okres_label(okres)} "
                         f"({_title(_BA_PART_ASCII.get(needle, needle))} has no "
                         f"median of its own)")
+    if ba:
         m = _BA_OKRES_RE.search(key)
         if m:
             okres = m.group(1).upper()
@@ -382,13 +415,13 @@ def median_source(district: str, market: str = "sk") -> tuple[float | None, str]
             return BA_OKRES_MEDIAN_PRICE_PER_M2[okres], label
 
     for needle in _OKRES_TOWN_KEYS_BY_LENGTH:
-        if needle in key:
+        if _has_place(needle, key, _CITY_TAIL):
             town = OKRES_TOWN_FOR[needle]
             return (CITY_MEDIAN_PRICE_PER_M2[town],
                     f"{_title(town)} (okres town — no median for {_title(needle)})")
 
     for needle in _CITY_KEYS_BY_LENGTH:
-        if needle in key:
+        if _has_place(needle, key, _CITY_TAIL):
             where = ("Bratislava city-wide (no city part or okres named)"
                      if needle == "bratislava" else _title(needle))
             return CITY_MEDIAN_PRICE_PER_M2[needle], where

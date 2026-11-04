@@ -442,7 +442,9 @@ class TestEnrichPendingSettle:
         price, district = conn.execute(
             "SELECT price_eur, district FROM listings WHERE id='gone'").fetchone()
         conn.close()
-        assert price == 199_000.0 and district == "Bratislava"
+        # The city part keeps its city (audit 3 #2): the detail address is
+        # no longer cut to its last comma part.
+        assert price == 199_000.0 and district == "Petržalka, Bratislava"
 
     @pytest.mark.parametrize("argv,limit,dry", [
         ([], 200, False), (["600"], 600, False),

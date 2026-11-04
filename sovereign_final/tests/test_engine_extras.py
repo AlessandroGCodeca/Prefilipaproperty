@@ -126,10 +126,12 @@ class TestProjectIrr:
         assert res.cash_flows[0] == pytest.approx(-equity_in)
 
     def test_the_sro_puts_in_its_own_deposit(self):
-        # A company loan lends at most SRO_LTV_RATIO of the price.
-        from config import SRO_LTV_RATIO
+        # A company loan lends at most SRO_LTV_RATIO of the price, and the
+        # company is set up (SRO_SETUP_COST) before it buys.
+        from config import SRO_LTV_RATIO, SRO_SETUP_COST
         res = project_irr(120_000, 60, "Nitra", structure="SRO", ltv=0.8, hold_years=10)
-        equity_in = 120_000 * (1 - SRO_LTV_RATIO) + 120_000 * ACQUISITION_COST_RATE
+        equity_in = (120_000 * (1 - SRO_LTV_RATIO) + 120_000 * ACQUISITION_COST_RATE
+                     + SRO_SETUP_COST)
         assert res.cash_flows[0] == pytest.approx(-equity_in)
 
     def test_personal_sale_after_five_years_is_tax_free(self):

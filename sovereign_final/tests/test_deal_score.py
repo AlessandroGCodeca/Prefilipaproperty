@@ -102,9 +102,10 @@ class TestConditionComponent:
 
 
 def test_score_capped_at_100():
-    # Absurdly good inputs still clamp to 0–100 / grade A.
+    # Absurdly good inputs still clamp to 0–100 / grade A. (A discount past the
+    # sanity floor — over 50 % — is a misread price and scores nothing.)
     score, grade = compute_deal_score({
-        "cap_rate": 0.50, "market_discount": 0.90, "location_score": 100,
+        "cap_rate": 0.50, "market_discount": 0.45, "location_score": 100,
         "energy_class": "A0", "lv_status": "PASS",
     })
     assert 0 <= score <= 100 and grade == "A"

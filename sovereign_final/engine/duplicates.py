@@ -30,9 +30,17 @@ is never the primary; see database.mark_duplicates for what it does instead.
 
 from __future__ import annotations
 
+import re
+import unicodedata
+
 SIZE_TOLERANCE_M2   = 1.0
 SIZE_TOLERANCE_PCT  = 0.015
 PRICE_TOLERANCE_PCT = 0.03
+
+
+def _fold(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", text or "")
+                   if unicodedata.category(c) != "Mn").lower()
 
 
 def _same_size(a: float, b: float) -> bool:
@@ -82,7 +90,14 @@ def _location_key(row: dict) -> str:
             key = _BA_PART_TO_DISTRICT.get(key, key)
     else:
         key = match_rent_key(district, market=market)
-    if key == "default":
+        if key == "praha":
+            # Prague's rent key is the city's; its districts are apart.
+            m = re.search(r"praha\s*[-–]?\s*(\d{1,2})(?!\d)", _fold(district))
+            key = f"praha {m.group(1)}" if m else "raw:" + district.lower()
+    from engine.financial import rent_fallback_kind
+    if key == "default" or (not key.startswith("raw:")
+                            and rent_fallback_kind(key, market=market) == "kraj"):
+        # A town with only its kraj's rent is its own place, not its kraj.
         key = "raw:" + district.lower()
     return f"{market}:{key}"
 

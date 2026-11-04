@@ -46,6 +46,7 @@ from database import (
 )
 from scraper._http import get, make_session
 from scraper.cz_common import (
+    warmup_url,
     PortalBlocked, require_robots, robots_allows, listing_record, sale_price, energy_cz,
     is_excluded_cz, cleanup,
 )
@@ -253,7 +254,7 @@ def listing_from_advert(advert: dict, url: str, now: str | None = None) -> dict 
 def run(max_pages: int = 10) -> int:
     require_robots(SITEMAP_INDEX)
     log.info(f"🔍 Bezrealitky.cz (sitemap, up to {max_pages * DETAILS_PER_PAGE} pages)...")
-    session = make_session(BASE)
+    session = make_session(warmup_url(BASE))
     urls = walk_sitemap(session)
     if not urls:
         raise PortalBlocked("Bezrealitky.cz: the sitemap named no flats for sale — "

@@ -26,6 +26,7 @@ the cooperative's LV and the share-transfer terms are for a lawyer to read.
 from __future__ import annotations
 
 import re
+from datetime import date
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -35,14 +36,24 @@ from modules.lv_screen import fold
 NAHLIZENI_URL = "https://nahlizenidokn.cuzk.gov.cz/"
 _HINT = ("Paste the flat's výpis z LV (CzechPOINT or ČÚZK dálkový přístup) on its "
          "card to verify it.")
+# How old a výpis may be and still clear a title: anything entered since its
+# date (an exekuce, an insolvency) is not on it. The Slovak cadastre copy is
+# kept as long (kataster_scraper.CACHE_TTL_DAYS).
+MAX_VYPIS_AGE_DAYS = int(os.getenv("CZ_LV_MAX_VYPIS_AGE_DAYS", "30") or 30)
 # "Vlastnictví: družstevní", "družstevní byt", "(družstevní)", "členský podíl /
 # členská práva", "podíl v (bytovém) družstvu" — not "dříve družstevní", "z
 # družstevního do osobního", "není družstevní", nor a building an "bytové
 # družstvo" merely manages.
 _COOP_RE = re.compile(
     r"vlastnictvi\s*:?\s*druzstev|"
-    r"(?<!drive )(?<!puvodne )(?<!z )(?<!neni )(?<!\w)druzstevn\w*|"
+    r"(?<!drive )(?<!puvodne )(?<!z )(?<!neni )(?<!ne )(?<!nikoliv )(?<!nikoli )"
+    r"(?<!byvaly )(?<!ulice )(?<!ulici )(?<!ul\. )(?<!ul\.)(?<!\w)druzstevn\w*(?!\w)"
+    r"(?!\s+ochoz)(?!\s*\d)|"
     r"(?<!\w)clensk\w*\s+(?:prav|podil)\w*|podil\w*\s+v\s+(?:bytov\w*\s+)?druzstv")
+# The portals' own ownership field ("Vlastnictví: osobní"), which the
+# scrapers put first in the description, outranks the ad's free text — where
+# "Družstevní" may be the street.
+_OWNERSHIP_RE = re.compile(r"vlastnictvi\s*:\s*([a-z]+)")
 
 
 def _unverified(detail: str, **extra) -> dict:
@@ -51,7 +62,11 @@ def _unverified(detail: str, **extra) -> dict:
 
 def is_cooperative(description: str) -> bool:
     """True when the listing says the flat is held in a cooperative."""
-    return bool(_COOP_RE.search(fold(description or "")))
+    text = fold(description or "")
+    m = _OWNERSHIP_RE.search(text)
+    if m:
+        return m.group(1).startswith("druzstev")
+    return bool(_COOP_RE.search(text))
 
 
 def _ku_differs(stated: tuple[str, str] | None, card: str) -> bool:
@@ -70,7 +85,8 @@ def _ku_differs(stated: tuple[str, str] | None, card: str) -> bool:
     return card_name not in name and name not in card_name
 
 
-def check_text(lv_text: str, lv_number=None, cadastral_area: str = "") -> dict:
+def check_text(lv_text: str, lv_number=None, cadastral_area: str = "",
+               building_lv=None) -> dict:
     """The verdict on a pasted výpis z LV — modules/debt_bot._parse_lv with
     the Czech screen. A clean result needs part C to have been read whole: a
     text with no part C heading (page 1 of 2, or not a výpis at all), or one
@@ -78,8 +94,8 @@ def check_text(lv_text: str, lv_number=None, cadastral_area: str = "") -> dict:
     a blocking entry still REJECTs."""
     from modules.debt_bot import _parse_lv
     from modules.lv_screen_cz import (
-        screen_lv_cz, lv_number_in, unit_numbers, part_c_start, unrecognised_entries,
-        ku_in, _norm,
+        screen_lv_cz, lv_number_in, unit_numbers, part_c_start, parts_c_d_whole,
+        unrecognised_entries, ku_in, vypis_date, _norm,
     )
     lv_text = _norm(lv_text)
     stated = lv_number_in(lv_text)
@@ -96,12 +112,34 @@ def check_text(lv_text: str, lv_number=None, cadastral_area: str = "") -> dict:
     decision = _parse_lv(lv_text, screen=screen_lv_cz)
     units = unit_numbers(lv_text)
     label = f"LV {stated or wanted}" if (stated or wanted) else "The pasted LV"
+    # The building's (and its land's) LV, which the card names from the map
+    # pin, lists no unit: it never speaks for the flat, clean or not.
+    no = stated or wanted
+    if not units and no and building_lv and str(no) == str(building_lv).strip():
+        return _unverified(f"LV {no} is the building's and land's LV (part B lists no "
+                           f"Jednotka), not the flat's — a flat's own LV is its unit's. "
+                           f"{_HINT}")
     if decision["status"] == "PASS":
         if part_c_start(lv_text) is None:
             return _unverified(
                 f"{label}: the pasted text has no part C ('C Věcná práva zatěžující "
                 f"nemovitosti…'), so its encumbrances weren't read — paste the whole "
                 f"výpis, parts A to E. {_HINT}")
+        if not parts_c_d_whole(lv_text):
+            return _unverified(
+                f"{label}: the pasted text stops before part E ('E Nabývací tituly…'), "
+                f"so parts C–D may go on on a page that wasn't pasted — paste the whole "
+                f"výpis, parts A to E. {_HINT}")
+        if not units:
+            return _unverified(
+                f"{label}: part B lists no Jednotka, so this is not a flat's výpis (the "
+                f"building's or the land's LV?). {_HINT}")
+        as_of = vypis_date(lv_text)
+        if as_of and (date.today() - as_of).days > MAX_VYPIS_AGE_DAYS:
+            return _unverified(
+                f"{label}: the výpis shows the register as of {as_of:%d.%m.%Y} — anything "
+                f"entered since (an exekuce, an insolvency) is not on it. Paste a výpis no "
+                f"older than {MAX_VYPIS_AGE_DAYS} days. {_HINT}")
         unknown = unrecognised_entries(lv_text)
         if unknown:
             return _unverified(
@@ -119,6 +157,9 @@ def check_text(lv_text: str, lv_number=None, cadastral_area: str = "") -> dict:
             f"{decision['detail'].removeprefix('LV encumbrance: ')} — check part C "
             f"for this flat's unit before ruling it out.")
     decision["detail"] = f"{label}: {decision['detail']}"
+    as_of = vypis_date(lv_text)
+    if as_of:
+        decision["detail"] += f" (výpis as of {as_of:%d.%m.%Y})"
     decision["market"] = "cz"
     return decision
 
@@ -178,7 +219,8 @@ def check_listing(row: dict) -> dict:
     coop = is_cooperative(get_listing_description(row["id"])) or \
         bool(doc and owner_is_cooperative(doc))
     if doc:
-        result = check_text(doc, row.get("lv_number"), row.get("cadastral_area") or "")
+        result = check_text(doc, row.get("lv_number"), row.get("cadastral_area") or "",
+                            building_lv=row.get("plot_lv_number"))
         if coop:
             return _unverified(
                 "Cooperative flat (družstevní byt): no LV of its own — the pasted LV is "

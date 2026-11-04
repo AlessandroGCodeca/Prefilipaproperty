@@ -131,6 +131,16 @@ def _pattern(name: str) -> re.Pattern:
     return re.compile(rf"(?<!\w){re.escape(_words(name))}(?!\w)")
 
 
+_TOWN_U_NAMES = {"Benešov u Prahy": "Benešov"}
+
+
+def _town_pattern(name: str) -> re.Pattern:
+    """An okres town's name, not the start of another town's: "Benešov nad
+    Ploučnicí" (okres Děčín) is not Benešov, "Teplice nad Metují" not Teplice
+    (the town's own "Benešov u Prahy" is listed in _TOWN_U_NAMES)."""
+    return re.compile(rf"(?<!\w){re.escape(_words(name))}(?!\w)(?!\s+(?:nad|pod|u|ve?|na)\s+\w)")
+
+
 # An okres matches by its own name or its town's ("Plzeň-jih" → "plzen jih";
 # "Brno-město" also by "brno"). Longest first, so "Nový Jičín" beats "Jičín"
 # and "Praha-východ" beats Prague itself.
@@ -143,8 +153,12 @@ def _okres_needles() -> list[tuple[re.Pattern, str]]:
             needles.setdefault(_words(town), okres)
     needles["praha"] = "Hlavní město Praha"
     needles["prague"] = "Hlavní město Praha"
-    return [(_pattern(n), okres) for n, okres in
-            sorted(needles.items(), key=lambda kv: len(kv[0]), reverse=True)]
+    # An okres town's own "u" name: Benešov's post office is "Benešov u Prahy",
+    # which a Bazoš card's place keeps. Other "<town> u X" names stay villages.
+    for town, okres in _TOWN_U_NAMES.items():
+        needles.setdefault(_words(town), okres)
+    return [(_pattern(n) if n in ("praha", "prague") else _town_pattern(n), okres)
+            for n, okres in sorted(needles.items(), key=lambda kv: len(kv[0]), reverse=True)]
 
 
 _OKRES_NEEDLES = _okres_needles()
@@ -158,6 +172,12 @@ def okres_for_district(district: str) -> str | None:
     text = _words(district)
     if not text:
         return None
+    # "Benešov nad Ploučnicí, okres Děčín": the okres it names outright wins.
+    for m in re.finditer(r"(?<!\w)okr(?:es)?\s+", text):
+        tail = text[m.end():]
+        for rx, okres in _OKRES_NEEDLES:
+            if rx.match(tail):
+                return okres
     for rx, okres in _OKRES_NEEDLES:
         if rx.search(text):
             return okres
@@ -227,6 +247,9 @@ def benchmark_note(district: str, rooms=None) -> str:
 # ── Loading the medians ───────────────────────────────────────────────────────
 _TABLES = {"kraj": KRAJ_MEDIAN, "okres": OKRES_MEDIAN,
            "praha": PRAHA_DISTRICT_MEDIAN, "brno": BRNO_DISTRICT_MEDIAN}
+# A median outside the market's own backstops is a typo, not a price
+# (markets.CZ.blank_district_floor_m2 / blank_district_ceiling_m2).
+_MEDIAN_MIN, _MEDIAN_MAX = 13_900.0, 600_000.0
 
 
 def load_medians(path: str) -> int:
@@ -240,11 +263,14 @@ def load_medians(path: str) -> int:
         for row in csv.DictReader(f):
             level = (row.get("level") or "").strip().lower()
             name = (row.get("name") or "").strip()
-            try:
-                median = float((row.get("median_czk_m2") or "").replace(" ", "").replace(",", "."))
-            except ValueError:
-                median = 0.0
-            if level not in _TABLES or name not in known[level] or median <= 0:
+            # "117 223" (any space as the thousands mark) or "70 000,5" (a
+            # decimal comma). "62,500" — an English thousands comma — is no
+            # Czech number: skipped, never read as 62.5 Kč/m².
+            raw = re.sub(r"\s", "", row.get("median_czk_m2") or "")
+            median = float(raw.replace(",", ".")) if re.fullmatch(r"\d+(?:[,.]\d{1,2})?", raw) \
+                else 0.0
+            if level not in _TABLES or name not in known[level] \
+                    or not _MEDIAN_MIN <= median <= _MEDIAN_MAX:
                 log.warning(f"cz_regional_prices.csv: skipped {row}")
                 continue
             _TABLES[level][name] = median
