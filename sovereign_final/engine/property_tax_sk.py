@@ -21,11 +21,19 @@ city's highest. A place not in the table is taxed at the highest rate in it,
 1.35 €/m². That is not a legal ceiling (a municipality may set more), so such
 a listing's tax is UNVERIFIED. A 60 m² flat pays about €19–81 a year in the
 towns below, so the approximation hardly moves a cash flow.
+
+The table can be brought up to date from the towns' own sites with one click
+on the dashboard (modules/tax_rates, scraper/property_tax_rates). What that
+stores in the property_tax_rates table is used here on top of the table: a
+town not in it gets its scraped rate; a town in it gets a stored rate only
+from a later tax year than TABLE_YEAR (a new ordinance) or one the user
+accepted or uploaded. Towns rated by cadastral area keep the table's rates.
 """
 
 from __future__ import annotations
 
 import math
+import re
 import unicodedata
 
 from engine import regional_prices as rp
@@ -153,6 +161,136 @@ def _area_rate(city: str, key: str) -> tuple[float, str] | None:
             return areas[area], f"{rp._title(area)} cadastral area, {rp._title(_fold(city))}"
     return None
 
+# The tax year every rate above was checked for (SOURCE).
+TABLE_YEAR = 2026
+
+# Rated by cadastral area or pásmo: a stored rate never replaces these, since
+# it would have to be mapped to the areas by hand.
+ZONED = {"bratislava", "kosice", "zilina", "zilinska lehota", "dunajska streda"}
+
+
+def table_rates(town: str) -> list[float]:
+    """The flat rates the table above charges in `town` (several for a town
+    rated by area), [] for a town it doesn't have."""
+    key = _fold(town)
+    if key == "bratislava":
+        return sorted(set(BA_PART_RATE_PER_M2.values()))
+    rates = set(CITY_AREA_RATE_PER_M2.get(key, {}).values())
+    if key in CITY_RATE_PER_M2:
+        rates.add(CITY_RATE_PER_M2[key][0])
+    if key == "zilina":
+        rates.add(CITY_RATE_PER_M2["zilinska lehota"][0])
+    return sorted(rates)
+
+
+# ── Rates read from the towns' sites (modules/tax_rates) ──────────────────────
+_stored: dict[str, list[dict]] | None = None
+_names: list[tuple[str, str, str, str]] | None = None
+_names_of: object = None            # the stored rates _names was built with
+
+
+def town_key(name: str) -> str:
+    """A town's key in the stored rates: its folded name, and for one of
+    several municipalities sharing a name ("Porúbka (okres Žilina)") the
+    name and district: "porubka|zilina"."""
+    m = re.match(r"^(.*?)\s*\((?:okres\s+)?([^)]*)\)\s*$", name or "")
+    return f"{_fold(m.group(1))}|{_fold(m.group(2))}" if m else _fold(name)
+
+
+def _known_names() -> list[tuple[str, str, str, str]]:
+    """(name, district required or "", key, district) of every Slovak
+    municipality the rates know of, the longest name first — so "Spišská
+    Nová Ves" is found before the village "Nová Ves" inside it. A name
+    several share counts only with its district named beside it."""
+    global _names, _names_of
+    if _names is None or _names_of is not stored_rates():
+        _names_of = stored_rates()
+        names: dict[str, tuple[str, str, str, str]] = {}
+        try:
+            import database
+            conn = database.get_conn()
+            try:
+                if database._has_table(conn, "sk_municipalities"):
+                    for r in conn.execute("SELECT name, okres, key FROM sk_municipalities"):
+                        k = town_key(r["key"])
+                        okres = _fold(r["okres"] or "")
+                        names[k] = (_fold(r["name"]), okres if "|" in k else "", k, okres)
+            finally:
+                conn.close()
+        except Exception:
+            pass
+        for k in stored_rates():
+            if k not in names:
+                n, _, okres = k.partition("|")
+                names[k] = (n, okres, k, okres)
+        _names = sorted(names.values(), key=lambda t: -len(t[0]))
+    return _names
+
+
+def reload() -> None:
+    """Forget the stored rates read so far: the next lookup reads them again
+    (after an update, and at the start of each scoring run — the dashboard
+    and the scheduler are two processes)."""
+    global _stored, _names
+    _stored = None
+    _names = None
+
+
+def stored_rates() -> dict[str, list[dict]]:
+    """{town (folded): its stored rates, the latest tax year first}."""
+    global _stored
+    if _stored is None:
+        _stored = _load_stored()
+    return _stored
+
+
+def _load_stored() -> dict[str, list[dict]]:
+    try:
+        import database
+        conn = database.get_conn()
+    except Exception:
+        return {}
+    try:
+        if not database._has_table(conn, "property_tax_rates"):
+            return {}
+        rows = conn.execute(
+            "SELECT town, name, tax_year, rate, origin, source_url, document, saved_at "
+            "FROM property_tax_rates ORDER BY tax_year DESC, saved_at DESC").fetchall()
+    except Exception:
+        return {}
+    finally:
+        conn.close()
+    out: dict[str, list[dict]] = {}
+    for r in rows:
+        out.setdefault(r["town"], []).append(dict(r))
+    return out
+
+
+def _stored_rate(town: str, year: int, in_table: bool) -> tuple[float, str] | None:
+    """The stored rate in force in `town` in tax year `year`, if one should be
+    used: for a town in the table only a later year's than TABLE_YEAR or one
+    a user accepted or uploaded — the table was checked by hand for its year."""
+    for r in stored_rates().get(town, []):
+        if r["tax_year"] > year:
+            continue
+        if in_table and r["origin"] == "scraped" and r["tax_year"] <= TABLE_YEAR:
+            return None
+        doc = r["document"] or r["source_url"] or "its site"
+        how = {"scraped": "read from", "accepted": "accepted from",
+               "upload": "uploaded:"}.get(r["origin"], "from")
+        return r["rate"], f"{r['name']} — {how} {doc} ({(r['saved_at'] or '')[:10]})"
+    return None
+
+
+def _year() -> int:
+    try:
+        from config import TAX_YEAR
+        return int(TAX_YEAR)
+    except Exception:
+        from datetime import date
+        return date.today().year
+
+
 # A place the table doesn't know: the highest rate in it (see the docstring).
 UNKNOWN_PLACE_RATE_PER_M2 = max(
     [r for r, _ in CITY_RATE_PER_M2.values()] + list(BA_PART_RATE_PER_M2.values()))
@@ -205,11 +343,14 @@ SOURCE = {
 }
 
 
-def rate_source(district: str) -> tuple[float, str]:
-    """(€/m² a year for a flat in `district`, what the rate is). A Bratislava
-    city part is matched as engine.regional_prices matches it: with
-    "Bratislava" named, or alone when it is unambiguous ("Petržalka", not
-    "Staré Mesto", which Košice also has)."""
+def rate_source(district: str, year: int | None = None) -> tuple[float, str]:
+    """(€/m² a year for a flat in `district` in tax year `year` — default
+    config.TAX_YEAR —, what the rate is). A Bratislava city part is matched
+    as engine.regional_prices matches it: with "Bratislava" named, or alone
+    when it is unambiguous ("Petržalka", not "Staré Mesto", which Košice also
+    has). A stored rate read from a town's site comes before the table where
+    _stored_rate says so."""
+    year = year or _year()
     key = (district or "").lower()
     if key:
         ba = "bratislava" in key
@@ -224,16 +365,39 @@ def rate_source(district: str) -> tuple[float, str]:
                 okres = m.group(1).upper()
                 return (BA_OKRES_RATE_PER_M2[okres],
                         f"Bratislava {okres} — its dearest city part (none named)")
-        for city in _CITIES_BY_LENGTH:
-            if rp._has_place(city, key, rp._CITY_TAIL):
-                return _area_rate(city, key) or CITY_RATE_PER_M2[city]
+        city = next((c for c in _CITIES_BY_LENGTH if rp._has_place(c, key, rp._CITY_TAIL)), None)
+        stored = stored_rates()
+        if stored:
+            folded = _fold(key)
+            # The municipality the string names most fully ("Spišská Nová
+            # Ves", not the village "Nová Ves" in it). One only the stored
+            # rates know ("Šamorín") takes its rate; when the string also
+            # names a table city, the longer name wins, as among the table's
+            # own cities.
+            name, town, district = next(((n, k, d) for n, okres, k, d in _known_names()
+                                         if rp._has_place(n, folded, rp._CITY_TAIL)
+                                         and (not okres or okres in folded)), ("", None, ""))
+            # A table city in the string that is the municipality's own
+            # district ("Ruská, Michalovce") is where it lies, not the place.
+            if (town and town in stored and name not in CITY_RATE_PER_M2
+                    and (city is None or len(name) > len(_fold(city))
+                         or _fold(city) == district)):
+                hit = _stored_rate(town, year, in_table=False)
+                if hit:
+                    return hit
+            if city and _fold(city) not in ZONED:
+                hit = _stored_rate(_fold(city), year, in_table=True)
+                if hit:
+                    return hit
+        if city:
+            return _area_rate(city, key) or CITY_RATE_PER_M2[city]
     return (UNKNOWN_PLACE_RATE_PER_M2,
             "UNVERIFIED — place not in the table; its highest rate is used")
 
 
-def annual_tax(size_m2: float, district: str = "") -> float:
+def annual_tax(size_m2: float, district: str = "", year: int | None = None) -> float:
     """€ a year for a flat of `size_m2` m² in `district`: every started m²
     at the rate per m² (rate_source)."""
     if not size_m2 or size_m2 <= 0:
         return 0.0
-    return round(math.ceil(size_m2 - 1e-9) * rate_source(district)[0], 2)
+    return round(math.ceil(size_m2 - 1e-9) * rate_source(district, year)[0], 2)

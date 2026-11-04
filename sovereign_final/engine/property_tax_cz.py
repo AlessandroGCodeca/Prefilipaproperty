@@ -23,10 +23,17 @@ Where the tax comes from:
   * Prague and the 26 statutory cities, each per its 2026 ordinance
     (PRAHA_DISTRICTS, CITY_COEFFICIENTS); the other 105 towns over 10,000
     people per theirs (TOWN_COEFFICIENTS).
-  * Any other municipality: the size coefficient for its population (ČSÚ),
-    times CZ_PROPERTY_TAX_LOCAL_COEF (1.0, the law's when a municipality sets
-    none, unless set) — its own local coefficient is UNVERIFIED.
+  * Any other municipality: its coefficients as 🏛️ UPDATE TAX RATES read them
+    from its ordinances (modules/tax_rates_cz → the property_tax_cz table).
+    Until that has run, the size coefficient for its population (ČSÚ) times
+    CZ_PROPERTY_TAX_LOCAL_COEF (1.0, the law's when a municipality sets none,
+    unless set) — its own local coefficient is then UNVERIFIED.
   * A place that names no municipality: 3.5 × CZ_PROPERTY_TAX_LOCAL_COEF.
+
+The tables are a hand-checked reading of the ordinances in force for
+TABLE_YEAR, and they win for that year. For a later year a place in them
+takes the update's reading when that changed since TABLE_YEAR (a new
+ordinance, a population band crossed); otherwise the table still stands.
 
 engine/property_tax_cz_data.json (dev/build_cz_property_tax_data.py, from
 ČÚZK's RÚIAN and ČSÚ) supplies the populations and the geography: which city
@@ -45,8 +52,13 @@ import json
 import math
 import os
 import re
+import unicodedata
 
 from engine import regional_prices_cz as rpcz
+
+# The tax year PRAHA_DISTRICTS, CITY_COEFFICIENTS and TOWN_COEFFICIENTS were
+# read for.
+TABLE_YEAR = 2026
 
 # Kč per m² for a flat, § 11 odst. 1 písm. j).
 RATE_PER_M2 = 3.50
@@ -347,24 +359,27 @@ def _dearest(labels: list[str], pairs: dict[str, tuple[float, float]]) -> str:
     return max(labels, key=lambda lab: _pair_key(pairs[lab]))
 
 
-def _praha(text: str, district: str) -> tuple[float, float, str]:
+def _praha(text: str, district: str, pairs: dict[str, tuple[float, float]] = PRAHA_DISTRICTS,
+           how: str = "") -> tuple[float, float, str]:
+    """Prague's pair for the city part `text` names, from `pairs` (city part →
+    (size, local): PRAHA_DISTRICTS, or the update's reading for a later year)."""
     quarters = _hits(text, _PRAHA_NEEDLES)
     if quarters:
         parts = list(dict.fromkeys(p for q in quarters for p in _PRAHA_QUARTERS[q]))
-        best = _dearest(parts, PRAHA_DISTRICTS)
+        best = _dearest(parts, pairs)
         note = "" if len(parts) == 1 else f" (the dearest of {', '.join(parts)})"
-        return (*PRAHA_DISTRICTS[best], f"{', '.join(quarters)}, Praha — city part {best}{note}")
+        return (*pairs[best], f"{', '.join(quarters)}, Praha — city part {best}{note}{how}")
     part = rpcz.praha_district(district)
-    if part in PRAHA_DISTRICTS:
+    if part in pairs:
         parts = list(dict.fromkeys([part, *_PRAHA_POSTAL.get(part, [])]))
-        best = _dearest(parts, PRAHA_DISTRICTS)
+        best = _dearest(parts, pairs)
         if len(parts) == 1:
-            return (*PRAHA_DISTRICTS[part], part)
-        return (*PRAHA_DISTRICTS[best],
+            return (*pairs[part], part + how)
+        return (*pairs[best],
                 f"{part} — city part {part} or postal district {part}, the dearest of "
-                f"{', '.join(parts)} ({best})")
-    best = _dearest(list(PRAHA_DISTRICTS), PRAHA_DISTRICTS)
-    return (*PRAHA_DISTRICTS[best], "Praha — its dearest city part (none named)")
+                f"{', '.join(parts)} ({best}){how}")
+    best = _dearest(list(pairs), pairs)
+    return (*pairs[best], f"Praha — its dearest city part (none named){how}")
 
 
 class _Place:
@@ -372,8 +387,12 @@ class _Place:
     quarters (části obce) → the areas or districts holding their flats."""
 
     def __init__(self, name: str, size: float, local: float,
-                 areas: dict[str, tuple[float, float]], quarters: dict[str, list[str]]):
+                 areas: dict[str, tuple[float, float]], quarters: dict[str, list[str]],
+                 rest: tuple[float, float] | None = None):
+        # `pair` is charged where no area is named; `rest` (default: the
+        # same) where a quarter lies in an area the ordinance doesn't list.
         self.name, self.pair, self.areas = name, (size, local), areas
+        self.rest = rest or self.pair
         own = rpcz._words(name)
         self.own = rpcz._pattern(name)
         self.area_needles = _needles({a: a for a in areas})
@@ -394,7 +413,7 @@ class _Place:
         for rx, area in self.area_needles:
             if rx.search(words):
                 return self.areas[area]
-        return self.pair
+        return self.rest
 
     def coefficients(self, text: str) -> tuple[float, float, str]:
         # The place's own name isn't one of its quarters: "Frýdek-Místek"
@@ -487,14 +506,169 @@ def _municipality_hit(text: str) -> tuple[int, str] | None:
     return None
 
 
-def _town(name_words: str, district: str, text: str) -> tuple[float, float, str]:
+# ── What 🏛️ UPDATE TAX RATES read (modules/tax_rates_cz) ──────────────────────
+_stored: dict | None = None
+
+
+def _fold(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", text or "")
+                   if unicodedata.category(c) != "Mn").lower()
+
+
+def reload() -> None:
+    """Forget the stored coefficients: the next lookup reads them again."""
+    global _stored
+    _stored = None
+
+
+def _load() -> dict:
+    """{"places": {code: {"name", "okres", "population", "years": {year:
+    (size, local, sources)}}}} from the property_tax_cz table, or {}. `size`
+    and `local` map "" (the municipality) and any area that differs to its
+    coefficient; `okres` is set only where municipalities share a name."""
+    try:
+        import database
+        conn = database.get_conn()
+    except Exception:
+        return {}
+    try:
+        if not database._has_table(conn, "property_tax_cz"):
+            return {}
+        rows = conn.execute("SELECT code, tax_year, name, okres, population, size, local, "
+                            "sources FROM property_tax_cz").fetchall()
+    except Exception:
+        return {}
+    finally:
+        conn.close()
+    places: dict[str, dict] = {}
+    for r in rows:
+        p = places.setdefault(r["code"], {"name": r["name"], "okres": r["okres"] or "",
+                                          "population": r["population"] or 0, "years": {}})
+        p["years"][r["tax_year"]] = (json.loads(r["size"]), json.loads(r["local"]),
+                                     json.loads(r["sources"] or "[]"))
+    return {"places": places} if places else {}
+
+
+def stored() -> dict:
+    global _stored
+    if _stored is None:
+        _stored = _load()
+    return _stored
+
+
+def _year() -> int:
+    try:
+        from config import TAX_YEAR
+        return int(TAX_YEAR)
+    except Exception:
+        from datetime import date
+        return date.today().year
+
+
+def _stored_place(data: dict, name: str, okres: str | None = None) -> dict | None:
+    """The update's record for municipality `name`: in `okres` where several
+    share the name, else the most populous of that name (a statutory city,
+    not its namesake village)."""
+    index = data.get("_by_name")
+    if index is None:
+        index = {}
+        for p in data.get("places", {}).values():
+            index.setdefault(rpcz._words(p["name"]), []).append(p)
+        data["_by_name"] = index
+    found = index.get(rpcz._words(name), [])
+    if okres is not None:
+        found = [p for p in found if not p.get("okres") or p["okres"] == okres]
+    return max(found, key=lambda p: p.get("population") or 0) if found else None
+
+
+def _reading_year(place: dict | None, year: int, table: bool) -> int | None:
+    """The year of `place`'s reading in force for `year` (the latest read for
+    it or before), or None. For a place in the hand-checked tables, only a
+    reading after TABLE_YEAR that differs from the same reading for
+    TABLE_YEAR counts — a new ordinance or a population band crossed;
+    otherwise the table's reading of the same ordinances stands (as it does
+    when TABLE_YEAR wasn't read: there is nothing to tell a change by)."""
+    if not place:
+        return None
+    have = [y for y in place["years"] if y <= year]
+    if not have:
+        return None
+    y = max(have)
+    if table:
+        base = place["years"].get(TABLE_YEAR)
+        if y <= TABLE_YEAR or base is None or base[:2] == place["years"][y][:2]:
+            return None
+    return y
+
+
+def _how(place: dict, y: int) -> str:
+    sources = place["years"][y][2]
+    what = "; ".join(sources) if sources else "no ordinance: the act's defaults"
+    return f" ({what}; read by 🏛️ UPDATE TAX RATES for {y})"
+
+
+def _read_place(data: dict, place: dict, y: int) -> _Place:
+    """`place`'s reading for `y` as a _Place. Named nowhere, it pays its own
+    area's pair (Pelhřimov's k.ú. Pelhřimov), its highest where it is rated
+    by city part ("Brno-střed"), else the rest of the municipality's — the
+    areas an ordinance lists apart are mostly outlying villages."""
+    cache = data.setdefault("_places", {})
+    key = (id(place), y)
+    if key not in cache:
+        size, local, _ = place["years"][y]
+        rest = (size[""], local[""])
+        areas = {a: (size.get(a, rest[0]), local.get(a, rest[1]))
+                 for a in (set(size) | set(local)) - {""}}
+        own_words = rpcz._words(place["name"])
+        mine = [a for a in areas if rpcz._words(a) == own_words]
+        if mine:
+            own = areas[mine[0]]
+        elif any(rpcz._words(a).startswith(own_words + " ") for a in areas):
+            own = max([rest, *areas.values()], key=_pair_key)
+        else:
+            own = rest
+        cache[key] = _Place(place["name"], *own, areas,
+                            _CITY_QUARTERS.get(place["name"], {}), rest=rest)
+    return cache[key]
+
+
+def _praha_pairs(place: dict, y: int) -> dict[str, tuple[float, float]]:
+    """Prague's city parts → (size, local) as the update read them for `y`."""
+    size, local, _ = place["years"][y]
+    keys = {rpcz._words(k): k for k in (set(size) | set(local)) - {""}}
+    pairs = {}
+    for part in PRAHA_DISTRICTS:
+        w = rpcz._words(part)
+        k = keys.get(w) or keys.get("praha " + w)
+        pairs[part] = (size.get(k, size[""]), local.get(k, local[""])) if k else (size[""], local[""])
+    return pairs
+
+
+def in_tables(name: str, okres: str = "") -> bool:
+    """Whether municipality `name` (in `okres`) is charged from the
+    hand-checked tables for TABLE_YEAR."""
+    if name == "Praha":
+        return True
+    if name in CITY_COEFFICIENTS:                  # not its namesake village elsewhere
+        return not okres or okres == _CITY_OKRES.get(name, okres)
+    return (name, okres) in TOWN_COEFFICIENTS
+
+
+def _town(name_words: str, district: str, text: str, data: dict,
+          year: int) -> tuple[float, float, str]:
     rows = _MUNICIPALITIES[name_words]
     if len(rows) > 1:
         okres = rpcz.okres_for_district(district)
         rows = [r for r in rows if r[1] == okres] or rows
     results = []
     for name, okres, pop in rows:
-        if (name, okres) in _TOWN_PLACES:
+        in_table = (name, okres) in _TOWN_PLACES
+        place = _stored_place(data, name, okres) if data else None
+        y = _reading_year(place, year, in_table)
+        if y is not None:
+            size, local, where = _read_place(data, place, y).coefficients(text)
+            results.append((size, local, f"{where} (okres {okres}){_how(place, y)}"))
+        elif in_table:
             size, local, where = _TOWN_PLACES[(name, okres)].coefficients(text)
             acts = TOWN_COEFFICIENTS[(name, okres)][3]
             results.append((size, local, f"{where} (okres {okres}; OZV {acts})"))
@@ -510,37 +684,59 @@ def _town(name_words: str, district: str, text: str) -> tuple[float, float, str]
     return size, local, where
 
 
-@functools.lru_cache(maxsize=4096)
-def coefficients(district: str) -> tuple[float, float, str]:
+def coefficients(district: str, year: int | None = None) -> tuple[float, float, str]:
     """(size coefficient, local coefficient, where they come from) for a flat
-    in `district`."""
-    text = rpcz._words(district or "")
+    in `district` in tax year `year` (default config.TAX_YEAR)."""
+    data = stored()
+    token = data.setdefault("_token", object()) if data.get("places") else None
+    return _coefficients(district or "", year or _year(), token)
+
+
+@functools.lru_cache(maxsize=8192)
+def _coefficients(district: str, year: int, token) -> tuple[float, float, str]:
+    # `token` names the stored reading the result was worked out from, so a
+    # reload is never answered from the cache.
+    data = stored() if token is not None else {}
+    text = rpcz._words(district)
     if _PRAHA_RE.search(text):
-        return _praha(text, district or "")
-    city = _city_hit(text, district or "")
+        place = _stored_place(data, "Praha") if data else None
+        y = _reading_year(place, year, True)
+        if y is not None:
+            return _praha(text, district, _praha_pairs(place, y), _how(place, y))
+        return _praha(text, district)
+    city = _city_hit(text, district)
     town = _municipality_hit(text)
     # "Orlová - Lutyně, Karviná": the town named first, unless it is a part
     # of the city ("Nová Ves, Ostrava").
     if city and town and town[0] < city[0] and not _hits(town[1], _CITY_PLACES[city[1]].needles):
         city = None
     if city:
+        place = _stored_place(data, city[1]) if data else None
+        y = _reading_year(place, year, True)
+        if y is not None:
+            size, local, where = _read_place(data, place, y).coefficients(text)
+            return size, local, where + _how(place, y)
         return _CITY_PLACES[city[1]].coefficients(text)
     if town:
-        return _town(town[1], district or "", text)
+        return _town(town[1], district, text, data, year)
     return (UNKNOWN_PLACE_COEFFICIENT, LOCAL_COEFFICIENT,
             "UNVERIFIED — no municipality named; 3.5 and CZ_PROPERTY_TAX_LOCAL_COEF")
 
 
-def size_coefficient(district: str) -> float:
-    return coefficients(district)[0]
+coefficients.cache_clear = _coefficients.cache_clear
 
 
-def annual_tax(size_m2: float, district: str = "") -> float:
-    """Kč a year for a flat of `size_m2` m² in `district`, rounded as § 11d
-    rounds: the base up to a whole m², each product up to a whole crown."""
+def size_coefficient(district: str, year: int | None = None) -> float:
+    return coefficients(district, year)[0]
+
+
+def annual_tax(size_m2: float, district: str = "", year: int | None = None) -> float:
+    """Kč a year for a flat of `size_m2` m² in `district` in tax year `year`,
+    rounded as § 11d rounds: the base up to a whole m², each product up to a
+    whole crown."""
     if not size_m2 or size_m2 <= 0:
         return 0.0
-    size, local, _ = coefficients(district)
+    size, local, _ = coefficients(district, year)
     base = math.ceil(size_m2 * UNIT_COEFFICIENT - 1e-9)
     tax = math.ceil(base * RATE_PER_M2 * size - 1e-9)
     tax = math.ceil(tax * INFLATION_COEFFICIENT - 1e-9)
@@ -572,7 +768,10 @@ SOURCE = {
         "in force on 1.1.2026). Prague quarters and postal districts, Ostrava "
         "quarters and the cadastral areas of quarters in cities rated by area from "
         "ČÚZK RÚIAN (31.10.2026), a place under 10% of the addresses or flats left "
-        "out. UNVERIFIED: the local coefficient of any other municipality "
+        "out. Every other municipality, and a table place whose reading changed "
+        "after 2026: 🏛️ UPDATE TAX RATES reads its ordinances in sbirkapp.gov.cz, "
+        "its population from ČSÚ and its IČO from ARES. UNVERIFIED until that has "
+        "run: the local coefficient of any other municipality "
         "(CZ_PROPERTY_TAX_LOCAL_COEF, 1.0 unless set, is used); a place that names "
         "no municipality (3.5 is used)."),
     "checked": "2026-11-04 (sbirkapp.gov.cz, zakonyprolidi.cz, csu.gov.cz, vdp.cuzk.gov.cz)",
