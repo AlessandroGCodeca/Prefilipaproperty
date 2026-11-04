@@ -10,6 +10,7 @@ currency, and a Czech card is labelled in Czech.
 """
 
 import logging
+import math
 import os, re, sys
 from html import escape as _html_escape
 import streamlit as st
@@ -2820,8 +2821,9 @@ def _tax_rates_tab_cz():
     if not last:
         st.caption("Not read yet: 🏛️ UPDATE TAX RATES reads every Czech municipality's "
                    "coefficients (a few minutes the first time, about a minute after that). "
-                   "Until then every place outside Prague is taxed at the 3.5 size coefficient "
-                   "and local coefficient 1.0.")
+                   "Until then Prague, the statutory cities and the 105 other towns over 10,000 "
+                   "pay their hand-checked 2026 figures, and every other municipality the size "
+                   "coefficient for its population and local coefficient 1.0.")
         if st.button("🏛️ UPDATE TAX RATES", key="tax_update_tab_cz", type="primary",
                      disabled=jobs.running()):
             _why = jobs.start("TAX RATES", _tax_step)
@@ -2837,7 +2839,9 @@ def _tax_rates_tab_cz():
                f"coefficients by ordinance for {_tax_year()}"
                + (f" ({ahead:,} more from {_tax_year() + 1}, already published)" if ahead > 0 else "")
                + "; the others pay the act's: the size coefficient by "
-               f"population (1.0–3.5, Prague 4.5) and local 1.0. A flat pays floor area × 1.22 × "
+               f"population (1.0–3.5, Prague 4.5) and local 1.0. Prague, the statutory cities and "
+               f"the 105 other towns over 10,000 pay their hand-checked {ptc.TABLE_YEAR} figures, "
+               f"and a later year's reading only where it changed. A flat pays floor area × 1.22 × "
                f"{ptc.RATE_PER_M2:.2f} Kč × size × local.")
     place = st.text_input("Look up a place, as a listing names it", key="tax_cz_lookup",
                           placeholder="Praha 3, Brno-střed, Olomouc …")
@@ -2855,8 +2859,13 @@ def _tax_rates_tab_cz():
             "Population": r["population"],
             "Size": main_size, "Local": main_local,
             "By area": (f"{len(parts)} areas differ" if parts else ""),
-            "60 m² a year, Kč": round(60 * ptc.UNIT_COEFFICIENT * ptc.RATE_PER_M2
-                                      * main_size * main_local),
+            # 60 m² × 1.22 → 74 m², each product rounded up to a crown (§ 11d).
+            "60 m² a year, Kč": math.ceil(math.ceil(74 * ptc.RATE_PER_M2 * main_size - 1e-9)
+                                          * main_local - 1e-9),
+            "Charged": ("this reading" if not ptc.in_tables(r["name"], r["okres"])
+                        else "the hand-checked table" if _tax_year() <= ptc.TABLE_YEAR
+                        else "the table, unless this reading changed since "
+                             f"{ptc.TABLE_YEAR}"),
             "Ordinances": "; ".join(r["sources"]),
         })
     st.dataframe(pd.DataFrame(table), hide_index=True, width="stretch", height=420,

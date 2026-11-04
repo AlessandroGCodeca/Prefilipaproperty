@@ -141,7 +141,7 @@ before; Czechia is added next to it.
 | Flood | ÚÚR national map, VÚV T. G. M. Q100 flood areas (indicative) | `modules/risk_data_cz.py` |
 | Noise | OpenStreetMap proxy + 2022 strategic noise map of main roads (MZ ČR) | ≥65 dB flags the flat |
 | Place names | RÚIAN okres names, Prague 1–22, Brno's districts; Czech locatives ("v Praze 2", "ve Zlíně"); every obec when `data/cz_obce.csv` (a RÚIAN export) is present | `scraper/czech_cases.py` |
-| Tax, mortgage, costs | ZDP 2026, ČNB limits (LTV 80 % / 70 % for investment mortgages from 1 Apr 2026), Swiss Life Hypoindex rate, SVJ fond oprav, daň z nemovitých věcí, katastr fee | `markets.py`, each with its source and date |
+| Tax, mortgage, costs | ZDP 2026, ČNB limits (LTV 80 % / 70 % for investment mortgages from 1 Apr 2026), Swiss Life Hypoindex rate, SVJ fond oprav, daň z nemovitých věcí (zákon 338/1992 Sb.; the coefficients of Prague, the 26 statutory cities and the 105 other towns over 10,000 people from their 2026 ordinances in sbirkapp.gov.cz; every municipality's size coefficient from its population, ČSÚ 1.1.2025; Prague quarters and postal districts, Ostrava quarters and city quarters' cadastral areas from ČÚZK RÚIAN — `dev/build_cz_property_tax_data.py` rebuilds `engine/property_tax_cz_data.json`), katastr fee | `markets.py`, `engine/property_tax_cz.py`, each with its source and date |
 | Contract | a Czech **kupní smlouva NÁVRH** for a Czech advokát or notář to review — not legal advice | `modules/contract_draft_cz.py` |
 
 No Czech host could be reached from the container this was built in. Every
@@ -156,7 +156,7 @@ named here override them.
 
 1. Czech sale-price medians: none (table empty); the rooms multiplier for them is 1.0.
 2. Deloitte Rent Index: whether its figures are asking or achieved rents.
-3. Property tax: until 🏛️ UPDATE TAX RATES has read the Czech coefficients (see "Czech property tax" below), each municipality's local coefficient (1.0, `CZ_PROPERTY_TAX_LOCAL_COEF`) and the size coefficient outside Prague (3.5, the upper bound); after it, a municipality whose ordinance couldn't be read (an old .doc file or a scan, listed on the TAX RATES tab) or whose name several share with none of their districts named.
+3. Property tax in a Czech municipality outside the hand-checked tables (Prague, the statutory cities and the 105 other towns over 10,000, read from their 2026 ordinances: `engine/property_tax_cz.SOURCE`): its size coefficient follows its population, and its local coefficient is 1.0 (the law's when a municipality sets none, or `CZ_PROPERTY_TAX_LOCAL_COEF`) until 🏛️ UPDATE TAX RATES has read its ordinances (see "Czech property tax" below) — and after it where an ordinance couldn't be read (an old .doc file or a scan, listed on the TAX RATES tab) or was misread. A place that names no municipality is taxed at 3.5.
 4. Personal tax: whether an SVJ fond oprav payment is deductible when paid (modelled) or only when spent; the 40 mil. Kč cap on an exempt sale (not modelled).
 5. Lending: a ČNB stress add-on (the engine's +2 pp is used).
 6. SVJ správa fee per flat (0, `CZ_SVJ_SPRAVA_PER_UNIT`); fond oprav 20 Kč/m² (`CZ_SVJ_FOND_OPRAV_PER_M2`).
@@ -610,7 +610,14 @@ chosen cadastral areas or city parts (§ 11 odst. 5). The local coefficient
 (0.5–5.0, § 12) is 1.0 unless an ordinance sets it — for the whole
 municipality, a cadastral area or city part, or the group of flats.
 
-🏛️ UPDATE TAX RATES reads both for all 6,258 municipalities
+Prague, the 26 statutory cities and the 105 other towns over 10,000 people
+are charged from hand-checked tables of their ordinances in force for 2026
+(`PRAHA_DISTRICTS`, `CITY_COEFFICIENTS`, `TOWN_COEFFICIENTS`), with ČÚZK's
+RÚIAN telling which city part or cadastral area a quarter lies in ("Praha 9 -
+Černý Most" is city part Praha 14). Every other municipality's size
+coefficient follows its population (`engine/property_tax_cz_data.json`).
+
+🏛️ UPDATE TAX RATES reads both coefficients for all 6,258 municipalities
 (`modules/tax_rates_cz`, `scraper/tax_coefficients_cz`):
 
 - the population of every municipality from the Czech Statistical Office's
@@ -625,20 +632,30 @@ It combines them as the act says: an ordinance counts for a tax year only if
 it was published by 1 October before it and is in effect on 1 January (§ 16a);
 a repealed one stops counting; an amendment's new annex replaces its
 ordinance's; the group of flats or an area replaces the municipality's own
-coefficient, and the higher of group and area counts (§ 12 odst. 5–8). A
-listing is charged its city part's or area's coefficients where it names one
-("Praha 3": size 5 × local 2 — 2,562 Kč a year on 60 m², against 1,729 Kč in
+coefficient, and the higher of group and area counts (§ 12 odst. 5–8).
+
+How the engine uses what it read:
+
+| Place | 2026 | A later year |
+|--|--|--|
+| In the hand-checked tables | the table | the reading, if it differs from the same reading for 2026 (a new ordinance, a population band crossed); otherwise the table |
+| Any other municipality | the reading | the reading |
+| Not read yet | the size coefficient by population × local 1.0 (UNVERIFIED) | the same |
+
+A listing is charged its city part's or area's coefficients where it names one
+("Praha 3": size 5 × local 2 — 2,590 Kč a year on 60 m², against 1,749 Kč in
 Praha 2), its city's highest where it names none, and a municipality whose
-name several share only with its district named.
+name several share by its district (the dearest of them where none is named).
 
 The first run (3½ minutes; about a minute after that) read 2,147 ordinances of
 1,775 municipalities — 772 set coefficients for 2026, the rest from 2027. 231
 couldn't be read (an old .doc file or a scan); the tab lists them with links,
 and those municipalities pay the act's figures. An ordinance from before 2021
-that was never put in the collection isn't seen either. Nothing waits for
-review here: the figures come from the state's own collection in the Interior
-Ministry's model wording, and a flat's Czech property tax is a few thousand
-crowns a year at most.
+that was never put in the collection isn't seen either. Checked against the
+hand-checked tables, the reading gave the same coefficients for 101 of their
+132 places. Where it read an ordinance, it was right for 63 of 73. Of the
+other 31, most missed an ordinance's coefficients and fell back to the act's.
+Against the act's local 1.0, it came closer to the table in 61 places, further in 2.
 
 Each figure was read from the act and the city's own ordinance or tax page in
 November 2026; `property_tax_sk.SOURCE` names each document. Prešov's comes

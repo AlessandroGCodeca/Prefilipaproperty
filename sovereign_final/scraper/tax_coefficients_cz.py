@@ -78,7 +78,9 @@ def size_coefficient(name: str, population: int | None) -> float:
     key = fold(name)
     if key in ("praha", "hlavni mesto praha"):
         return 4.5
-    if key in STATUTORY or key in SPA_TOWNS:
+    # A namesake village isn't the statutory city: Kladno in okres Chrudim has
+    # 232 people (every statutory city has well over 20,000).
+    if key in SPA_TOWNS or (key in STATUTORY and (population is None or population > 20_000)):
         return 3.5
     if population is None:
         return 3.5

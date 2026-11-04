@@ -86,7 +86,10 @@ def update(progress=None, year: int | None = None, sources: Sources | None = Non
      "unreadable", "changed": [(name, before, after)], "requeued"}."""
     year = year or _year()
     src = sources or Sources()
-    years = (year, year + 1)
+    # The engine's hand-checked tables are for TABLE_YEAR: reading that year
+    # too shows whether a later year's reading differs from it.
+    from engine.property_tax_cz import TABLE_YEAR
+    years = tuple(sorted({min(year, TABLE_YEAR), year, year + 1}))
     note = (lambda i, n, what: progress(i, n, note=what)) if progress else (lambda *a: None)
 
     # 1. Population, for the size coefficient (§ 12f: 1 January of Y − 1).

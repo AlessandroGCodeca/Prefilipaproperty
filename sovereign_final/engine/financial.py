@@ -70,7 +70,7 @@ def _need(value, what: str, market, where: str = "markets.py"):
 # the room-adjusted benchmark, the rent fallbacks). A stored score from an
 # older model is redone on the next scoring run
 # (database.requeue_scores_from_older_model).
-SCORING_MODEL_VERSION = 5   # 5: Košice and Žilina property tax by cadastral area
+SCORING_MODEL_VERSION = 5   # 5: property tax by area in Košice and Žilina; Czech coefficients by city, town and population
 
 
 @dataclass

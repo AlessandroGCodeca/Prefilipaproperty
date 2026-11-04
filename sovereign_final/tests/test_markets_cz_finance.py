@@ -3,6 +3,7 @@ figures the engine scores a Czech listing with, and that they never reach a
 Slovak one."""
 
 import dataclasses
+import math
 
 import pytest
 
@@ -102,8 +103,10 @@ class TestLending:
 
 class TestCosts:
     def test_property_tax_is_per_m2(self):
-        assert ptax.annual_tax(60, "Praha 2") == pytest.approx(60 * 1.22 * 3.5 * 4.5)
-        assert ptax.annual_tax(60, "Brno-střed") == pytest.approx(60 * 1.22 * 3.5 * 3.5)
+        # 60 m² × 1.22 → 74 m²; × 3.50 Kč × the size coefficient, rounded up;
+        # × the local coefficient, rounded up (Praha 2: 4.5 and 1.5; Brno: 3.5, none).
+        assert ptax.annual_tax(60, "Praha 2") == math.ceil(math.ceil(74 * 3.5 * 4.5) * 1.5)
+        assert ptax.annual_tax(60, "Brno-střed") == math.ceil(74 * 3.5 * 3.5)
         assert ptax.annual_tax(0, "Praha") == 0
         assert fin.property_tax_annual(9_999_999, 60, "Praha 2", market="cz") == \
             ptax.annual_tax(60, "Praha 2")          # not a share of the price

@@ -7,6 +7,7 @@ November 2026 (the municipality is named), including the split words and
 numbers a Word file leaves ("m ístní", "2 , 6", "č. 11/20 2 4").
 """
 
+import math
 from datetime import date
 
 import pytest
@@ -22,6 +23,7 @@ from tests.conftest import make_listing
     ("Beroun", 20_000, 2.0), ("Kolín", 33_000, 2.5), ("Třinec", 34_000, 3.5),   # statutory
     ("Luhačovice", 5_000, 3.5),                                                 # spa town
     ("Brno", 404_296, 3.5), ("Praha", 1_397_880, 4.5),
+    ("Kladno", 69_664, 3.5), ("Kladno", 232, 1.0),          # the city, its namesake village
     ("Obec", 1_000, 1.0), ("Obec", 1_001, 1.4),                                 # "do 1000"
 ])
 def test_the_size_coefficient_follows_the_act(name, population, coef):
@@ -200,86 +202,121 @@ def test_no_ordinance_leaves_the_acts_figures():
 
 
 # ── The engine ────────────────────────────────────────────────────────────────
-def place(name, okres, size, local, sources=("1/2024 (from 2025)",)):
-    return {"name": name, "okres": okres,
-            "years": {2026: (size, local, list(sources))}}
+# Prague, the statutory cities and the 105 towns over 10,000 are in the
+# engine's hand-checked tables; Hostivice (9,179 people), Lhota and Krakov are
+# not.
+def place(name, okres, size, local, sources=("1/2024 (from 2025)",), years=(2026,),
+          population=1_000):
+    return {"name": name, "okres": okres, "population": population,
+            "years": {y: (size, local, list(sources)) for y in years}}
 
 
 def stored(*places):
-    data = {"places": {str(i): p for i, p in enumerate(places)}}
-    count = {}
-    for p in places:
-        count[ptc._fold(p["name"])] = count.get(ptc._fold(p["name"]), 0) + 1
-    data["names"] = sorted(((ptc._fold(p["name"]),
-                             ptc._fold(p["okres"]) if count[ptc._fold(p["name"])] > 1 else "",
-                             str(i)) for i, p in enumerate(places)), key=lambda t: -len(t[0]))
-    return data
+    return {"places": {str(i): p for i, p in enumerate(places)}}
 
 
 @pytest.fixture
-def cities(monkeypatch):
+def read(monkeypatch):
     c = cz.coefficients("Praha", 1_397_880, prague(), 2026)
     monkeypatch.setattr(ptc, "_stored", stored(
-        place("Praha", "Praha", c.size, c.local),
-        place("Olomouc", "Olomouc", {"": 3.5}, {"": 2.0}),
-        place("Pelhřimov", "Pelhřimov", {"": 2.0}, {"": 1.0, "bitetice": 0.8}),
-        place("Lhota", "Plzeň-jih", {"": 1.0}, {"": 1.5}),
-        place("Lhota", "Kladno", {"": 1.0}, {"": 3.0}),
-        place("Brno", "Brno-město", {"": 3.5}, {"": 1.0}, sources=())))
+        place("Praha", "Praha", c.size, c.local, years=(2026, 2027), population=1_397_880),
+        # The reading missed Olomouc's ordinance, in both years.
+        place("Olomouc", "Olomouc", {"": 3.5}, {"": 1.0}, sources=(), years=(2026, 2027),
+              population=101_000),
+        place("Hostivice", "Praha-západ", {"": 1.6}, {"": 2.1, "litovice": 1.5},
+              population=9_179),
+        place("Lhota", "Kladno", {"": 1.0}, {"": 3.0}, population=661),
+        place("Lhota", "Přerov", {"": 1.0}, {"": 1.0}, population=346)))
+    return c
 
 
-def test_a_city_part_is_charged_its_own_coefficients(cities):
+def test_the_hand_checked_table_wins_for_its_year(read):
+    assert ptc.coefficients("Olomouc", 2026)[:2] == (3.5, 2.0)      # not the reading's 1.0
     assert ptc.coefficients("Praha 3", 2026)[:2] == (5.0, 2.0)
-    assert ptc.coefficients("Praha 2 - Vinohrady", 2026)[:2] == (4.5, 1.5)
-    assert ptc.annual_tax(60, "Praha 3", 2026) == round(60 * 1.22 * 3.5 * 5 * 2, 2)
+    assert "UPDATE TAX RATES" not in ptc.coefficients("Praha 3", 2026)[2]
 
 
-def test_praha_10_is_not_praha_1(monkeypatch):
+def test_a_later_reading_the_same_as_the_tables_year_leaves_the_table(read):
+    # The same ordinances read the same way: the table's reading of them stands.
+    assert ptc.coefficients("Olomouc", 2027)[:2] == (3.5, 2.0)
+    assert ptc.coefficients("Praha 8", 2027)[:2] == (5.0, 1.7)
+
+
+def test_a_later_reading_that_changed_replaces_the_table(read, monkeypatch):
+    local = {**read.local, "": 1.8}                    # a new ordinance from 2027
     monkeypatch.setattr(ptc, "_stored", stored(
-        place("Praha", "Praha", {"": 4.5, "praha 1": 5.0, "praha 10": 4.5}, {"": 1.5})))
-    assert ptc.coefficients("Praha 10", 2026)[:2] == (4.5, 1.5)
-    assert ptc.coefficients("Praha 1", 2026)[:2] == (5.0, 1.5)
+        {"name": "Praha", "okres": "Praha", "population": 1_397_880,
+         "years": {2026: (read.size, read.local, ["11/2024 (from 2025)"]),
+                   2027: (read.size, local, ["11/2024 (from 2025)", "5/2026 (from 2027)"])}}))
+    size, local_2, why = ptc.coefficients("Praha 2", 2027)
+    assert (size, local_2) == (4.5, 1.8) and "5/2026 (from 2027)" in why
+    assert ptc.coefficients("Praha 3", 2027)[:2] == (5.0, 2.0)      # its own coefficient
+    # Main's geography with the reading's figures: Černý Most is city part
+    # Praha 14, which this reading doesn't raise to 5.0.
+    size, local_2, why = ptc.coefficients("Praha 9 - Černý Most", 2027)
+    assert (size, local_2) == (4.5, 1.8) and "city part Praha 14" in why
+    assert ptc.coefficients("Praha 2", 2026)[:2] == (4.5, 1.5)      # 2026: still the table
 
 
-def test_a_city_without_its_part_named_pays_its_highest(cities):
-    size, local, why = ptc.coefficients("Praha", 2026)
-    assert (size, local) == (5.0, 2.0) and "none named" in why
+def test_a_later_reading_without_the_tables_year_leaves_the_table(read, monkeypatch):
+    # Nothing read for 2026 to tell a change by: the hand-checked table stands.
+    monkeypatch.setattr(ptc, "_stored", stored(
+        place("Olomouc", "Olomouc", {"": 3.5}, {"": 1.0}, years=(2027,), population=101_000)))
+    assert ptc.coefficients("Olomouc", 2027)[:2] == (3.5, 2.0)
 
 
-def test_outlying_areas_leave_the_town_at_its_own_figure(cities):
-    assert ptc.coefficients("Pelhřimov", 2026)[:2] == (2.0, 1.0)
+def test_a_municipality_outside_the_tables_is_charged_its_reading(read):
+    size, local, why = ptc.coefficients("Hostivice", 2026)
+    assert (size, local) == (1.6, 2.1) and "UPDATE TAX RATES" in why
+    assert ptc.coefficients("Hostivice - Litovice", 2026)[:2] == (1.6, 1.5)
+    assert ptc.annual_tax(60, "Hostivice", 2026) == math.ceil(math.ceil(74 * 3.5 * 1.6) * 2.1)
+    # A year before anything was read: the act's size coefficient, local UNVERIFIED.
+    size, local, why = ptc.coefficients("Hostivice", 2025)
+    assert (size, local) == (1.6, ptc.LOCAL_COEFFICIENT) and "UNVERIFIED" in why
 
 
-def test_a_shared_name_needs_its_district(cities):
-    assert ptc.coefficients("Lhota", 2026)[2].startswith("UNVERIFIED")
+def test_a_shared_name_is_read_for_its_district(read):
     assert ptc.coefficients("Lhota, okres Kladno", 2026)[:2] == (1.0, 3.0)
+    assert ptc.coefficients("Lhota, okres Přerov", 2026)[:2] == (1.0, 1.0)
+    size, local, why = ptc.coefficients("Lhota", 2026)               # none named: the dearest
+    assert (size, local) == (1.0, 3.0) and "the dearest of" in why
 
 
-def test_an_okres_around_a_city_is_not_the_city(cities):
-    assert ptc.coefficients("Brno-venkov", 2026)[2].startswith("UNVERIFIED")
-    assert ptc.coefficients("Brno-střed", 2026)[:2] == (3.5, 1.0)
+def test_the_tables_places_are_known_by_name_and_district():
+    assert ptc.in_tables("Praha", "Praha") and ptc.in_tables("Kladno", "Kladno")
+    assert ptc.in_tables("Benešov", "Benešov")                       # a town over 10,000
+    assert not ptc.in_tables("Kladno", "Chrudim")                    # its namesake village
+    assert not ptc.in_tables("Hostivice", "Praha-západ")
 
 
-def test_without_stored_coefficients_the_old_estimate_stands():
-    assert ptc.coefficients("Olomouc")[:2] == (3.5, ptc.LOCAL_COEFFICIENT)
-    assert ptc.coefficients("Praha 3")[:2] == (4.5, ptc.LOCAL_COEFFICIENT)
+def test_without_a_reading_the_tables_and_the_act_stand():
+    assert ptc.coefficients("Olomouc")[:2] == (3.5, 2.0)
+    assert ptc.coefficients("Praha 3")[:2] == (5.0, 2.0)
+    size, local, why = ptc.coefficients("Hostivice")
+    assert (size, local) == (1.6, ptc.LOCAL_COEFFICIENT) and "UNVERIFIED" in why
 
 
 # ── The update ────────────────────────────────────────────────────────────────
 class FakeSources:
-    def __init__(self):
+    def __init__(self, later=False):
         self.read, self.pop_calls = [], 0
         self.listed = [
             cz.Listed("SPP1", "Hlavní město Praha", "00064581", "11/2024",
                       "o výši koeficientů", date(2024, 9, 1), date(2025, 1, 1)),
             cz.Listed("SPP2", "Obec Krakov", "00000002", "4/2025", "o koeficientu",
                       date(2025, 9, 1), date(2026, 1, 1)),
+            cz.Listed("SPP3", "Město Hostivice", "00241326", "2/2024", "o koeficientu",
+                      date(2024, 9, 1), date(2025, 1, 1)),
         ]
+        if later:                                  # Prague's 1.5 becomes 2.0 from 2027
+            self.listed.append(cz.Listed("SPP4", "Hlavní město Praha", "00064581", "9/2026",
+                                         "o výši koeficientů", date(2026, 6, 1), date(2027, 1, 1)))
 
     def populations(self, years):
         self.pop_calls += 1
         return {y: {"500496": ("Olomouc", "Olomouc", 101_000), "500000": ("Krakov", "Rakovník", 200),
-                    "554782": ("Praha", "Praha", 1_397_880)} for y in years}
+                    "554782": ("Praha", "Praha", 1_397_880),
+                    "539244": ("Hostivice", "Praha-západ", 9_179)} for y in years}
 
     def list_ordinances(self):
         return self.listed
@@ -289,12 +326,21 @@ class FakeSources:
         self.read.append(oid)
         if oid == "SPP2":
             return Doc(oid, "pdf", "", problem="a scanned PDF with no text layer — it can't be read")
+        if oid == "SPP4":
+            return Doc(oid, "docx", "§ 1 (1) Na území hlavního města Prahy se stanovuje místní "
+                                    "koeficient pro obec ve výši 2. § 2 Zrušuje se obecně závazná "
+                                    "vyhláška č. 11/2024. Čl. 3 Účinnost")
+        if oid == "SPP3":
+            return Doc(oid, "docx", "Čl. 2 (1) Město stanovuje místní koeficient pro obec ve výši "
+                                    "2,1. Čl. 3 Účinnost")
         return Doc(oid, "docx", "§ 4 (1) Na území hlavního města Prahy se stanovuje místní "
                                 "koeficient pro obec ve výši 1,5. Čl. 3 Účinnost")
 
     def municipality_of(self, ico):
         return {"00064581": {"code": "554782", "name": "Praha", "district": "Praha"},
-                "00000002": {"code": "500000", "name": "Krakov", "district": "Rakovník"}}.get(ico)
+                "00000002": {"code": "500000", "name": "Krakov", "district": "Rakovník"},
+                "00241326": {"code": "539244", "name": "Hostivice", "district": "Praha-západ"}
+                }.get(ico)
 
 
 @pytest.fixture
@@ -308,22 +354,27 @@ def test_one_click_reads_every_municipality_once(db):
     from modules import tax_rates_cz as trc
     src = FakeSources()
     s = trc.update(year=2026, sources=src)
-    assert (s["municipalities"], s["with_ordinances"], s["ordinances"]) == (3, 1, 2)
+    assert (s["municipalities"], s["with_ordinances"], s["ordinances"]) == (4, 2, 3)
     assert len(s["unreadable"]) == 1 and "Krakov" in s["unreadable"][0]
-    assert ptc.coefficients("Praha 5", 2026)[:2] == (4.5, 1.5)
+    assert ptc.coefficients("Hostivice", 2026)[:2] == (1.6, 2.1)   # its ordinance
     assert ptc.coefficients("Krakov", 2026)[:2] == (1.0, 1.0)      # unreadable: the act's
-    assert ptc.coefficients("Olomouc", 2026)[:2] == (3.5, 1.0)     # no ordinance: the act's
+    assert ptc.coefficients("Praha 5", 2026)[:2] == (5.0, 1.5)     # the hand-checked table's
+    assert ptc.coefficients("Olomouc", 2026)[:2] == (3.5, 2.0)
     rows = {r["name"]: r for r in trc.table(2026)}
-    assert set(rows) == {"Praha"} and rows["Praha"]["sources"] == ["11/2024 (from 2025)"]
+    assert set(rows) == {"Praha", "Hostivice"}
+    assert rows["Praha"]["sources"] == ["11/2024 (from 2025)"]
 
     again = trc.update(year=2026, sources=src)
     assert again["read_now"] == 0 and src.read.count("SPP1") == 1 and src.pop_calls == 1
     assert "6,258" not in trc.summary_text(again) and "Czech municipalities" in trc.summary_text(again)
 
 
-def test_a_czech_listing_is_rescored_when_its_coefficient_moves(db):
+def test_a_czech_listing_is_rescored_when_its_coefficient_moves(db, monkeypatch):
+    # Scoring in 2027, when a new Prague ordinance sets 2.0 where the 2026
+    # table has 1.5 (Czech rents are known only for cities in the tables).
     from modules import tax_rates_cz as trc
     from modules.cashflow_runner import run_scoring
+    monkeypatch.setattr(ptc, "_year", lambda: 2027)
     db.upsert_listing(make_listing("c1", district="Praha 2", price_eur=6_000_000.0,
                                    size_m2=60.0, market="cz"))
     db.set_lv_status("c1", "PASS", "", "clean")
@@ -337,9 +388,10 @@ def test_a_czech_listing_is_rescored_when_its_coefficient_moves(db):
             return r[0] if r else None
         finally:
             conn.close()
-    before = tax_of()
-    assert before == round(round(60 * 1.22 * 3.5 * 4.5, 2) / 12, 2)
-    s = trc.update(year=2026, sources=FakeSources())
+    # 60 m² × 1.22 → 74 m²; × 3.50 Kč × 4.5, rounded up; × local, rounded up.
+    assert tax_of() == round(math.ceil(math.ceil(74 * 3.5 * 4.5) * 1.5) / 12, 2)
+    s = trc.update(year=2027, sources=FakeSources(later=True))
     assert s["requeued"] == 1
     run_scoring(market="cz")
-    assert tax_of() == round(round(60 * 1.22 * 3.5 * 4.5 * 1.5, 2) / 12, 2)
+    assert tax_of() == round(math.ceil(math.ceil(74 * 3.5 * 4.5) * 2.0) / 12, 2)
+    assert ptc.coefficients("Praha 2", 2026)[:2] == (4.5, 1.5)      # 2026 is still the table's
