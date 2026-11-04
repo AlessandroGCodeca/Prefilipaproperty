@@ -120,3 +120,65 @@ class TestSummarize:
         level, text = summarize(_st(), None, NOW + timedelta(days=2))
         assert level == "warning" and "Is the scheduler running?" in text
         assert "8 Oct 06:40" in text
+
+    def test_nothing_on_record_points_at_the_button_too(self):
+        # Without Docker no scheduler runs: "the scheduler runs it at 06:00"
+        # alone left the dashboard's own run unmentioned.
+        _, text = summarize(None, None, NOW)
+        assert "RUN EVERYTHING" in text
+
+
+class TestSummarizeDashboardRun:
+    """A full run started from the dashboard's ▶ RUN EVERYTHING (trigger
+    "dashboard"): no scheduler stands behind it, so the text points at the
+    button rather than at retries or the scheduler."""
+
+    HOLDER = "dashboard: RUN EVERYTHING"
+
+    def _st(self, **kw):
+        return _st(trigger="dashboard", holder=self.HOLDER, **kw)
+
+    def test_ok(self):
+        level, text = summarize(self._st(), None, NOW)
+        assert level == "ok" and text.startswith("Last full run 06:40") and "🟢3" in text
+
+    def test_running_while_the_dashboard_holds_the_lock(self):
+        level, text = summarize(self._st(state="running"), {"holder": self.HOLDER}, NOW)
+        assert level == "running" and text.startswith("Full run in progress")
+
+    def test_another_dashboard_job_is_not_this_run(self):
+        level, text = summarize(self._st(state="running"), {"holder": "dashboard: BAZOS"}, NOW)
+        assert level == "error" and "never finished" in text
+
+    def test_running_without_the_lock_was_interrupted(self):
+        level, text = summarize(self._st(state="running"), None, NOW)
+        assert level == "error" and "never finished" in text
+        assert "RUN EVERYTHING" in text and "scheduler" not in text
+
+    def test_failed_says_to_click_again_not_when_it_retries(self):
+        level, text = summarize(self._st(state="failed", error="all 3 scrapers failed",
+                                         next_retry_at="2026-10-08T07:40:00+00:00"),
+                                None, NOW)
+        assert level == "error" and "FAILED: all 3 scrapers failed" in text
+        assert "RUN EVERYTHING" in text and "Retrying" not in text
+
+    def test_failed_steps_are_named(self):
+        level, text = summarize(self._st(steps=[{"step": "LV Debt Filter", "ok": False}]),
+                                None, NOW)
+        assert level == "warning" and text.startswith("Last full run")
+        assert "LV Debt Filter" in text
+
+    def test_a_lock_nobody_keeps_alive_is_not_a_run_in_progress(self):
+        # The dashboard's Terminal window closed mid-run: its lock row stays
+        # behind, but its heartbeat stops.
+        def lock(minutes_ago):
+            beat = (NOW - timedelta(minutes=minutes_ago)).isoformat()
+            return {"holder": self.HOLDER, "heartbeat_at": beat}
+        assert summarize(self._st(state="running"), lock(1), NOW)[0] == "running"
+        level, text = summarize(self._st(state="running"), lock(10), NOW)
+        assert level == "error" and "never finished" in text
+
+    def test_an_old_run_asks_for_a_new_one_not_for_the_scheduler(self):
+        level, text = summarize(self._st(), None, NOW + timedelta(days=2))
+        assert level == "warning" and "RUN EVERYTHING" in text
+        assert "scheduler" not in text

@@ -10,7 +10,8 @@ build_memo_pdf(listing) takes a row shaped like database.get_all_active()'s
 and returns the PDF as bytes for st.download_button. It recomputes nothing
 the score already holds; only the year-by-year IRR cash flows are rebuilt
 (the score stores the IRR, not the flows) on the score's own rent and
-financing.
+financing. memo_fingerprint(listing) is a digest of what the memo prints:
+the dashboard rebuilds a memo it has kept once that changes.
 
 Slovak text needs a Unicode font. DejaVu Sans (Linux, the Docker image) or
 Arial (Windows/macOS) is used when found; failing both, the memo falls back
@@ -19,6 +20,7 @@ to Helvetica with diacritics folded away rather than not printing.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from datetime import datetime
 
@@ -131,11 +133,43 @@ def _flag(v, yes: str, no: str) -> str:
     return "unknown" if v is None else (yes if v else no)
 
 
+def memo_fingerprint(l: dict) -> str:
+    """A digest of everything build_memo_pdf prints for this card's row: the
+    row's own fields (price, score, LV result, location…), its deal stage,
+    price history and latest note with the note count (the "_stage", "_ph"
+    and "_vibe" the dashboard adds), and its other portals' copies. The
+    dashboard keeps a built memo only while this stays the same: a price
+    change, a rescore, a new note or a stage change used to leave the first
+    memo of the session on offer. The copies are summarised by what the memo
+    shows of them — each copy row carries the others, this one included."""
+    own = sorted((k, repr(v)) for k, v in l.items() if k != "_copies")
+    copies = [(c.get("id"), c.get("source"), c.get("price_eur"), c.get("url"),
+               c.get("scraped_at")) for c in (l.get("_copies") or [])]
+    return hashlib.sha1(repr((own, copies)).encode("utf-8", "replace")).hexdigest()
+
+
 def build_memo_pdf(l: dict, *, price_history: dict | None = None,
                    notes: list[dict] | None = None, stage: dict | None = None,
-                   portals: list[dict] | None = None) -> bytes:
-    from engine.financial import compute_deal_score, project_irr
+                   portals: list[dict] | None = None,
+                   generated_at: datetime | None = None) -> bytes:
+    """generated_at is the time printed on the memo (default: now); like the
+    contract draft, it is shown in Bratislava time (modules.contract_draft)."""
+    from engine.financial import compute_deal_score, project_irr, is_cashflow_negative
+    from modules.contract_draft import doc_stamp, to_local
+    from engine.regional_prices import benchmark_note
     from database import days_on_market
+    import markets
+
+    # A Czech listing's memo is in its crowns and its market's terms; a
+    # Slovak one reads exactly as before.
+    mkt = markets.of_row(l)
+    cz = mkt != "sk"
+    mk = {"market": mkt} if cz else {}
+
+    def money(v, signed=False):
+        if not cz:
+            return _eur(v, signed)
+        return "—" if v is None else markets.format_money(v, "CZK", signed=signed)
 
     pdf = _Memo()
     pdf.add_page()
@@ -148,7 +182,7 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
     pdf.h1(l.get("title") or l.get("district") or "Listing")
     pdf.para(f"{l.get('address_raw') or l.get('district') or ''}\n"
              f"{(l.get('source') or '').upper()} · {l.get('url') or ''}\n"
-             f"Memo generated {datetime.now():%Y-%m-%d %H:%M}", size=8, color=110)
+             f"Memo generated {doc_stamp(generated_at)}", size=8, color=110)
 
     pdf.h2("Verdict")
     verdict = (f"{cls} · deal grade {grade} ({score}/100) · best structure "
@@ -156,6 +190,10 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
     pdf.set_font(pdf.memo_font, "B", 11)
     pdf.set_text_color(20)
     pdf.multi_cell(0, 6, pdf.txt(verdict), new_x="LMARGIN", new_y="NEXT")
+    surpluses = [v for v in (l.get("surplus_personal"), l.get("surplus_sro")) if v is not None]
+    if surpluses and is_cashflow_negative(max(surpluses), **mk):
+        pdf.para(f"Cash-flow negative: {money(max(surpluses), True)}/mo under the better "
+                 f"structure. {cls} is the price against the regional market, not income.")
     my, mg = l.get("max_price_yellow"), l.get("max_price_green")
     if my or mg:
         gap = ""
@@ -163,7 +201,7 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
             d = (price / my - 1) * 100
             gap = (f" — asking is {d:.1f}% above the YELLOW price" if d > 0
                    else f" — asking is already {-d:.1f}% under it")
-        pdf.para(f"Max offer to stay YELLOW: {_eur(my)} · to make GREEN: {_eur(mg)}{gap}.")
+        pdf.para(f"Max offer to stay YELLOW: {money(my)} · to make GREEN: {money(mg)}{gap}.")
 
     pdf.h2("Price & market")
     disc = l.get("market_discount")
@@ -173,34 +211,51 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
     first_seen = min(seen) if seen else None
     dom = days_on_market(first_seen)
     pdf.kv([
-        ("Asking price", _eur(price)),
+        ("Asking price", money(price)),
         ("Size", f"{size:.0f} m²" if size else "—"),
-        ("Price / m²", _eur(price / size) if size else "—"),
-        ("Regional median", f"{_eur(median_m2)}/m²" if median_m2 else "—"),
+        ("Price / m²", money(price / size) if size else "—"),
+        ("Regional median", f"{money(median_m2)}/m²" if median_m2 else "—"),
         ("Vs market", "—" if disc is None else
          (f"{disc * 100:.1f}% below" if disc >= 0 else f"{-disc * 100:.1f}% above")),
-        ("Days on market", "—" if dom is None else f"{dom} (first seen {str(first_seen)[:10]})"),
+        ("Days tracked", "—" if dom is None else f"{dom} (first seen {str(first_seen)[:10]})"),
     ])
+    if median_m2:
+        pdf.para("Benchmark: " + benchmark_note(l.get("district") or "", l.get("rooms"), **mk)
+                 + ". Days tracked count from this dashboard's first sight of the flat, "
+                   "not the portal's posting date.", size=7.5, color=110)
     ph = (price_history or {}).get(l.get("id"))
     if ph:
-        steps = " → ".join(f"{_eur(p)} ({str(w)[:10]})" for w, p in ph["history"])
+        steps = " → ".join(f"{money(p)} ({str(w)[:10]})" for w, p in ph["history"])
         pdf.para(f"Price history: {steps}  [{_pct(ph['change_pct'])} overall]")
     if portals and len(portals) > 1:
         pdf.para("Also listed: " + "; ".join(
-            f"{(p.get('source') or '').upper()} {_eur(p.get('price_eur'))} {p.get('url')}"
+            f"{(p.get('source') or '').upper()} {money(p.get('price_eur'))} {p.get('url')}"
             for p in portals))
 
     pdf.h2("Monthly cashflow")
     rent_src = l.get("rent_source")
-    pdf.para(f"Estimated rent {_eur(l.get('estimated_rent_eur'))}/mo "
-             f"({'live prenájom comps' if rent_src == 'live' else 'published baseline €/m²'}).")
+    from engine.financial import rent_fallback_kind
+    rent_key = l.get("rent_key")
+    fallback = rent_fallback_kind(rent_key, **mk) if rent_key else None
+    live_label, base_label = (("live pronájem comps", "Deloitte Rent Index baseline Kč/m²")
+                              if cz else ("live prenájom comps", "published baseline €/m²"))
+    pdf.para(f"Estimated rent {money(l.get('estimated_rent_eur'))}/mo "
+             f"({live_label if rent_src == 'live' else base_label}"
+             f"{f' for {rent_key}' if rent_key else ''})."
+             + {"default": " Warning: national default rent — the town is in no rent table.",
+                "kraj": " Warning: kraj-level rent — no figure for the town itself."}.get(fallback, ""))
+    sro_mortgage = l.get("mortgage_monthly_sro")
     rows = [
-        ("Mortgage", l.get("mortgage_monthly"), l.get("mortgage_monthly")),
-        ("HOA (incl. fond opráv)", l.get("hoa_monthly"), l.get("hoa_monthly")),
+        ("Mortgage", l.get("mortgage_monthly"),
+         sro_mortgage if sro_mortgage is not None else l.get("mortgage_monthly")),
+        ("SVJ (fond oprav + správa)" if cz else "HOA (incl. fond opráv)",
+         l.get("hoa_monthly"), l.get("hoa_monthly")),
         ("Property tax", l.get("property_tax_monthly"), l.get("property_tax_monthly")),
         ("Vacancy", l.get("vacancy_cost"), l.get("vacancy_cost")),
         ("Owner reserve", l.get("maintenance_monthly"), l.get("maintenance_monthly")),
         ("Management", l.get("management_monthly"), l.get("management_monthly")),
+        ("s.r.o. running cost", 0 if l.get("sro_running_cost_monthly") is not None else None,
+         l.get("sro_running_cost_monthly")),
         ("Income tax", l.get("income_tax_personal"), l.get("income_tax_sro")),
         ("Total costs", l.get("total_costs_personal"), l.get("total_costs_sro")),
         ("Net surplus", l.get("surplus_personal"), l.get("surplus_sro")),
@@ -212,8 +267,9 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
             table_rows.append((label, _pct(p), _pct(s)))
         else:
             signed = label == "Net surplus"
-            table_rows.append((label, _eur(p, signed), _eur(s, signed)))
-    pdf.table(["€ / month", "Personal", "s.r.o."], table_rows, [80, 50, 50])
+            table_rows.append((label, money(p, signed), money(s, signed)))
+    pdf.table(["Kč / month" if cz else "€ / month", "Personal", "s.r.o."], table_rows,
+              [80, 50, 50])
     pdf.ln(1)
     pdf.kv([
         ("Cap rate (unlevered)", _pct(l.get("cap_rate"), 2)),
@@ -227,44 +283,61 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
     rate = l.get("mortgage_rate_used")
     term = l.get("loan_term_years")
     pdf.kv([
-        ("LTV", _pct(ltv, 0)),
+        ("LTV (personal)", _pct(ltv, 0)),
         ("Rate / term", f"{_pct(rate, 2)} / {term or '—'} y"),
-        ("Cash in (deposit + costs)", _eur(l.get("total_cash_invested"))),
-        ("Principal paydown", f"{_eur(l.get('principal_paydown_monthly'))}/mo"),
-        ("At rate +2 pp: surplus", f"{_eur(l.get('stress_surplus_sro'), True)}/mo"),
+        ("Cash in (deposit + costs)", money(l.get("total_cash_invested"))),
+        ("s.r.o. loan: LTV / rate", f"{_pct(l.get('sro_ltv_used'), 0)} / "
+                                    f"{_pct(l.get('sro_rate_used'), 2)}"),
+        ("s.r.o. cash in", money(l.get("total_cash_invested_sro"))),
+        ("Principal paydown (s.r.o.)", f"{money(l.get('principal_paydown_monthly'))}/mo"),
+        ("At rate +2 pp: surplus", f"{money(l.get('stress_surplus_sro'), True)}/mo"),
         ("At rate +2 pp: self-funding", _pct(l.get("stress_ratio_sro"))),
     ])
 
     if price and size and l.get("estimated_rent_eur"):
         pdf.h2("Hold-period return (IRR)")
         kw = dict(rent=l.get("estimated_rent_eur"), ltv=ltv, rate=rate or None,
-                  term_years=term or None)
+                  term_years=term or None, tax_year=l.get("tax_year"),
+                  sro_ltv=l.get("sro_ltv_used"),
+                  sro_rate_premium=(l["sro_rate_used"] - rate
+                                    if l.get("sro_rate_used") is not None and rate else None),
+                  sro_running_cost=(l["sro_running_cost_monthly"] * 12
+                                    if l.get("sro_running_cost_monthly") is not None else None))
         kw = {k: v for k, v in kw.items() if v is not None}
-        res = {s: project_irr(price, size, l.get("district") or "", structure=s, **kw)
+        res = {s: project_irr(price, size, l.get("district") or "", structure=s, **kw, **mk)
                for s in ("PERSONAL", "SRO")}
         p, s = res["PERSONAL"], res["SRO"]
-        from config import APPRECIATION_RATE, RENT_GROWTH_RATE, EXIT_COST_RATE
+        if cz:
+            prof = markets.get(mkt)
+            APPRECIATION_RATE, RENT_GROWTH_RATE, EXIT_COST_RATE = (
+                prof.appreciation_rate, prof.rent_growth_rate, prof.exit_cost_rate)
+        else:
+            from config import APPRECIATION_RATE, RENT_GROWTH_RATE, EXIT_COST_RATE
         pdf.para(f"Buy, hold {p.hold_years} years, sell. Assumes {_pct(APPRECIATION_RATE)} "
                  f"price growth, {_pct(RENT_GROWTH_RATE)} rent growth and "
                  f"{_pct(EXIT_COST_RATE)} selling costs.")
         pdf.table(["", "Personal", "s.r.o."], [
             ("IRR on equity", _pct(p.irr), _pct(s.irr)),
             ("Equity multiple", f"{p.equity_multiple or 0:.2f}×", f"{s.equity_multiple or 0:.2f}×"),
-            ("Sale price", _eur(p.sale_price), _eur(s.sale_price)),
-            ("Exit costs", _eur(p.exit_costs), _eur(s.exit_costs)),
-            ("Loan repaid at exit", _eur(p.loan_balance_exit), _eur(s.loan_balance_exit)),
-            ("Tax caused by the sale", _eur(p.exit_tax), _eur(s.exit_tax)),
-            ("Total profit", _eur(p.total_profit, True), _eur(s.total_profit, True)),
+            ("Sale price", money(p.sale_price), money(s.sale_price)),
+            ("Exit costs", money(p.exit_costs), money(s.exit_costs)),
+            ("Loan repaid at exit", money(p.loan_balance_exit), money(s.loan_balance_exit)),
+            ("Tax caused by the sale", money(p.exit_tax), money(s.exit_tax)),
+            ("Total profit", money(p.total_profit, True), money(s.total_profit, True)),
         ], [80, 50, 50])
         pdf.ln(1)
-        flows = "  ".join(f"y{t}: {_eur(c)}" for t, c in enumerate(s.cash_flows))
+        flows = "  ".join(f"y{t}: {money(c)}" for t, c in enumerate(s.cash_flows))
         pdf.para(f"s.r.o. cash flows — {flows}", size=7)
 
     pdf.h2("Location & risk")
     precision = l.get("geo_precision")
     pdf.kv([
-        ("Location score", f"{l.get('location_score') or '—'}/100 {l.get('location_tier') or ''}"),
-        ("Nearest transit", f"{l['nearest_transit_m']:.0f} m" if l.get("nearest_transit_m") else "—"),
+        # As on the card: a real 0 is "0/100"; no score at all is "—".
+        ("Location score", ("—" if l.get("location_score") is None
+                            else f"{l['location_score']}/100")
+                           + (f" {l['location_tier']}" if l.get("location_tier") else "")),
+        ("Nearest transit", f"{l['nearest_transit_m']:.0f} m"
+                            if l.get("nearest_transit_m") is not None else "—"),
         ("Energy class", l.get("energy_class") or "—"),
         ("Geocode", precision or "—"),
     ])
@@ -304,20 +377,44 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
              + (f"\n{l['lv_summary']}"
                 if l.get("lv_summary") and l["lv_summary"] not in (l.get("lv_detail") or "")
                 else "")
+             + (f"\nSoft flags (not rejected — check with your lawyer): {l['lv_soft_flags']}"
+                if l.get("lv_soft_flags") else "")
              + "\nRe-verify the LV 48 hours before signing.")
+
+    def day(stamp):
+        # Stored in UTC; dated in Bratislava time, like "Memo generated". A
+        # value that isn't a time is printed as stored.
+        ts = to_local(stamp)
+        return ts.strftime("%Y-%m-%d") if ts else str(stamp)[:10]
 
     if stage or notes:
         pdf.h2("Deal notes")
         if stage:
-            pdf.para(f"Stage: {stage.get('stage')} (since {str(stage.get('updated_at'))[:10]})"
+            pdf.para(f"Stage: {stage.get('stage')} (since {day(stage.get('updated_at'))})"
                      + (f" — {stage['note']}" if stage.get("note") else ""))
         for n in (notes or [])[:8]:
-            pdf.para(f"{str(n.get('created_at'))[:10]} · vibe {n.get('vibe_score') or '—'}/10 · "
+            pdf.para(f"{day(n.get('created_at'))} · vibe {n.get('vibe_score') or '—'}/10 · "
                      f"{n.get('note') or ''}")
 
     pdf.h2("Caveats")
+    if cz:
+        medians = ("the market value is judged against the regional median above (its "
+                   "source as given)" if median_m2 else
+                   "there is no Czech regional price median for this place in this app, so "
+                   "the class is WHITE")
+        pdf.para("Rent, market value and risk flags are estimates from public data; "
+                 f"{medians}. Rent is the Deloitte Rent Index (Q2 2026) figure "
+                 "or live pronájem comps. "
+                 f"Taxes use the {l.get('tax_year') or 'current'} Czech tax table (ZDP): "
+                 "§ 9 rental income taxed after the larger of actual expenses and the 30 % "
+                 "flat rate, s.r.o. 21 % corporate tax and 15 % on dividends, a personal "
+                 "sale exempt after 10 years — to be confirmed with a daňový poradce. "
+                 "The title deed is verified only from the flat's own výpis z LV. Keep the "
+                 "price in úschova until the vklad.", size=7.5, color=110)
+        return bytes(pdf.output())
     pdf.para("Rent, market value and risk flags are estimates from public data; the "
-             "regional median is for older 3-room flats. Tax treatment (§6(3) personal "
+             "regional median is for older 3-room flats, adjusted by room count. "
+             f"Taxes use the {l.get('tax_year') or 'current'} tax table. Tax treatment (§6(3) personal "
              "rental, s.r.o. corporate + dividend tax, 5-year exemption on a personal "
              "sale) must be confirmed with an účtovník. Use notárska úschova for funds.",
              size=7.5, color=110)

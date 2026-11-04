@@ -76,10 +76,13 @@ class TestAcquisitionCosts:
         )
 
     def test_coc_uses_total_cash_invested(self):
+        # Cash-on-cash is the s.r.o.'s, on the s.r.o.'s own deposit.
         r = _deal()
         assert r.cash_on_cash == pytest.approx(
-            (r.surplus_sro * 12) / r.total_cash_invested, rel=1e-3
+            (r.surplus_sro * 12) / r.total_cash_invested_sro, rel=1e-3
         )
+        assert r.total_cash_invested_sro == pytest.approx(
+            r.price_eur * (1 - r.sro_ltv) + r.acquisition_costs, abs=0.01)
 
 
 class TestOwnerReserve:

@@ -1,15 +1,24 @@
 """
 engine/financial.py — Sovereign Investor Dashboard
-Module B: 2026 Slovak Financial Engine
+Module B: the financial engine — Slovakia and Czechia
 
 Dual-scenario analysis: Personal (Fyzická osoba) vs s.r.o.
 Outputs: CoC, Net Yield, Self-Funding Ratio, Optimal Structure, and the
 class — how far the asking €/m² sits below the regional median (see the
 Classification Thresholds note in config.py for why not the ratio).
+
+Every function takes market="sk" by default. A Slovak listing is worked out
+exactly as before, from config.py's figures (read through this module's own
+names, so an override of one still takes effect); a Czech one from the Czech
+profile in markets.py, in CZK, under the Czech tax rules (§9 ZDP rental
+income, flat-rate expenses, 15 % / 23 %, 21 % corporate tax, 15 % dividend
+withholding).
 """
 
 from __future__ import annotations
 import math
+import re
+import statistics
 from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime, timezone
@@ -18,22 +27,50 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
     MORTGAGE_RATE_PA, LOAN_TERM_YEARS, LTV_RATIO,
-    TAX_RATE_PERSONAL_LOW, TAX_RATE_PERSONAL_HIGH, TAX_THRESHOLD_PERSONAL,
-    RENTAL_INCOME_EXEMPTION,
-    TAX_RATE_SRO, TAX_RATE_SRO_REDUCED, SRO_REDUCED_REVENUE_LIMIT,
-    DIVIDEND_TAX_RATE,
-    HEALTH_LEVY_PERSONAL, PROPERTY_TAX_RATE_PA, VACANCY_RATE, OWNER_RESERVE_RATE, PROPERTY_MGMT_RATE,
+    tax_rules, TAX_YEAR,
+    VACANCY_RATE, OWNER_RESERVE_RATE, PROPERTY_MGMT_RATE,
     ACQUISITION_COST_RATE,
     HOA_SMALL, HOA_MEDIUM, HOA_LARGE, HOA_PREMIUM,
     GREEN_DISCOUNT, YELLOW_DISCOUNT, NEAR_FLOOR_DISCOUNT, SRO_SETUP_COST,
+    SRO_ANNUAL_RUNNING_COST, SRO_RATE_PREMIUM_PP, SRO_LTV_RATIO,
+    CASHFLOW_MIN_SURPLUS,
     RENT_PER_M2, INDUSTRIAL_ZONES, INDUSTRIAL_RENT_PREMIUM,
     PARKING_RENT_PREMIUM, FURNISHED_RENT_PREMIUM, SEMI_FURNISHED_PREMIUM,
     BALCONY_RENT_PREMIUM,
     LTV_RATIO_INVESTOR, INVESTOR_LTV_FROM, PROPERTIES_OWNED, RATE_SHOCK_PP,
     HOLD_YEARS, APPRECIATION_RATE, RENT_GROWTH_RATE, COST_INFLATION_RATE,
-    EXIT_COST_RATE, PERSONAL_CGT_EXEMPT_YEARS,
+    EXIT_COST_RATE,
 )
-from engine.regional_prices import regional_median_price, REGIONAL_PRICE_FLOOR_RATIO
+from engine.regional_prices import (
+    benchmark_median, kraj_for_district, KRAJ_NAMES,
+    REGIONAL_PRICE_FLOOR_RATIO,
+)
+import markets
+
+
+def _sk(market) -> bool:
+    return markets.normalize(market) == "sk"
+
+
+def _mkw(market) -> dict:
+    """{"market": m} to pass on for a non-Slovak market, {} for Slovakia —
+    so a Slovak call is exactly the call it always was."""
+    m = markets.normalize(market)
+    return {} if m == "sk" else {"market": m}
+
+
+def _need(value, what: str, market, where: str = "markets.py"):
+    """A Czech figure the profile doesn't have yet is an error, not a guess."""
+    if value is None:
+        raise LookupError(f"{markets.get(market).name}: no {what} in {where} yet")
+    return value
+
+# Bumped whenever a change to the model moves the figures of a listing that
+# was already scored (here: the s.r.o.'s running cost and company-loan terms,
+# the room-adjusted benchmark, the rent fallbacks). A stored score from an
+# older model is redone on the next scoring run
+# (database.requeue_scores_from_older_model).
+SCORING_MODEL_VERSION = 5   # 5: property tax by area in Košice and Žilina; Czech coefficients by city, town and population
 
 
 @dataclass
@@ -91,10 +128,60 @@ class FinancialResult:
     classification:         str
     recommendation:         str
 
-    # Financing the figures were worked out with.
+    # Financing the figures were worked out with. The personal scenario uses
+    # mortgage_rate / ltv; the s.r.o. borrows on its own terms (sro_financing).
     mortgage_rate:          float = MORTGAGE_RATE_PA
     ltv:                    float = LTV_RATIO
     loan_term_years:        int   = LOAN_TERM_YEARS
+    sro_mortgage_rate:      float = MORTGAGE_RATE_PA + SRO_RATE_PREMIUM_PP
+    sro_ltv:                float = SRO_LTV_RATIO
+    loan_amount_sro:        float = 0.0
+    mortgage_monthly_sro:   float = 0.0
+    total_cash_invested_sro: float = 0.0
+    sro_running_cost_monthly: float = 0.0
+
+    rooms:                  Optional[int] = None
+    rent_key:               str   = ""      # RENT_PER_M2 / kraj key the rent came from
+    tax_year:               int   = TAX_YEAR  # the tax table the taxes came from
+    market:                 str   = "sk"
+    currency:               str   = "EUR"     # every amount above is in it
+
+    @property
+    def cashflow_negative(self) -> bool:
+        """True when neither structure clears CASHFLOW_MIN_SURPLUS a month —
+        the class says the price is cheap, not that the flat pays for itself."""
+        return is_cashflow_negative(max(self.surplus_personal, self.surplus_sro),
+                                    market=self.market)
+
+
+def cashflow_min_surplus(market: str = "sk") -> float:
+    """The monthly surplus (in the market's currency) a listing must clear
+    not to be flagged cash-flow negative."""
+    return CASHFLOW_MIN_SURPLUS if _sk(market) else markets.get(market).cashflow_min_surplus
+
+
+def is_cashflow_negative(surplus, market: str = "sk") -> bool:
+    """A stored monthly surplus below CASHFLOW_MIN_SURPLUS. None (not scored)
+    is not negative: there is nothing to say yet."""
+    return surplus is not None and surplus < cashflow_min_surplus(market)
+
+
+def sro_financing(ltv: float, rate: float, sro_ltv: Optional[float] = None,
+                  sro_rate_premium: Optional[float] = None,
+                  market: str = "sk") -> tuple[float, float]:
+    """(LTV, rate) the s.r.o. borrows at, given the personal ones: a company
+    loan is commercial, priced above the hypotéka rate and lent on a lower
+    share of the price (config SRO_RATE_PREMIUM_PP / SRO_LTV_RATIO, or the
+    market's profile). The LTV never exceeds the personal one."""
+    if _sk(market):
+        default_premium, default_cap = SRO_RATE_PREMIUM_PP, SRO_LTV_RATIO
+    else:
+        m = markets.get(market)
+        default_premium = _need(m.sro_rate_premium_pp, "s.r.o. rate premium", market)
+        default_cap = _need(m.sro_ltv_ratio, "s.r.o. LTV", market)
+    premium = default_premium if sro_rate_premium is None else sro_rate_premium
+    cap = default_cap if sro_ltv is None else sro_ltv
+    return min(ltv, cap), rate + premium
 
 
 def calc_mortgage(principal: float,
@@ -129,39 +216,110 @@ def first_year_amortization(principal: float,
     return interest_mo, principal_mo
 
 
-def calc_hoa(size_m2: float) -> float:
+def calc_hoa(size_m2: float, market: str = "sk") -> float:
+    """The owner's monthly building fee: Slovakia's HOA bands (správa + fond
+    opráv); a market priced per m² (Czechia's SVJ: fond oprav + správa)
+    takes its per-m² rate plus a per-flat fee from the profile."""
+    if not _sk(market):
+        hoa = markets.get(market).hoa
+        per_m2 = _need(hoa.get("per_m2"), "SVJ fee per m²", market)
+        return round(per_m2 * size_m2 + (hoa.get("per_unit") or 0.0), 2)
     if size_m2 < 40:   return HOA_SMALL
     if size_m2 <= 70:  return HOA_MEDIUM
     if size_m2 <= 120: return HOA_LARGE
     return HOA_PREMIUM
 
 
-def calc_income_tax_personal(annual_net: float) -> float:
+def property_tax_annual(price: float, size_m2: float, district: str = "",
+                        market: str = "sk") -> float:
+    """Yearly property tax on the flat's floor area; the price plays no part.
+    Slovakia: daň z bytov — every started m² × the municipality's rate per m²
+    (engine.property_tax_sk). Czechia: daň z nemovitých věcí on a flat
+    (jednotka) — floor area × 1.22 × the rate per m² × the municipality's
+    coefficients (markets.py; engine.property_tax_cz)."""
+    if _sk(market):
+        from engine import property_tax_sk
+        return property_tax_sk.annual_tax(size_m2, district)
+    from engine import property_tax_cz
+    return property_tax_cz.annual_tax(size_m2, district)
+
+
+def acquisition_costs(price: float, market: str = "sk") -> float:
+    """One-off buyer costs: a share of the price, plus the market's fixed
+    fees (Czechia: the katastr filing fee and the like)."""
+    if _sk(market):
+        return price * ACQUISITION_COST_RATE
+    m = markets.get(market)
+    return (price * _need(m.acquisition_cost_rate, "acquisition cost rate", market)
+            + _need(m.acquisition_cost_fixed, "fixed acquisition costs", market))
+
+
+def personal_rental_base(rules: dict, *, noi_annual: float, rent_annual: float,
+                         expenses_annual: float, interest_annual: float) -> float:
+    """The rental income a person is taxed on, under the tax table's market.
+
+    Slovakia (§6 ods. 3 ZDP): the net operating income less the €500
+    exemption; mortgage interest is not deducted.
+    Czechia (§9 ZDP): the rent received less the larger of the actual
+    expenses (running costs and mortgage interest; depreciation is left out,
+    which over- rather than under-states the tax) and the flat-rate
+    expenses (výdajový paušál: a share of the rent, capped).
+
+    rent_annual is the rent actually received (after vacancy);
+    expenses_annual the running costs (building fee, property tax, reserve,
+    management)."""
+    flat_rate = rules.get("rental_flat_expense_rate")
+    if flat_rate is None:
+        return max(noi_annual - rules["rental_exemption"], 0)
+    flat = rent_annual * flat_rate
+    cap = rules.get("rental_flat_expense_cap")
+    if cap is not None:
+        flat = min(flat, cap)
+    actual = expenses_annual + interest_annual
+    return max(rent_annual - max(flat, actual), 0)
+
+
+def calc_income_tax_personal(annual_net: float, rules: Optional[dict] = None) -> float:
+    """Personal income tax on `annual_net` under a year's tax table
+    (config.tax_rules; default the current tax year)."""
+    t = rules or tax_rules()
     if annual_net <= 0:
         return 0.0
-    if annual_net <= TAX_THRESHOLD_PERSONAL:
-        return annual_net * TAX_RATE_PERSONAL_LOW
-    return (TAX_THRESHOLD_PERSONAL * TAX_RATE_PERSONAL_LOW +
-            (annual_net - TAX_THRESHOLD_PERSONAL) * TAX_RATE_PERSONAL_HIGH)
+    threshold = t["personal_threshold"]
+    if annual_net <= threshold:
+        return annual_net * t["personal_rate_low"]
+    return (threshold * t["personal_rate_low"] +
+            (annual_net - threshold) * t["personal_rate_high"])
 
 
-def sro_corporate_rate(annual_revenue: float) -> float:
+def sro_corporate_rate(annual_revenue: float, rules: Optional[dict] = None) -> float:
     """Reduced corporate rate applies below the small-company revenue limit."""
-    return TAX_RATE_SRO_REDUCED if annual_revenue <= SRO_REDUCED_REVENUE_LIMIT else TAX_RATE_SRO
+    t = rules or tax_rules()
+    return (t["sro_rate_reduced"] if annual_revenue <= t["sro_reduced_revenue_limit"]
+            else t["sro_rate"])
 
 
-def calc_tax_sro(annual_taxable: float, annual_revenue: float) -> float:
+def calc_tax_sro(annual_taxable: float, annual_revenue: float,
+                 rules: Optional[dict] = None) -> float:
     """Combined s.r.o. tax on rental profit: corporate income tax PLUS dividend
     withholding tax on the distributed remainder (the double-taxation that makes
     s.r.o. less of a slam-dunk than a flat corporate rate suggests)."""
+    t = rules or tax_rules()
     if annual_taxable <= 0:
         return 0.0
-    corp = annual_taxable * sro_corporate_rate(annual_revenue)
-    dividend = max(annual_taxable - corp, 0) * DIVIDEND_TAX_RATE
+    corp = annual_taxable * sro_corporate_rate(annual_revenue, t)
+    dividend = max(annual_taxable - corp, 0) * t["dividend_tax"]
     return corp + dividend
 
 
 _CITY_ONLY_KEYS = {"bratislava", "košice"}  # used only as last-resort city fallbacks
+
+
+def _fold(text: str) -> str:
+    """Lower-case without diacritics: "Petržalka" → "petrzalka"."""
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", text or "")
+                   if unicodedata.category(c) != "Mn").lower()
 
 # Bratislava's city parts in RENT_PER_M2. "Staré Mesto" and "Nové Mesto" are
 # generic names (Košice has a Staré Mesto too), so a city-part rate is not used
@@ -182,7 +340,8 @@ _OUTSIDE_BA_KEYS = tuple(
 
 
 def _names_town_outside_bratislava(key: str) -> bool:
-    return "bratislava" not in key and any(t in key for t in _OUTSIDE_BA_KEYS)
+    key = _fold(key)
+    return "bratislava" not in key and any(_fold(t) in key for t in _OUTSIDE_BA_KEYS)
 
 # Per-m² rates in RENT_PER_M2 represent 2-izb apartments (baseline). Smaller
 # units command a per-m² premium; larger units sell at a discount. Multipliers
@@ -210,22 +369,90 @@ def _rooms_multiplier(rooms) -> float:
     return ROOMS_RENT_MULTIPLIER.get(min(r, 4), 0.85)
 
 
-def _furnished_multiplier(furnished) -> float:
+def _furnished_multiplier(furnished, market: str = "sk") -> float:
     """Rent multiplier for the furnishing level parsed from the description.
     'furnished' earns the full premium, 'semi' a partial one; everything else
     (unfurnished / unknown / None) is neutral."""
+    if _sk(market):
+        full, semi = FURNISHED_RENT_PREMIUM, SEMI_FURNISHED_PREMIUM
+    else:
+        m = markets.get(market)
+        full, semi = m.furnished_rent_premium, m.semi_furnished_premium
     f = (furnished or "").strip().lower()
     if f == "furnished":
-        return FURNISHED_RENT_PREMIUM
+        return full
     if f == "semi":
-        return SEMI_FURNISHED_PREMIUM
+        return semi
     return 1.0
 
 
+# Longest first — but a named city part ("Vrakuňa, Bratislava II") before the
+# Bratislava / Košice okres it lies in, whatever their lengths.
 _KEYS_BY_SPECIFICITY = sorted(
     (k for k in RENT_PER_M2 if k != "default" and k not in _CITY_ONLY_KEYS),
-    key=len, reverse=True,
+    key=lambda k: (bool(re.fullmatch(r"(?:bratislava|košice) [iv]+", k)), -len(k)),
 )
+# A key matches only as whole words, and with or without diacritics:
+# "rača" is not in "Kráčany", "bratislava i" is not the start of
+# "Bratislava IV", and a portal's "petrzalka" is Petržalka.
+_KEY_PATTERNS = {k: re.compile(rf"(?<!\w){re.escape(_fold(k))}(?!\w)")
+                 for k in _KEYS_BY_SPECIFICITY}
+
+# Words that name no place on their own. A district that is only these ("Nové",
+# "Mesto", "Banská") used to match the first longer key containing it — "Nové"
+# and "Mesto" both came out as Nové Mesto nad Váhom's €6.80.
+_GENERIC_PLACE_WORDS = {
+    "nove", "nova", "novy", "mesto", "stare", "stara", "stary", "nad", "pri",
+    "pod", "okres", "okolie", "kraj", "banska", "spisska", "dolny", "horny",
+    "velky", "velke", "maly", "male", "liptovsky", "kysucke", "dunajska",
+    "rimavska", "povazska", "zlate", "turcianske", "mestska", "cast",
+}
+
+
+# Towns in neither RENT_PER_M2 nor anywhere near one of its keys still have a
+# kraj (engine.regional_prices), and a kraj's small towns rent for far less —
+# or, around Bratislava, far more — than the national €6.50 default. Such a
+# town is priced at the median of its kraj's towns in the table (the cities
+# and city districts left out). Keyed by the kraj's name so live rent comps
+# can collect under it like any other key.
+def _kraj_rent_fallbacks() -> dict[str, float]:
+    by_kraj: dict[str, list[float]] = {}
+    for key, rate in RENT_PER_M2.items():
+        if (key == "default" or key in _BA_CITY_PART_KEYS
+                or re.fullmatch(r"(bratislava|košice)( [iv]+)?", key)):
+            continue
+        kraj = kraj_for_district(key)
+        if kraj:
+            by_kraj.setdefault(kraj, []).append(rate)
+    return {KRAJ_NAMES[k].lower(): round(statistics.median(v), 2)
+            for k, v in by_kraj.items()}
+
+
+KRAJ_RENT_FALLBACK = _kraj_rent_fallbacks()
+_KEYS_BY_FOLDED = {_fold(k): k for k in list(RENT_PER_M2) + list(KRAJ_RENT_FALLBACK)
+                   if k != "default"}
+
+
+def baseline_rent(key: str, market: str = "sk") -> float:
+    """The published-baseline €/m² for a rent key: its RENT_PER_M2 entry, its
+    kraj fallback, else the national default. (Czechia: Kč/m², engine.rent_cz.)"""
+    if not _sk(market):
+        from engine import rent_cz
+        return rent_cz.baseline_rent(key)
+    return RENT_PER_M2.get(key) or KRAJ_RENT_FALLBACK.get(key) or RENT_PER_M2["default"]
+
+
+def rent_fallback_kind(key: str, market: str = "sk") -> Optional[str]:
+    """"default" (the national €/m² — the town is in no table), "kraj" (the
+    median of the kraj's towns), or None for a key that names the place."""
+    if not _sk(market):
+        from engine import rent_cz
+        return rent_cz.rent_fallback_kind(key)
+    if not key or key == "default":
+        return "default"
+    if key in KRAJ_RENT_FALLBACK and key not in RENT_PER_M2:
+        return "kraj"
+    return None
 
 # A major city named anywhere in the district string falls back to a base
 # (non-numbered) district rate as a reasonable approximation.
@@ -243,18 +470,25 @@ _CITY_ANCHORS = [
 ]
 
 
-def match_rent_key(district: str) -> str:
-    """The RENT_PER_M2 key a district string resolves to ("default" when
-    nothing matches). Live rent comps are aggregated under these same keys
-    (engine/rent_comps), so a live rate replaces exactly the baseline it is
-    measured against."""
+def match_rent_key(district: str, market: str = "sk") -> str:
+    """The rent key a district string resolves to: a RENT_PER_M2 key, a kraj
+    fallback (KRAJ_RENT_FALLBACK), or "default" when nothing matches. Live
+    rent comps are aggregated under these same keys (engine/rent_comps), so a
+    live rate replaces exactly the baseline it is measured against.
+    (Czechia: engine.rent_cz.match_rent_key.)"""
+    if not _sk(market):
+        from engine import rent_cz
+        return rent_cz.match_rent_key(district)
     key = (district or "").lower().strip()
+    folded = _fold(key)
 
-    # 1. Exact match — including the city-only keys.
-    if key in RENT_PER_M2:
+    # 1. Exact match — including the city-only keys and the kraj fallbacks.
+    if key in RENT_PER_M2 or key in KRAJ_RENT_FALLBACK:
         return key
+    if folded in _KEYS_BY_FOLDED:
+        return _KEYS_BY_FOLDED[folded]
 
-    # 2. A known district name appears inside the address string.
+    # 2. A known district name appears in the address string as whole words.
     # Iterate longest-first so "petržalka" beats "ružinov" when both are
     # subsumed; suburbs/specific districts are preferred over bare city
     # names ("bratislava", "košice"), which are reserved as final fallbacks.
@@ -262,78 +496,128 @@ def match_rent_key(district: str) -> str:
     for known in _KEYS_BY_SPECIFICITY:
         if outside_ba and known in _BA_CITY_PART_KEYS:
             continue
-        if known in key:
+        if _KEY_PATTERNS[known].search(folded):
             return known
 
-    # 3. Reverse: district token appears in a known key (longest-first so
-    # "košice i" wins over plain "košice" when district is just "košice i")
-    if key:
-        for known in _KEYS_BY_SPECIFICITY:
-            if key in known:
-                return known
+    # 3. A shortened name: the district is the first word(s) of exactly one
+    # key ("Žiar" → "žiar nad hronom"). A district made only of words that
+    # name no place ("Nové", "Mesto") matches nothing here.
+    words = re.findall(r"\w+", folded)
+    if words and not all(w in _GENERIC_PLACE_WORDS for w in words):
+        prefix = " ".join(words)
+        hits = [k for k in _KEYS_BY_SPECIFICITY
+                if " ".join(re.findall(r"\w+", _fold(k))).startswith(prefix + " ")]
+        if len(hits) == 1:
+            return hits[0]
 
     # 4. City-name anchor.
     for city, fallback_key in _CITY_ANCHORS:
-        if city in key:
+        if _fold(city) in folded:
             return fallback_key if fallback_key in RENT_PER_M2 else "default"
+
+    # 5. A town with no rent entry of its own: its kraj's median.
+    kraj = kraj_for_district(key)
+    if kraj and KRAJ_NAMES[kraj].lower() in KRAJ_RENT_FALLBACK:
+        return KRAJ_NAMES[kraj].lower()
 
     return "default"
 
 
-def base_rent_rate(district: str, rates=None) -> tuple[float, str, str]:
+def base_rent_rate(district: str, rates=None, market: str = "sk") -> tuple[float, str, str]:
     """(€/m² for a 2-izb baseline flat, matched key, source) before the
     industrial / rooms / feature multipliers.
 
     `rates` is an optional {key: €/m²} of live comps (engine/rent_comps); a
     key it carries wins over the hard-coded RENT_PER_M2 baseline. source is
     "live" or "baseline" so the dashboard can say which one drove the rent.
+    (Czechia: Kč/m² and its own keys.)
     """
-    k = match_rent_key(district)
+    k = match_rent_key(district, **_mkw(market))
     if rates and rates.get(k):
         return float(rates[k]), k, "live"
-    return RENT_PER_M2.get(k, RENT_PER_M2["default"]), k, "baseline"
+    if _sk(market):
+        return baseline_rent(k), k, "baseline"
+    # A Czech place with no rent figure (engine/rent_cz) has no rent: an
+    # error the scorer reports, never a guess.
+    return _need(baseline_rent(k, market=market),
+                 f"rent figure for {district or 'a blank district'!r}", market,
+                 "engine/rent_cz.py"), k, "baseline"
+
+
+def _rent_premiums(market: str) -> tuple:
+    if _sk(market):
+        return (INDUSTRIAL_ZONES, INDUSTRIAL_RENT_PREMIUM, PARKING_RENT_PREMIUM,
+                BALCONY_RENT_PREMIUM)
+    m = markets.get(market)
+    return (m.industrial_zones, m.industrial_rent_premium, m.parking_rent_premium,
+            m.balcony_rent_premium)
 
 
 def get_rent_estimate(district: str, size_m2: float, rooms=None,
                       parking=None, furnished=None, balcony=None,
-                      rates=None) -> float:
+                      rates=None, market: str = "sk") -> float:
     key = (district or "").lower().strip()
-    rate, _, source = base_rent_rate(district, rates)
+    rate, _, source = base_rent_rate(district, rates, **_mkw(market))
+    zones, industrial, parking_premium, balcony_premium = _rent_premiums(market)
 
     # A live comp already contains whatever the local employer adds to demand;
     # only the published baseline needs the industrial premium on top.
-    if source == "baseline" and any(z in key for z in INDUSTRIAL_ZONES):
-        rate *= INDUSTRIAL_RENT_PREMIUM
-    rate *= _rooms_multiplier(rooms)
+    if source == "baseline" and any(z in key for z in zones):
+        rate *= industrial
+    # Slovakia's table is a 2-izb flat's, so the rooms multiplier applies; a
+    # Czech figure is an average over every size (engine/rent_cz): none.
+    rate *= _rooms_multiplier(rooms) if _sk(market) else 1.0
     # Description-derived premiums (only when the description was parsed; a
     # falsy parking/balcony flag and unfurnished/unknown furnishing leave rate
     # untouched).
     if parking:
-        rate *= PARKING_RENT_PREMIUM
-    rate *= _furnished_multiplier(furnished)
+        rate *= parking_premium
+    rate *= _furnished_multiplier(furnished, market)
     if balcony:
-        rate *= BALCONY_RENT_PREMIUM
+        rate *= balcony_premium
     return round(rate * size_m2, 2)
 
 
-def is_industrial_zone(district: str) -> bool:
+def is_industrial_zone(district: str, market: str = "sk") -> bool:
     key = district.lower().strip()
-    return any(z in key for z in INDUSTRIAL_ZONES)
+    return any(z in key for z in _rent_premiums(market)[0])
 
 
 def default_ltv(properties_owned: Optional[int] = None,
-                on: Optional[str] = None) -> float:
+                on: Optional[str] = None, market: str = "sk") -> float:
     """The LTV a bank will lend at for your next purchase.
 
     NBS caps a 3rd-and-subsequent residential property at 70% from
     INVESTOR_LTV_FROM (1 Oct 2026). Owning 2+ already makes the next one a 3rd.
-    `on` is an ISO date (default today) so tests can sit either side of it.
+    Czechia: ČNB's investment-mortgage limit (markets.py) applies to a 3rd+
+    property and to any property bought to let — every purchase this tool
+    scores — from 1 Apr 2026. `on` is an ISO date (default today) so tests
+    can sit either side of it.
     """
     owned = PROPERTIES_OWNED if properties_owned is None else properties_owned
+    investor = owned >= 2
+    if _sk(market):
+        ltv, ltv_investor, investor_from = LTV_RATIO, LTV_RATIO_INVESTOR, INVESTOR_LTV_FROM
+    else:
+        m = markets.get(market)
+        ltv = _need(m.ltv_ratio, "LTV limit", market)
+        ltv_investor = _need(m.ltv_ratio_investor, "investor LTV limit", market)
+        investor_from = _need(m.investor_ltv_from, "investor LTV start date", market)
+        investor = investor or bool(m.lending_rules.get("rental_is_investment"))
     today = on or datetime.now(timezone.utc).date().isoformat()
-    if owned >= 2 and today >= INVESTOR_LTV_FROM:
-        return LTV_RATIO_INVESTOR
-    return LTV_RATIO
+    if investor and today >= investor_from:
+        return ltv_investor
+    return ltv
+
+
+def _money(v: float, market: str = "sk", decimals: int = 0, plus: bool = False,
+           unit: str = "") -> str:
+    """An amount for the recommendation text: Slovakia's exactly as it always
+    read ("€1,234", "€+41"), another market's in its own currency."""
+    if _sk(market):
+        return (f"€{v:+,.{decimals}f}" if plus else f"€{v:,.{decimals}f}") + unit
+    return markets.format_money(v, markets.get(market).currency, decimals,
+                                signed=plus) + unit
 
 
 def analyse(
@@ -347,38 +631,60 @@ def analyse(
     parking=None,
     furnished=None,
     balcony=None,
-    rate: float = MORTGAGE_RATE_PA,
-    term_years: int = LOAN_TERM_YEARS,
+    rate: Optional[float] = None,
+    term_years: Optional[int] = None,
     rent_rates=None,
+    tax_year: Optional[int] = None,
+    sro_ltv: Optional[float] = None,
+    sro_rate_premium: Optional[float] = None,
+    sro_running_cost: Optional[float] = None,
+    market: str = "sk",
 ) -> FinancialResult:
     """Score one property under both ownership structures.
 
     ltv defaults to default_ltv() — 80%, or the 70% investor cap when
     PROPERTIES_OWNED says this is a 3rd+ property. rate / term_years default to
     config and exist so the what-if panel and the stress test can vary them.
-    rent_rates is an optional {rent key: €/m²} of live comps.
+    The s.r.o. borrows on its own terms (sro_financing: rate + premium, LTV
+    capped) and pays its running cost every year; sro_* override those.
+    rent_rates is an optional {rent key: €/m²} of live comps. tax_year picks
+    the tax table (config.tax_rules; default the current tax year).
+
+    `market` picks every one of those defaults, the tax rules and the
+    currency: price_eur and every amount in the result are in the market's
+    own currency (CZK for "cz") — the name predates the Czech market.
     """
+    mkt = markets.normalize(market)
+    sk = mkt == "sk"
+    prof = markets.get(mkt)
+    if rate is None:
+        rate = MORTGAGE_RATE_PA if sk else _need(prof.mortgage_rate_pa, "mortgage rate", mkt)
+    if term_years is None:
+        term_years = LOAN_TERM_YEARS if sk else _need(prof.loan_term_years, "loan term", mkt)
     if ltv is None:
-        ltv = default_ltv()
+        ltv = default_ltv(**_mkw(mkt))
+    rules = tax_rules(tax_year) if sk else markets.tax_rules(tax_year, mkt)
+    sro_ltv_used, sro_rate = sro_financing(ltv, rate, sro_ltv, sro_rate_premium, **_mkw(mkt))
+    if sro_running_cost is not None:
+        running_annual = sro_running_cost
+    elif sk:
+        running_annual = SRO_ANNUAL_RUNNING_COST
+    else:
+        running_annual = _need(prof.sro_annual_running_cost, "s.r.o. running cost", mkt)
+    setup_cost = SRO_SETUP_COST if sk else _need(prof.sro_setup_cost, "s.r.o. setup cost", mkt)
 
-    loan_amount     = price_eur * ltv
-    equity          = price_eur * (1 - ltv)
-    acquisition     = price_eur * ACQUISITION_COST_RATE
-    cash_invested   = equity + acquisition
+    acquisition     = acquisition_costs(price_eur, **_mkw(mkt))
+    rent_key        = match_rent_key(district, **_mkw(mkt))
     rent            = rent_override or get_rent_estimate(
-        district, size_m2, rooms, parking, furnished, balcony, rates=rent_rates)
+        district, size_m2, rooms, parking, furnished, balcony, rates=rent_rates,
+        **_mkw(mkt))
     annual_rent     = rent * 12
-
-    # Mortgage (annuity) split into interest vs principal — principal is equity
-    # buildup, not an expense, so it's tracked separately for total-return math.
-    mortgage_mo     = calc_mortgage(loan_amount, rate, term_years)
-    interest_mo, principal_mo = first_year_amortization(loan_amount, rate, term_years)
 
     # ── Operating expenses (exclude debt service & income tax) ────
     # HOA already includes the fond opráv (building shell); the owner reserve
     # covers only in-flat capex, so the two don't double-count.
-    hoa_mo          = calc_hoa(size_m2)
-    prop_tax_mo     = (price_eur * PROPERTY_TAX_RATE_PA) / 12
+    hoa_mo          = calc_hoa(size_m2, **_mkw(mkt))
+    prop_tax_mo     = property_tax_annual(price_eur, size_m2, district, **_mkw(mkt)) / 12
     vacancy_mo      = rent * VACANCY_RATE
     owner_reserve_mo = rent * OWNER_RESERVE_RATE
     mgmt_mo         = rent * PROPERTY_MGMT_RATE
@@ -389,47 +695,66 @@ def analyse(
     noi_annual      = noi_mo * 12
     cap_rate        = noi_annual / price_eur if price_eur > 0 else 0
 
-    # Cash cost of carrying the loan each month (interest + principal).
-    operating_mo    = opex_mo + mortgage_mo
-
-    # ── Personal scenario (passive §6(3): no health levy, €500 exempt) ──
-    taxable_p       = max(noi_annual - RENTAL_INCOME_EXEMPTION, 0)
-    tax_p_annual    = calc_income_tax_personal(taxable_p)
-    levy_p_annual   = taxable_p * HEALTH_LEVY_PERSONAL  # 0 for passive rental
+    # ── Personal scenario (SK passive §6(3): no health levy, €500 exempt;
+    # CZ §9: flat-rate or actual expenses, interest deductible) ──
+    # Mortgage (annuity) split into interest vs principal — principal is equity
+    # buildup, not an expense, so it's tracked separately for total-return math.
+    loan_amount     = price_eur * ltv
+    equity          = price_eur * (1 - ltv)
+    cash_invested   = equity + acquisition
+    mortgage_mo     = calc_mortgage(loan_amount, rate, term_years)
+    interest_mo, principal_mo = first_year_amortization(loan_amount, rate, term_years)
+    taxable_p       = personal_rental_base(
+        rules, noi_annual=noi_annual, rent_annual=(rent - vacancy_mo) * 12,
+        expenses_annual=(hoa_mo + prop_tax_mo + owner_reserve_mo + mgmt_mo) * 12,
+        interest_annual=interest_mo * 12)
+    tax_p_annual    = calc_income_tax_personal(taxable_p, rules)
+    levy_p_annual   = taxable_p * rules["health_levy_personal"]  # 0 for passive rental
     tax_p_mo        = tax_p_annual / 12
     levy_p_mo       = levy_p_annual / 12
-    total_p_mo      = operating_mo + tax_p_mo + levy_p_mo
+    total_p_mo      = opex_mo + mortgage_mo + tax_p_mo + levy_p_mo
     surplus_p       = rent - total_p_mo
     ratio_p         = rent / total_p_mo if total_p_mo > 0 else 0
 
-    # ── s.r.o. scenario (deducts interest; corporate tax + dividend tax) ──
-    taxable_s       = max(noi_annual - interest_mo * 12, 0)
-    tax_s_annual    = calc_tax_sro(taxable_s, annual_rent)
+    # ── s.r.o. scenario (company loan; deducts interest and its running
+    # cost; corporate tax + dividend tax) ──
+    loan_s          = price_eur * sro_ltv_used
+    cash_invested_s = price_eur * (1 - sro_ltv_used) + acquisition
+    mortgage_s_mo   = calc_mortgage(loan_s, sro_rate, term_years)
+    interest_s_mo, principal_s_mo = first_year_amortization(loan_s, sro_rate, term_years)
+    running_mo      = running_annual / 12
+    taxable_s       = max(noi_annual - interest_s_mo * 12 - running_annual, 0)
+    tax_s_annual    = calc_tax_sro(taxable_s, annual_rent, rules)
     tax_s_mo        = tax_s_annual / 12
     levy_s_mo       = 0.0
-    total_s_mo      = operating_mo + tax_s_mo + levy_s_mo
+    total_s_mo      = opex_mo + mortgage_s_mo + running_mo + tax_s_mo + levy_s_mo
     surplus_s       = rent - total_s_mo
     ratio_s         = rent / total_s_mo if total_s_mo > 0 else 0
 
-    # ── Key metrics (use s.r.o. as primary — usually better structure) ────
+    # ── Key metrics (on the s.r.o.'s own financing, as before) ────
     annual_cf_sro   = surplus_s * 12
-    coc             = annual_cf_sro / cash_invested if cash_invested > 0 else 0
+    coc             = annual_cf_sro / cash_invested_s if cash_invested_s > 0 else 0
     net_yield       = annual_cf_sro / price_eur if price_eur > 0 else 0
     gross_yield     = annual_rent / price_eur if price_eur > 0 else 0
-    principal_paydown_annual = principal_mo * 12
+    principal_paydown_annual = principal_s_mo * 12
     # Total return adds equity built via amortization (appreciation NOT modelled).
     total_return_annual = annual_cf_sro + principal_paydown_annual
-    total_roi       = total_return_annual / cash_invested if cash_invested > 0 else 0
+    total_roi       = total_return_annual / cash_invested_s if cash_invested_s > 0 else 0
 
     # ── Decision ──────────────────────────────────────────────────
+    # The s.r.o. is recommended only when it comes out ahead after its
+    # running cost and company-loan terms, and that gain repays the setup
+    # cost within the hold period.
     annual_sro_saving   = (surplus_s - surplus_p) * 12
-    optimal             = "SRO" if annual_sro_saving >= 0 else "PERSONAL"
-    break_even          = math.ceil(SRO_SETUP_COST / (annual_sro_saving / 12)) \
+    break_even          = math.ceil(setup_cost / (annual_sro_saving / 12)) \
                          if annual_sro_saving > 0 else None
+    sro_pays            = (annual_sro_saving > 0
+                           and annual_sro_saving * HOLD_YEARS > setup_cost)
+    optimal             = "SRO" if sro_pays else "PERSONAL"
 
-    # ── Class: discount to the regional median €/m² ───────────────
-    median = regional_median_price(district)
-    discount = discount_to_median(price_eur, size_m2, district)
+    # ── Class: discount to the room-adjusted regional median €/m² ─
+    median = benchmark_median(district, rooms, **_mkw(mkt))
+    discount = discount_to_median(price_eur, size_m2, district, rooms, **_mkw(mkt))
     cls = classify(discount)
 
     # Recommendation
@@ -438,7 +763,8 @@ def analyse(
         parts.append("⚪ WHITE — no regional price benchmark for this district.")
     else:
         where = (f"{abs(discount)*100:.0f}% {'below' if discount >= 0 else 'above'} "
-                 f"the regional median (€{price_eur/size_m2:,.0f} vs €{median:,.0f}/m²)")
+                 f"the regional median ({_money(price_eur/size_m2, mkt)} vs "
+                 f"{_money(median, mkt)}/m²)")
         label = {"GREEN": "🟢 GREEN", "YELLOW": "🟡 YELLOW", "WHITE": "⚪ WHITE"}[cls]
         parts.append(f"{label} — {where}, gross yield {gross_yield*100:.1f}%.")
         if below_sanity_floor(discount):
@@ -447,22 +773,45 @@ def analyse(
         elif round(discount, 4) >= NEAR_FLOOR_DISCOUNT:
             parts.append("⚠️ Close to the sanity floor — confirm the price is this "
                          "flat's own, not a deposit, an 'od €X' price or another listing's.")
-    parts.append(f"Self-funding at {ltv*100:.0f}% LTV: {ratio_s*100:.0f}% (s.r.o.).")
+    best = max(surplus_p, surplus_s)
+    if is_cashflow_negative(best, **_mkw(mkt)):
+        parts.append(f"⛔ Cash-flow negative: {_money(best, mkt, plus=True)}/mo under the better "
+                     f"structure — the class is price vs market, not income.")
+    parts.append(f"Self-funding at {ltv*100:.0f}% LTV: {ratio_p*100:.0f}% personal, "
+                 f"{ratio_s*100:.0f}% s.r.o. ({sro_ltv_used*100:.0f}% LTV at "
+                 f"{sro_rate*100:.2f}%).")
 
-    if annual_sro_saving > 0:
-        parts.append(f"s.r.o. saves €{annual_sro_saving:,.0f}/yr vs personal. "
-                     f"Setup cost recovered in {break_even} months.")
+    if sro_pays:
+        parts.append(f"s.r.o. nets {_money(annual_sro_saving, mkt)}/yr more than personal "
+                     f"after its {_money(running_annual, mkt)}/yr running cost. Setup cost "
+                     f"recovered in {break_even} months.")
+    elif annual_sro_saving > 0:
+        parts.append(f"s.r.o. nets only {_money(annual_sro_saving, mkt)}/yr more — its "
+                     f"{_money(setup_cost, mkt)} setup cost takes {break_even} months to "
+                     f"recover, beyond the {HOLD_YEARS}-year hold. Personal is better.")
     else:
-        parts.append("Personal ownership marginally better — low income band.")
+        parts.append(f"Personal ownership is better: the s.r.o. comes out "
+                     f"{_money(-annual_sro_saving, mkt)}/yr worse after its running cost "
+                     f"and company-loan terms.")
 
-    if is_industrial_zone(district):
+    if rent_override is None:
+        fallback = rent_fallback_kind(rent_key, **_mkw(mkt))
+        if fallback == "default":
+            parts.append(f"⚠️ Rent uses the national default "
+                         f"{_money(baseline_rent('default', **_mkw(mkt)), mkt, 2)}/m² "
+                         f"— this town is in no rent table.")
+        elif fallback == "kraj":
+            parts.append(f"⚠️ Rent uses the {rent_key.title()} median of its towns — "
+                         f"no rent figure for this town itself.")
+
+    if is_industrial_zone(district, **_mkw(mkt)):
         parts.append(f"⚙️ Industrial zone premium applied ({district}).")
 
     # Description-derived rent premiums (only when no manual override was given).
     if rent_override is None:
         if parking:
             parts.append("🅿️ Parking premium applied.")
-        if _furnished_multiplier(furnished) > 1.0:
+        if _furnished_multiplier(furnished, mkt) > 1.0:
             parts.append(f"🛋️ Furnished premium applied ({furnished}).")
         if balcony:
             parts.append("🌿 Balcony premium applied.")
@@ -500,7 +849,7 @@ def analyse(
         cash_on_cash          = round(coc, 4),
         net_rental_yield      = round(net_yield, 4),
         gross_yield           = round(gross_yield, 4),
-        principal_paydown_monthly = round(principal_mo, 2),
+        principal_paydown_monthly = round(principal_s_mo, 2),
         total_return_annual   = round(total_return_annual, 2),
         total_roi             = round(total_roi, 4),
         regional_median_m2    = median,
@@ -513,6 +862,17 @@ def analyse(
         mortgage_rate         = rate,
         ltv                   = ltv,
         loan_term_years       = term_years,
+        sro_mortgage_rate     = sro_rate,
+        sro_ltv               = sro_ltv_used,
+        loan_amount_sro       = round(loan_s, 2),
+        mortgage_monthly_sro  = round(mortgage_s_mo, 2),
+        total_cash_invested_sro = round(cash_invested_s, 2),
+        sro_running_cost_monthly = round(running_mo, 2),
+        rooms                 = rooms,
+        rent_key              = rent_key,
+        tax_year              = rules["year"],
+        market                = mkt,
+        currency              = prof.currency,
     )
 
 
@@ -543,28 +903,34 @@ def below_sanity_floor(market_discount: Optional[float]) -> bool:
             and round(market_discount, 4) > 1 - REGIONAL_PRICE_FLOOR_RATIO)
 
 
-def discount_to_median(price_eur: float, size_m2: float, district: str) -> Optional[float]:
-    """How far the asking €/m² sits below the regional median (0.2 = 20%
-    below; negative = above). None without a benchmark, a price or a size."""
-    median = regional_median_price(district or "")
+def discount_to_median(price_eur: float, size_m2: float, district: str,
+                       rooms=None, market: str = "sk") -> Optional[float]:
+    """How far the asking €/m² sits below the regional median, adjusted for
+    the room count (benchmark_median; 0.2 = 20% below; negative = above).
+    None without a benchmark, a price or a size."""
+    median = benchmark_median(district or "", rooms, **_mkw(market))
     if not median or not size_m2 or size_m2 <= 0 or not price_eur or price_eur <= 0:
         return None
     return 1 - (price_eur / size_m2) / median
 
 
-def class_at_price(price_eur: float, size_m2: float, district: str) -> str:
+def class_at_price(price_eur: float, size_m2: float, district: str,
+                   rooms=None, market: str = "sk") -> str:
     """The class a listing would get at `price_eur` — what analyse() would
     say, without the cashflow work. For a price cut or a what-if offer: a
     price below the sanity floor comes out WHITE, not as a bargain."""
-    return classify(discount_to_median(price_eur, size_m2, district))
+    return classify(discount_to_median(price_eur, size_m2, district, rooms, **_mkw(market)))
 
 
 # ── Max offer price ───────────────────────────────────────────────────────────
 TARGET_DISCOUNTS = {"GREEN": GREEN_DISCOUNT, "YELLOW": YELLOW_DISCOUNT}
+# A Czech max offer is rounded down to this many crowns (€500 in Slovakia).
+OFFER_STEP_CZK = 10_000.0
 
 
 def max_offer_price(size_m2: float, district: str, target: str = "YELLOW", *,
-                    step: float = 500.0) -> Optional[float]:
+                    rooms=None, step: Optional[float] = None,
+                    market: str = "sk") -> Optional[float]:
     """The highest price at which the listing still classifies as `target`,
     rounded DOWN to `step`.
 
@@ -572,13 +938,17 @@ def max_offer_price(size_m2: float, district: str, target: str = "YELLOW", *,
     boundary is median × size × (1 − threshold). That figure is then checked
     through analyse() itself and stepped down if rounding left it a hair
     short, so the answer can never promise a class analyse() wouldn't give.
-    Financing doesn't enter: the class doesn't depend on it. None when the
-    district has no regional median (such a listing is WHITE at any price).
+    Financing doesn't enter: the class doesn't depend on it. The median is
+    the room-adjusted one analyse() uses. None when the district has no
+    regional median (such a listing is WHITE at any price). `step` defaults
+    to €500 — Kč 10,000 for a Czech one.
     """
+    if step is None:
+        step = 500.0 if _sk(market) else OFFER_STEP_CZK
     threshold = TARGET_DISCOUNTS[target.upper()]
     if not size_m2 or size_m2 <= 0:
         return None
-    median = regional_median_price(district or "")
+    median = benchmark_median(district or "", rooms, **_mkw(market))
     if not median:
         return None
     wanted = ("GREEN",) if target.upper() == "GREEN" else ("GREEN", "YELLOW")
@@ -594,11 +964,19 @@ def max_offer_price(size_m2: float, district: str, target: str = "YELLOW", *,
 
 # ── Stress test ───────────────────────────────────────────────────────────────
 def rate_shock(price_eur: float, size_m2: float, district: str, *,
-               shock: float = RATE_SHOCK_PP, rate: float = MORTGAGE_RATE_PA,
-               **kwargs) -> FinancialResult:
+               shock: Optional[float] = None, rate: Optional[float] = None,
+               market: str = "sk", **kwargs) -> FinancialResult:
     """analyse() at the mortgage rate + `shock` (default +2 pp, the NBS
-    affordability stress). Whatever else is passed goes straight through."""
-    return analyse(price_eur, size_m2, district, rate=rate + shock, **kwargs)
+    affordability stress; Czechia: the market's own). Whatever else is passed
+    goes straight through."""
+    if _sk(market):
+        shock = RATE_SHOCK_PP if shock is None else shock
+        rate = MORTGAGE_RATE_PA if rate is None else rate
+    else:
+        prof = markets.get(market)
+        shock = _need(prof.rate_shock_pp, "stress-test add-on", market) if shock is None else shock
+        rate = _need(prof.mortgage_rate_pa, "mortgage rate", market) if rate is None else rate
+    return analyse(price_eur, size_m2, district, rate=rate + shock, **kwargs, **_mkw(market))
 
 
 # ── Hold-period IRR ───────────────────────────────────────────────────────────
@@ -665,15 +1043,19 @@ class IrrResult:
 
 def project_irr(price_eur: float, size_m2: float, district: str, *,
                 structure: str = "SRO", rent: Optional[float] = None,
-                ltv: Optional[float] = None, rate: float = MORTGAGE_RATE_PA,
-                term_years: int = LOAN_TERM_YEARS,
+                ltv: Optional[float] = None, rate: Optional[float] = None,
+                term_years: Optional[int] = None,
                 hold_years: int = HOLD_YEARS,
-                appreciation: float = APPRECIATION_RATE,
-                rent_growth: float = RENT_GROWTH_RATE,
-                cost_inflation: float = COST_INFLATION_RATE,
-                exit_cost_rate: float = EXIT_COST_RATE,
+                appreciation: Optional[float] = None,
+                rent_growth: Optional[float] = None,
+                cost_inflation: Optional[float] = None,
+                exit_cost_rate: Optional[float] = None,
                 rooms=None, parking=None, furnished=None, balcony=None,
-                rent_rates=None) -> IrrResult:
+                rent_rates=None, tax_year: Optional[int] = None,
+                sro_ltv: Optional[float] = None,
+                sro_rate_premium: Optional[float] = None,
+                sro_running_cost: Optional[float] = None,
+                market: str = "sk") -> IrrResult:
     """Buy, hold `hold_years`, sell — and the IRR of the equity cash flows.
 
     Year 0 is the cash put in (deposit + acquisition costs). Each year after
@@ -689,43 +1071,77 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
                 sale at no gain costs that year's rental profit the 10% rate).
     exit_tax is the whole extra tax the sale causes that year.
     Appreciation is not modelled anywhere else; this is the one place it shows.
+
+    `ltv` / `rate` are the personal terms; the s.r.o. borrows on its own
+    (sro_financing) and pays its running cost every year, growing with
+    cost_inflation and deductible. Every year is taxed under the tax_year
+    table — later years' rules are not known yet. `market` picks every
+    default, the tax rules and the currency (as in analyse()).
     """
+    mkt = markets.normalize(market)
+    sk = mkt == "sk"
+    prof = markets.get(mkt)
+
+    def pick(value, sk_default, attr, what):
+        if value is not None:
+            return value
+        return sk_default if sk else _need(getattr(prof, attr), what, mkt)
+    rate = pick(rate, MORTGAGE_RATE_PA, "mortgage_rate_pa", "mortgage rate")
+    term_years = pick(term_years, LOAN_TERM_YEARS, "loan_term_years", "loan term")
+    appreciation = pick(appreciation, APPRECIATION_RATE, "appreciation_rate", "price growth")
+    rent_growth = pick(rent_growth, RENT_GROWTH_RATE, "rent_growth_rate", "rent growth")
+    cost_inflation = pick(cost_inflation, COST_INFLATION_RATE, "cost_inflation_rate",
+                          "cost inflation")
+    exit_cost_rate = pick(exit_cost_rate, EXIT_COST_RATE, "exit_cost_rate", "exit costs")
     structure = structure.upper()
     if ltv is None:
-        ltv = default_ltv()
+        ltv = default_ltv(**_mkw(mkt))
+    rules = tax_rules(tax_year) if sk else markets.tax_rules(tax_year, mkt)
+    running = setup = 0.0
+    if structure == "SRO":
+        ltv, rate = sro_financing(ltv, rate, sro_ltv, sro_rate_premium, **_mkw(mkt))
+        running = pick(sro_running_cost, SRO_ANNUAL_RUNNING_COST,
+                       "sro_annual_running_cost", "s.r.o. running cost")
+        # The company is set up once, at the start: a cost only it pays.
+        setup = pick(None, SRO_SETUP_COST, "sro_setup_cost", "s.r.o. setup cost")
     if rent is None:
         rent = get_rent_estimate(district, size_m2, rooms, parking, furnished,
-                                 balcony, rates=rent_rates)
+                                 balcony, rates=rent_rates, **_mkw(mkt))
     hold_years = max(int(hold_years), 1)
 
     loan = price_eur * ltv
-    acquisition = price_eur * ACQUISITION_COST_RATE
-    equity_in = price_eur * (1 - ltv) + acquisition
+    acquisition = acquisition_costs(price_eur, **_mkw(mkt))
+    equity_in = price_eur * (1 - ltv) + acquisition + setup
     payment_y = calc_mortgage(loan, rate, term_years) * 12
     schedule = amortization_schedule(loan, rate, term_years)
-    prop_tax_y = price_eur * PROPERTY_TAX_RATE_PA
-    hoa_mo = calc_hoa(size_m2)
+    prop_tax_y = property_tax_annual(price_eur, size_m2, district, **_mkw(mkt))
+    hoa_mo = calc_hoa(size_m2, **_mkw(mkt))
     var_cost_rate = VACANCY_RATE + OWNER_RESERVE_RATE + PROPERTY_MGMT_RATE
 
     def personal_tax(taxable: float) -> float:
-        return calc_income_tax_personal(max(taxable, 0.0))
+        return calc_income_tax_personal(max(taxable, 0.0), rules)
 
     flows = [-equity_in]
     sale_price = exit_costs = balance = exit_tax = 0.0
     for t in range(1, hold_years + 1):
         rent_y = rent * 12 * (1 + rent_growth) ** (t - 1)
         hoa_y = hoa_mo * 12 * (1 + cost_inflation) ** (t - 1)
-        noi = rent_y - hoa_y - prop_tax_y - rent_y * var_cost_rate
+        noi = (rent_y - hoa_y - prop_tax_y - rent_y * var_cost_rate
+               - running * (1 + cost_inflation) ** (t - 1))
         if t <= term_years:
             interest, _, balance = schedule[t - 1]
             debt = payment_y
         else:
             interest, debt, balance = 0.0, 0.0, 0.0
 
-        op_taxable_p = max(noi - RENTAL_INCOME_EXEMPTION, 0.0)
+        op_taxable_p = personal_rental_base(
+            rules, noi_annual=noi, rent_annual=rent_y * (1 - VACANCY_RATE),
+            expenses_annual=(hoa_y + prop_tax_y
+                             + rent_y * (OWNER_RESERVE_RATE + PROPERTY_MGMT_RATE)),
+            interest_annual=interest)
         op_taxable_s = max(noi - interest, 0.0)
         if t < hold_years:
-            tax = (calc_tax_sro(op_taxable_s, rent_y) if structure == "SRO"
+            tax = (calc_tax_sro(op_taxable_s, rent_y, rules) if structure == "SRO"
                    else personal_tax(op_taxable_p))
             flows.append(noi - debt - tax)
             continue
@@ -735,11 +1151,12 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
         exit_costs = sale_price * exit_cost_rate
         gain = max(sale_price - exit_costs - price_eur - acquisition, 0.0)
         if structure == "SRO":
-            op_tax = calc_tax_sro(op_taxable_s, rent_y)
-            all_tax = calc_tax_sro(op_taxable_s + gain, rent_y + sale_price)
+            op_tax = calc_tax_sro(op_taxable_s, rent_y, rules)
+            all_tax = calc_tax_sro(op_taxable_s + gain, rent_y + sale_price, rules)
         else:
             op_tax = personal_tax(op_taxable_p)
-            taxed_gain = 0.0 if hold_years >= PERSONAL_CGT_EXEMPT_YEARS else gain
+            exempt_after = rules["personal_cgt_exempt_years"]
+            taxed_gain = 0.0 if hold_years >= exempt_after else gain
             all_tax = personal_tax(op_taxable_p + taxed_gain)
         exit_tax = all_tax - op_tax
         flows.append(noi - debt - all_tax + sale_price - exit_costs - balance)
@@ -766,14 +1183,18 @@ def deal_extras(r: FinancialResult) -> dict:
     +2 pp rate shock and the hold-period IRRs. All are worked out on the
     score's own rent and financing, so they agree with it. (Value vs the
     regional market is already on the score: market_discount.)"""
+    mk = _mkw(r.market)
+    sro = dict(sro_ltv=r.sro_ltv, sro_rate_premium=r.sro_mortgage_rate - r.mortgage_rate,
+               sro_running_cost=r.sro_running_cost_monthly * 12, tax_year=r.tax_year)
     kw = dict(rent=r.estimated_rent, ltv=r.ltv, rate=r.mortgage_rate,
-              term_years=r.loan_term_years)
+              term_years=r.loan_term_years, **sro, **mk)
     shocked = rate_shock(r.price_eur, r.size_m2, r.district,
                          rent_override=r.estimated_rent, ltv=r.ltv,
-                         rate=r.mortgage_rate, term_years=r.loan_term_years)
+                         rate=r.mortgage_rate, term_years=r.loan_term_years,
+                         rooms=r.rooms, **sro, **mk)
     return {
-        "max_price_green":    max_offer_price(r.size_m2, r.district, "GREEN"),
-        "max_price_yellow":   max_offer_price(r.size_m2, r.district, "YELLOW"),
+        "max_price_green":    max_offer_price(r.size_m2, r.district, "GREEN", rooms=r.rooms, **mk),
+        "max_price_yellow":   max_offer_price(r.size_m2, r.district, "YELLOW", rooms=r.rooms, **mk),
         "stress_surplus_sro": shocked.surplus_sro,
         "stress_ratio_sro":   shocked.ratio_sro,
         "irr_sro":            project_irr(r.price_eur, r.size_m2, r.district,
@@ -791,6 +1212,8 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
     Each component contributes points out of its own max; only components with
     data are counted, and the score is rescaled to 100 over the available maxima
     so a missing location score (no Google API) doesn't unfairly sink the grade.
+    The discount to the regional median is the exception: a listing with no
+    benchmark earns 0 of its 25 rather than being graded without it.
 
     Components & weights:
       Financial (50): cap rate (25) + discount to the regional median (25)
@@ -805,6 +1228,10 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
     """
     points = 0.0
     max_pts = 0.0
+    # A price below the sanity floor is a misread, not a bargain (classify()
+    # makes it WHITE): it earns no score, never the top of the ranking.
+    if below_sanity_floor(row.get("market_discount")):
+        return 0, "—"
 
     # ── Financial (yield + discount) ──
     # The self-funding ratio used to be the second half. It sits at 0.60–0.75
@@ -816,10 +1243,14 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
         if cap is not None:
             points += max(0.0, min(cap / 0.06, 1.0)) * 25   # 6%+ cap = full marks
             max_pts += 25
+        # The discount's 25 always count. With no regional median (WHITE "no
+        # benchmark" — every Czech listing until a sale-price CSV fills the
+        # medians) it earns none of them: leaving it out of the maximum graded
+        # the flat on cap rate alone, above one that is cheap against its median.
+        max_pts += 25
         if discount is not None:
             # At or above the median → 0 pts, 30%+ below → full 25
             points += max(0.0, min(discount / 0.30, 1.0)) * 25
-            max_pts += 25
     else:
         return 0, "—"
 
@@ -906,6 +1337,14 @@ def result_to_db_dict(r: FinancialResult) -> dict:
         "mortgage_rate_used":     r.mortgage_rate,
         "ltv_used":               r.ltv,
         "loan_term_years":        r.loan_term_years,
+        "sro_rate_used":          r.sro_mortgage_rate,
+        "sro_ltv_used":           r.sro_ltv,
+        "mortgage_monthly_sro":   r.mortgage_monthly_sro,
+        "total_cash_invested_sro": r.total_cash_invested_sro,
+        "sro_running_cost_monthly": r.sro_running_cost_monthly,
+        "rent_key":               r.rent_key,
+        "tax_year":               r.tax_year,
+        "model_version":          SCORING_MODEL_VERSION,
     }
 
 

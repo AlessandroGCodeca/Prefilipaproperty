@@ -35,7 +35,7 @@ from datetime import datetime, timedelta, timezone
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
-    RENT_PER_M2, RENT_COMP_ASKING_HAIRCUT, RENT_COMP_MIN_SAMPLE,
+    RENT_COMP_ASKING_HAIRCUT, RENT_COMP_MIN_SAMPLE,
     RENT_COMP_PRIOR_WEIGHT, RENT_COMP_MAX_AGE_DAYS, RENT_MIN_EUR, RENT_MAX_EUR,
     FURNISHED_RENT_PREMIUM, SEMI_FURNISHED_PREMIUM,
 )
@@ -56,7 +56,7 @@ def _fold(text: str) -> str:
 
 
 _ENERGIES_INCLUDED_RE = re.compile(
-    r"vratane\s+(?:vsetkych\s+)?(?:energi|poplatk|sluzieb)"
+    r"vratane\s+(?:vsetkych\s+)?(?:energi|poplatk|sluzieb|zaloh)|(?<!\w)so\s+zalohami"
     r"|s\s+energiami|energie\s+(?:su\s+)?v\s+cene|v\s+cene\s+(?:su\s+|je\s+)?(?:aj\s+)?energi"
     r"|vsetko\s+v\s+cene|all\s+inclusive|cena\s+s\s+energiami"
 )
@@ -70,23 +70,52 @@ def energies_included(text: str) -> bool:
 def furnishing_from_text(text: str) -> str:
     """'furnished' / 'semi' / 'unfurnished' / 'unknown' from rental ad text."""
     t = _fold(text)
-    if "nezariaden" in t:
+    # A bathroom's fittings or a fitted (or unequipped) kitchen say nothing
+    # about furniture: "nevybavená kuchyňa, inak zariadený byt" is furnished.
+    t = re.sub(r"(?:socialn|sanitarn|hygienick)\w*\s+zariaden\w*|zariaden\w*\s+kuchyn\w*|"
+               r"kuchyn\w*(?:\s+\w+){0,2}\s+zariaden\w*|"
+               r"nevybaven\w*\s+kuchyn\w*|kuchyn\w*(?:\s+\w+){0,2}\s+nevybaven\w*", " ", t)
+    if re.search(r"nezariaden|bez\s+(?:zariadenia|nabytku)|nevybaven", t):
         return "unfurnished"
-    if re.search(r"ciastocne\s+zariaden|polozariaden|ciastocne\s+vybaven", t):
+    if re.search(r"ciastocne\s+zariaden|polozariaden|ciastocne\s+vybaven"
+                 r"|ciastocne\s+s\s+nabytkom", t):
         return "semi"
-    if re.search(r"zariaden|vybaven[ya]\s+nabytk|kompletne\s+vybaven", t):
+    # The participle that describes the flat ("zariadený", "plne zariadená")
+    # or a flat let "so zariadením", never the noun on its own (a facility:
+    # "predškolské zariadenie").
+    if re.search(r"(?<!\w)zariaden(?:y|a|e|eho|emu|om|ej|u|ych|ym|ymi)(?!\w)"
+                 r"|(?<!\w)(?:so|s\s+(?:kompletnym|celym|plnym|novym))\s+zariadenim(?!\w)"
+                 r"|vybaven[ya]\s+nabytk|kompletne\s+vybaven"
+                 r"|(?<!\w)s\s+nabytkom|nabytok\s+(?:je\s+)?v\s+cene", t):
         return "furnished"
     return "unknown"
 
 
-# Not a whole flat let long-term: a single room, a bed, a nightly let.
+# Not a whole flat let long-term: a single room on offer (not a flat that
+# names its "obývacia izba"), a bed, a nightly let. Folded, "prenájom" is
+# "prenajom" and "prenájmu"/"prenajmem" are "prenajm…": both stems count
+# ("izba na prenájom", "izbu do prenájmu", "Na prenájom izba").
 _NOT_A_FLAT_RE = re.compile(
-    r"\bizba\b|prenajom\s+izby|podnajom\s+izby|spolubyv|\blozko\b|ubytovan"
+    r"prenajom\s+izby|podnajom\s+izby|"
+    r"izb[au]\s+(?:na|k|do)\s+(?:(?:pre|pod)naj(?:om|m\w*)|naj(?:om|mu)(?!\w))|"
+    r"(?:pre|pod)naj(?:om|m\w*)\s+(?:(?!byt)\w+\s+){0,2}izbu(?!\w)|"
+    r"(?:pre|pod)najom(?:\s*[:\-–]\s*|\s+)izb[auy](?!\w)|"
+    r"(?:volna|samostatna)\s+izba\s+v|spolubyv|\blozko\b|ubytovan"
     r"|na\s+noc\b|/\s*noc\b|za\s+noc\b|na\s+den\b|kratkodob|airbnb|apartman\s+na\s+noc"
 )
 
+# A title that offers a room: "Izba …", "Voľná izba od 1.11.", "Samostatná
+# izba pre 1 osobu". Only at the start of the title — inside a whole flat's
+# ad "obývačka a samostatná izba" is one of its rooms.
+_ROOM_TITLE_RE = re.compile(r"\W*(?:(?:volna|samostatna|volnu|samostatnu)\s+)?izb[auy](?!\w)")
+
 
 def is_long_term_flat(*texts: str) -> bool:
+    """False for a room, a bed, a shared or a short let. The first text is
+    the title: one that starts with "Izba" (or "Voľná/Samostatná izba")
+    offers a room."""
+    if texts and _ROOM_TITLE_RE.match(_fold(texts[0])):
+        return False
     folded = " ".join(_fold(t) for t in texts)
     return not _NOT_A_FLAT_RE.search(folded)
 
@@ -149,38 +178,51 @@ def aggregate(rentals: list[dict]) -> dict[str, dict]:
 
 def rates_from_comps(comps: dict[str, dict]) -> dict[str, float]:
     """{key: blended €/m²} for every key with enough comps."""
+    from engine.financial import baseline_rent
     rates = {}
     for key, c in comps.items():
         if c["n"] < RENT_COMP_MIN_SAMPLE:
             continue
-        baseline = RENT_PER_M2.get(key, RENT_PER_M2["default"])
+        baseline = baseline_rent(key)
         rates[key] = blended_rate(c["median_eur_per_m2"], c["n"], baseline)
     return rates
 
 
 # ── DB side ───────────────────────────────────────────────────────────────────
+def _sk_rows(conn, table: str) -> str:
+    """" AND market = 'sk'" when `table` has a market column — another
+    market's rentals, comps and listings are its own (engine.rent_comps_cz) —
+    else "" (a database from before markets: every row is Slovak)."""
+    cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    return " AND market = 'sk'" if "market" in cols else ""
+
+
 def _active_rentals(conn, max_age_days: int) -> list[dict]:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         SELECT rent_eur, size_m2, rooms, furnished, energies_included, rent_key
         FROM rental_listings
-        WHERE is_active = 1 AND last_seen_at >= ?
+        WHERE is_active = 1 AND last_seen_at >= ?{_sk_rows(conn, "rental_listings")}
     """, (cutoff,)).fetchall()
     return [dict(r) for r in rows]
 
 
 def _stored_comps(conn) -> dict[str, dict]:
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         SELECT district, sample_count, eur_per_m2 FROM rent_comps
-        WHERE source = 'live_prenajom' AND size_band = 'all'
+        WHERE source = 'live_prenajom' AND size_band = 'all'{_sk_rows(conn, "rent_comps")}
     """).fetchall()
     return {r["district"]: {"n": r["sample_count"] or 0,
                             "median_eur_per_m2": r["eur_per_m2"] or 0} for r in rows}
 
 
-def load_live_rates() -> dict[str, float]:
+def load_live_rates(market: str = "sk") -> dict[str, float]:
     """The live rates scoring should use right now. Empty (→ baseline
-    everywhere) when no comps have been built or the tables don't exist yet."""
+    everywhere) when no comps have been built or the tables don't exist yet.
+    (Another market's comps: engine.rent_comps_cz.)"""
+    if market != "sk":
+        from engine import rent_comps_cz
+        return rent_comps_cz.load_live_rates()
     from database import get_conn
     conn = get_conn()
     try:
@@ -200,13 +242,14 @@ def rebuild_rent_comps(max_age_days: int = RENT_COMP_MAX_AGE_DAYS) -> dict:
              "rescored": n scores dropped for re-scoring}.
     """
     from database import get_conn, _drop_cashflow_score
-    from engine.financial import match_rent_key
+    from engine.financial import match_rent_key, baseline_rent
     conn = get_conn()
     try:
         old_rates = rates_from_comps(_stored_comps(conn))
         comps = aggregate(_active_rentals(conn, max_age_days))
         now = datetime.now(timezone.utc).isoformat()
-        conn.execute("DELETE FROM rent_comps WHERE source = 'live_prenajom'")
+        conn.execute("DELETE FROM rent_comps WHERE source = 'live_prenajom'"
+                     + _sk_rows(conn, "rent_comps"))
         for key, c in comps.items():
             conn.execute("""
                 INSERT INTO rent_comps
@@ -219,8 +262,8 @@ def rebuild_rent_comps(max_age_days: int = RENT_COMP_MAX_AGE_DAYS) -> dict:
 
         changed = []
         for key in set(old_rates) | set(new_rates):
-            before = old_rates.get(key) or RENT_PER_M2.get(key, RENT_PER_M2["default"])
-            after = new_rates.get(key) or RENT_PER_M2.get(key, RENT_PER_M2["default"])
+            before = old_rates.get(key) or baseline_rent(key)
+            after = new_rates.get(key) or baseline_rent(key)
             if before and abs(after / before - 1) >= RESCORE_THRESHOLD:
                 changed.append(key)
 
@@ -228,7 +271,8 @@ def rebuild_rent_comps(max_age_days: int = RENT_COMP_MAX_AGE_DAYS) -> dict:
         if changed:
             wanted = set(changed)
             for r in conn.execute(
-                    "SELECT id, district FROM listings WHERE is_active = 1").fetchall():
+                    "SELECT id, district FROM listings WHERE is_active = 1"
+                    + _sk_rows(conn, "listings")).fetchall():
                 if match_rent_key(r["district"] or "") in wanted:
                     rescored += _drop_cashflow_score(conn, r["id"])
         conn.commit()
@@ -248,10 +292,11 @@ def comps_table() -> list[dict]:
         stored = {}
     finally:
         conn.close()
+    from engine.financial import baseline_rent
     rates = rates_from_comps(stored)
     rows = []
     for key, c in sorted(stored.items(), key=lambda kv: -kv[1]["n"]):
-        baseline = RENT_PER_M2.get(key, RENT_PER_M2["default"])
+        baseline = baseline_rent(key)
         rows.append({
             "District key":   key,
             "Comps":          c["n"],

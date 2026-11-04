@@ -9,6 +9,7 @@ stores the grouping so the dashboard can show one row with "listed on 3
 portals" and links to every copy.
 
 Two listings are the same flat when all of these hold:
+  - they are in the same market (a Slovak and a Czech listing never match);
   - the district resolves to the same rent key (engine.financial.match_rent_key),
     with a Bratislava city part counted as its administrative district —
     or, when that key is only the "default" fallback, the raw district
@@ -29,9 +30,17 @@ is never the primary; see database.mark_duplicates for what it does instead.
 
 from __future__ import annotations
 
+import re
+import unicodedata
+
 SIZE_TOLERANCE_M2   = 1.0
 SIZE_TOLERANCE_PCT  = 0.015
 PRICE_TOLERANCE_PCT = 0.03
+
+
+def _fold(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", text or "")
+                   if unicodedata.category(c) != "Mn").lower()
 
 
 def _same_size(a: float, b: float) -> bool:
@@ -66,14 +75,31 @@ _BA_PART_TO_DISTRICT = {
 
 
 def _location_key(row: dict) -> str:
+    """Where a listing is, for matching: its market, then its rent key (a
+    Bratislava city part as its administrative district) or, with only the
+    default key, its raw district. "" when it has no district."""
+    import markets
     from engine.financial import match_rent_key
     district = (row.get("district") or "").strip()
     if not district:
         return ""
-    key = match_rent_key(district)
-    if key == "default":
-        return "raw:" + district.lower()
-    return _BA_PART_TO_DISTRICT.get(key, key)
+    market = markets.of_row(row)
+    if market == "sk":
+        key = match_rent_key(district)
+        if key != "default":
+            key = _BA_PART_TO_DISTRICT.get(key, key)
+    else:
+        key = match_rent_key(district, market=market)
+        if key == "praha":
+            # Prague's rent key is the city's; its districts are apart.
+            m = re.search(r"praha\s*[-–]?\s*(\d{1,2})(?!\d)", _fold(district))
+            key = f"praha {m.group(1)}" if m else "raw:" + district.lower()
+    from engine.financial import rent_fallback_kind
+    if key == "default" or (not key.startswith("raw:")
+                            and rent_fallback_kind(key, market=market) == "kraj"):
+        # A town with only its kraj's rent is its own place, not its kraj.
+        key = "raw:" + district.lower()
+    return f"{market}:{key}"
 
 
 def is_same_flat(a: dict, b: dict) -> bool:

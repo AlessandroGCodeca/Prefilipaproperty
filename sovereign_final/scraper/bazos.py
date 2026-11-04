@@ -11,11 +11,11 @@ from bs4 import BeautifulSoup
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import SCRAPE_DELAY_SEC
+from config import SCRAPE_DELAY_SEC, SALE_PRICE_MIN_EUR
 from database import upsert_listing, init_db
 from scraper._http import get, make_session
 from scraper.nehnutelnosti import _extract_location_from_text
-from scraper.textparse import rooms_from_title
+from scraper.textparse import bazos_title_link, is_excluded_listing, rooms_from_title
 
 log = logging.getLogger(__name__)
 
@@ -27,8 +27,9 @@ PAGE_URL_QS  = BASE + CATEGORY + "?hledat=&rubriky=byt&hlokalita=&humkreis=25&ce
 PAGE_SIZE    = 20
 
 # Plausible apartment sale prices — anything outside this range is treated as
-# a deposit, monthly rent, or fee rather than a real sale price.
-_PRICE_MIN = 30_000
+# a deposit, monthly rent, or fee rather than a real sale price. The floor is
+# a setting (config.SALE_PRICE_MIN_EUR); the per-region check comes after.
+_PRICE_MIN = SALE_PRICE_MIN_EUR
 _PRICE_MAX = 10_000_000
 
 
@@ -99,6 +100,11 @@ def _build_listing_from_card(card, link) -> dict | None:
 
     card_text = card.get_text(" ", strip=True)
     title = link.get_text(strip=True) or card_text[:80]
+    # The /predam/byt/ category still carries rentals, houses, garages and
+    # shares of a flat ("Predám 1/2 bytu") — dropped here as the other Slovak
+    # scrapers drop them.
+    if is_excluded_listing(title, href):
+        return None
 
     # Price — bazos uses div.inzeratycena. _price() validates the value falls
     # within a plausible apartment sale-price range, rejecting deposits/fees.
@@ -190,7 +196,7 @@ def scrape_page(offset: int, session=None) -> list[dict]:
     if cards:
         for card in cards:
             try:
-                link = card.select_one("div.inzeratynadpis a, h2 a, h3 a, a[href*='/inzerat/']")
+                link = bazos_title_link(card)
                 if not link:
                     continue
                 rec = _build_listing_from_card(card, link)

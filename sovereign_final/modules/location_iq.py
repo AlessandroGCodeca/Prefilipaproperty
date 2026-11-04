@@ -5,6 +5,10 @@ Module C: Location IQ — transit, amenities and noise/flood/construction risk.
 Geocoding, transit and amenities come from Google when GOOGLE_PLACES_API_KEY
 is set, and from OpenStreetMap (Nominatim + Overpass) when it isn't. The risk
 flags always come from open data via modules/risk_data — never invented.
+
+Each listing is located in its own market's country (listings.market): a
+Czech address is geocoded in Czechia and its flood answer comes from the
+Czech map.
 """
 
 import logging
@@ -25,7 +29,7 @@ from config import (
 )
 from database import (
     get_unscored_location, upsert_location, init_db,
-    get_location_rows_missing_risk, update_location_risk,
+    get_location_rows_missing_risk, update_location_risk, mark_location_tried,
 )
 from modules import risk_data
 
@@ -36,15 +40,20 @@ PLACES_URL  = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
 
 
 # ── Geocoding ─────────────────────────────────────────────────────────────────
-def geocode_precise(address: str) -> tuple[float | None, float | None, str]:
+def geocode_precise(address: str, market: str = "sk") -> tuple[float | None, float | None, str]:
     """(lat, lng, precision) — precision is "address", "street" or "area"
-    (see modules/risk_data). Google when a key is set, else Nominatim."""
+    (see modules/risk_data). Google when a key is set, else Nominatim; in
+    the market's country (Slovakia by default)."""
     if not GOOGLE_API_KEY:
-        return risk_data.geocode_nominatim(address)
+        if market == "sk":
+            return risk_data.geocode_nominatim(address)
+        return risk_data.geocode_nominatim(address, market=market)
+    import markets
     try:
         r = requests.get(GEOCODE_URL, params={
-            "address": address + ", Slovakia",
+            "address": address + ", " + markets.get(market).name,
             "key": GOOGLE_API_KEY,
+            **({} if market == "sk" else {"region": markets.get(market).country_code}),
         }, timeout=10)
         data = r.json()
         if data.get("results"):
@@ -63,6 +72,11 @@ def geocode(address: str) -> tuple[float | None, float | None]:
 
 # ── Places Queries ────────────────────────────────────────────────────────────
 def nearest_transit(lat: float, lng: float) -> float:
+    """Metres to the nearest transit stop, or 9999.0 when none is found.
+
+    Google's Nearby Search lists results by prominence, not distance, so the
+    first result is often a main station a kilometre away while a tram stop
+    sits at the door: the nearest is the shortest distance over all results."""
     if not GOOGLE_API_KEY:
         elements = risk_data.fetch_osm(lat, lng)
         t = risk_data.classify_osm(elements, lat, lng)["nearest_transit_m"] if elements else None
@@ -72,10 +86,15 @@ def nearest_transit(lat: float, lng: float) -> float:
             "location": f"{lat},{lng}", "radius": 2000,
             "type": "transit_station", "key": GOOGLE_API_KEY,
         }, timeout=10)
-        results = r.json().get("results", [])
-        if results:
-            rl = results[0]["geometry"]["location"]
-            return _haversine(lat, lng, rl["lat"], rl["lng"])
+        dists = []
+        for p in r.json().get("results", []):
+            try:
+                rl = p["geometry"]["location"]
+                dists.append(_haversine(lat, lng, float(rl["lat"]), float(rl["lng"])))
+            except (KeyError, TypeError, ValueError):
+                continue        # a result without a usable location
+        if dists:
+            return min(dists)
     except Exception as e:
         log.warning(f"    Transit error: {e}")
     return 9999.0
@@ -144,12 +163,29 @@ def _haversine(lat1, lng1, lat2, lng2) -> float:
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
 
-def is_industrial(district: str) -> tuple[bool, str]:
+def is_industrial(district: str, market: str = "sk") -> tuple[bool, str]:
     key = district.lower().strip()
-    for z in INDUSTRIAL_ZONES:
+    if market == "sk":
+        zones = INDUSTRIAL_ZONES
+    else:
+        import markets
+        zones = markets.get(market).industrial_zones
+    for z in zones:
         if z in key:
             return True, z
     return False, ""
+
+
+def _geocode(address: str, market: str):
+    """geocode_precise, called for a Slovak listing exactly as it always was."""
+    return geocode_precise(address) if market == "sk" else geocode_precise(address, market=market)
+
+
+def _assess(lat, lng, precision, market: str):
+    """risk_data.assess, called for a Slovak listing exactly as it always was."""
+    if market == "sk":
+        return risk_data.assess(lat, lng, precision)
+    return risk_data.assess(lat, lng, precision, market=market)
 
 
 # ── Score Computation ─────────────────────────────────────────────────────────
@@ -176,7 +212,8 @@ def _flag(v) -> int | None:
     return None if v is None else int(bool(v))
 
 
-def run_location_scoring(progress_callback=None, limit: int | None = 200) -> int:
+def run_location_scoring(progress_callback=None, limit: int | None = 200,
+                         market: str | None = None) -> int:
     """Score every PASS listing that has no location row yet.
 
     With a Google key: Google geocoding, transit and amenities. Without one:
@@ -186,6 +223,8 @@ def run_location_scoring(progress_callback=None, limit: int | None = 200) -> int
     NULL, and an area-level geocode leaves every risk flag NULL.
     """
     listings = get_unscored_location()
+    if market is not None:
+        listings = [r for r in listings if (r.get("market") or "sk") == market]
     if not listings:
         log.info("✅ No listings to score for location.")
         return 0
@@ -204,6 +243,7 @@ def run_location_scoring(progress_callback=None, limit: int | None = 200) -> int
         addr   = row.get("address_raw") or row.get("district") or ""
         energy = row.get("energy_class","UNKNOWN")
         dist   = row.get("district","")
+        mkt    = row.get("market") or "sk"
 
         if progress_callback:
             progress_callback(i + 1, len(listings), addr[:50])
@@ -214,12 +254,15 @@ def run_location_scoring(progress_callback=None, limit: int | None = 200) -> int
         if row.get("coords_source") == "listing" and row.get("lat") is not None:
             lat, lng, precision = row["lat"], row["lng"], "street"
         else:
-            lat, lng, precision = geocode_precise(addr)
+            lat, lng, precision = _geocode(addr, mkt)
         if lat is None:
             log.warning(f"  ⚠️ No geocode: {addr[:50]}")
+            # To the back of the queue: listings that never geocode would
+            # otherwise take the first `limit` places on every run.
+            mark_location_tried(lid)
             continue
 
-        risk = risk_data.assess(lat, lng, precision)
+        risk = _assess(lat, lng, precision, mkt)
         if GOOGLE_API_KEY:
             transit   = nearest_transit(lat, lng)
             amenities = count_amenities(lat, lng)
@@ -228,7 +271,7 @@ def run_location_scoring(progress_callback=None, limit: int | None = 200) -> int
             transit = 9999.0 if transit is None else transit
             amenities = {k: risk[k] or 0 for k in
                          ("grocery_count", "pharmacy_count", "school_count")}
-        ind, ind_name = is_industrial(dist)
+        ind, ind_name = is_industrial(dist) if mkt == "sk" else is_industrial(dist, mkt)
         score, tier  = compute_score(transit, amenities, bool(risk["construction"]),
                                      bool(risk["noise"]), energy)
 
@@ -270,7 +313,8 @@ def run_location_scoring(progress_callback=None, limit: int | None = 200) -> int
     return scored
 
 
-def run_risk_backfill(limit: int = 100, progress_callback=None) -> int:
+def run_risk_backfill(limit: int = 100, progress_callback=None,
+                      market: str | None = None) -> int:
     """Give rows scored before the real risk data existed their noise, flood
     and construction answers. Those rows hold a stored False for each (the old
     stubs' answer), and no record of how precise their geocode was. The
@@ -280,20 +324,23 @@ def run_risk_backfill(limit: int = 100, progress_callback=None) -> int:
     computed from the stubs' answers, so they are recomputed from the new
     flags with the stored transit and amenity facts."""
     rows = get_location_rows_missing_risk(limit)
+    if market is not None:
+        rows = [r for r in rows if (r.get("market") or "sk") == market]
     done = 0
     for i, row in enumerate(rows):
         if progress_callback:
             progress_callback(i + 1, len(rows), (row.get("address_raw") or "")[:50])
         addr = row.get("address_raw") or row.get("district") or ""
+        mkt = row.get("market") or "sk"
         if row.get("coords_source") == "listing" and row.get("listing_lat") is not None:
             lat, lng, precision = row["listing_lat"], row["listing_lng"], "street"
         else:
-            lat, lng, precision = geocode_precise(addr)
+            lat, lng, precision = _geocode(addr, mkt)
             if lat is None:
                 lat, lng, precision = row.get("lat"), row.get("lng"), "area"
         if lat is None:
             continue
-        risk = risk_data.assess(lat, lng, precision)
+        risk = _assess(lat, lng, precision, mkt)
         transit = row.get("nearest_transit_m")
         score, tier = compute_score(
             9999.0 if transit is None else transit,

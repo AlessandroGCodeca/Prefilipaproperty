@@ -101,7 +101,7 @@ def test_empty_database_renders_the_demo_view(db):
 def test_populated_database_renders_every_tab(populated_db):
     at = run_app()
     assert not at.exception, [e.value for e in at.exception]
-    assert len(at.tabs) == 9
+    assert len(at.tabs) == 11
 
 
 def test_stats_bar_counts_the_listings_on_the_page(populated_db):
@@ -588,8 +588,9 @@ def test_best_deal_ranking_puts_near_floor_discounts_after_the_rest(db):
     # the ones the card itself warns may be a deposit or an "od €X" price — to
     # the top of the GREEN list.
     from config import NEAR_FLOOR_DISCOUNT
-    from engine.regional_prices import regional_median_price
-    median = regional_median_price("Trnava") * 50
+    from engine.regional_prices import benchmark_median
+    # make_listing's flats are 2-room: the benchmark is the room-adjusted median.
+    median = benchmark_median("Trnava", 2) * 50
     for name, below in (("Suspect45", 0.45), ("Deal30", 0.30), ("Suspect41", 0.41),
                         ("Deal22", 0.22), ("Deal39", 0.39)):
         assert (below >= NEAR_FLOOR_DISCOUNT) == name.startswith("Suspect")
@@ -655,6 +656,47 @@ def test_theme_file_is_dark_and_the_grid_wraps():
     assert not re.search(r"\.stButton>button\s*\{", src)   # missed buttons with a tooltip
 
 
+
+# ── Audit A1 / A8 / A12 ───────────────────────────────────────────────────────
+def test_a_green_that_loses_money_is_flagged_and_can_be_hidden(populated_db):
+    # g1 and w1 are GREEN (far under their medians) but cost money every month.
+    at = run_app(open_cards=("g1",))
+    assert not at.exception, [e.value for e in at.exception]
+    md = markdown_of(at)
+    assert "CASH-FLOW NEGATIVE" in md
+    assert re.search(r"GREEN — ≥20% BELOW MARKET \((\d+)\) · ⛔ \1 CASH-FLOW NEGATIVE", md)
+    next(t for t in at.toggle if t.label.startswith("💶")).set_value(True).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "CASH-FLOW NEGATIVE" not in markdown_of(at)
+
+
+def test_days_count_from_the_first_scrape_and_say_so(populated_db):
+    at = run_app(open_cards=("g1",))
+    labels = {m.label for m in at.metric}
+    assert "Days tracked" in labels and "Days listed" not in labels
+
+
+def test_the_lv_to_do_lists_unverified_deals(populated_db):
+    # g1's title deed was never read: it belongs on the queue.
+    populated_db.set_lv_status("g1", "UNVERIFIED", "", "no map pin")
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("1 listing(s) waiting · 0 edited" in c.value for c in at.caption)
+    assert at.button(key="lv_todo_save").disabled
+    assert at.button(key="lv_todo_verify").disabled
+
+
+def test_a_soft_flag_on_the_lv_is_shown_not_rejected(populated_db):
+    populated_db.set_lv_status("g1", "PASS", "", "LV 4321: Clean title",
+                               soft_flags="vecné bremeno — utility / access easement: <b>x</b>")
+    at = run_app(open_cards=("g1",))
+    assert not at.exception, [e.value for e in at.exception]
+    md = markdown_of(at)
+    assert "LV SOFT FLAG" in md
+    assert "soft flags (not rejected" in md
+    assert "<b>x</b>" not in md        # escaped like every LV note
+
+
 # ── Audit O1, O4, O7 ──────────────────────────────────────────────────────────
 @pytest.fixture(autouse=True)
 def _isolated_runs(monkeypatch, tmp_path):
@@ -691,12 +733,12 @@ def test_password_gate(db, monkeypatch):
     at.text_input(key="login_pw").input("s3cret")
     at.button[0].click().run()
     assert not at.exception, [e.value for e in at.exception]
-    assert len(at.tabs) == 9
+    assert len(at.tabs) == 11   # with LV TO-DO (audit A8) and TAX RATES
 
 
 def test_no_password_set_means_no_gate(db):
     at = run_app()
-    assert len(at.tabs) == 9
+    assert len(at.tabs) == 11   # with LV TO-DO (audit A8) and TAX RATES
 
 
 def test_sidebar_shows_the_last_scheduled_run(db):
@@ -753,3 +795,141 @@ def test_a_button_waits_for_the_scheduler(db):
         at = _click(run_app(), "🧹 CLEAN STALE (21d)")
     assert not jobs.running()
     assert any("scheduler is running" in w.value for w in at.warning)
+
+
+# ── RUN EVERYTHING, FILL MISSING DETAILS, empty states ───────────────────────
+def test_run_everything_runs_the_scheduler_pipeline_under_its_job_lock(db, monkeypatch):
+    # Without Docker no scheduler runs, and a full refresh was a dozen
+    # buttons pressed in the right order.
+    import scheduler
+    from modules import pipeline_state
+    seen = {}
+
+    def fake_run_pipeline(trigger="06:00", holder=None, call=None, progress=None):
+        seen.update(trigger=trigger, holder=holder, call=call,
+                    lock=db.get_pipeline_lock()["holder"])
+        progress(4, 14, "Topreality.sk")
+        now = datetime.now(timezone.utc).isoformat()
+        pipeline_state.write_status({
+            "state": "ok", "trigger": trigger, "holder": holder, "started_at": now,
+            "finished_at": now, "summary": "🟢2 🟡1",
+            "steps": [{"step": "Backup", "ok": True},
+                      {"step": "LV Debt Filter", "ok": False}]})
+        return True
+    monkeypatch.setattr(scheduler, "run_pipeline", fake_run_pipeline)
+    at = _finished(_click(run_app(), "▶ RUN EVERYTHING"))
+    assert seen["trigger"] == "dashboard"
+    assert seen["holder"] == seen["lock"] == "dashboard: RUN EVERYTHING"
+    assert callable(seen["call"])
+    assert any("Full run done: 🟢2 🟡1" in w.value and "LV Debt Filter" in w.value
+               for w in at.warning)
+    assert any(c.value.startswith("⚠️ Last full run") for c in at.caption)
+
+
+def test_a_failed_full_run_says_why(db, monkeypatch):
+    import scheduler
+    from modules import pipeline_state
+
+    def fake_run_pipeline(**kw):
+        pipeline_state.write_status({"state": "failed", "trigger": "dashboard",
+                                     "error": "all 3 scrapers failed", "steps": []})
+        return False
+    monkeypatch.setattr(scheduler, "run_pipeline", fake_run_pipeline)
+    at = _finished(_click(run_app(), "▶ RUN EVERYTHING"))
+    assert any("Full run failed: all 3 scrapers failed" in e.value for e in at.error)
+    assert any("RUN EVERYTHING to try again" in e.value for e in at.error)
+
+
+def test_run_everything_runs_the_browser_steps_in_a_subprocess(db, monkeypatch):
+    # The `call` RUN EVERYTHING hands run_pipeline runs the scrapers and the
+    # missing-details read the way their buttons do; a failure or a timeout
+    # raises, which fails that one step.
+    import subprocess
+    import scheduler
+
+    def ok(cmd):
+        return subprocess.CompletedProcess(cmd, 0, 'progress…\n{"ok": true, "n": 7}\n', "")
+
+    def blocked(cmd):
+        return subprocess.CompletedProcess(cmd, 0, '{"ok": false, "error": "blocked"}\n', "")
+
+    def too_slow(cmd):
+        raise subprocess.TimeoutExpired(cmd, 1)
+    replies, cmds, outcomes = iter([ok, blocked, too_slow]), [], []
+
+    def fake_subprocess_run(cmd, **k):
+        cmds.append(cmd[-1])
+        return next(replies)(cmd)
+
+    def fake_run_pipeline(trigger="06:00", holder=None, call=None, progress=None):
+        for module, kw in (("enrich_pending", {"limit": 100}),
+                           ("scraper.bazos", {"max_pages": 10}),
+                           ("scraper.bazos", {"max_pages": 10})):
+            try:
+                outcomes.append(call(module, "run", **kw))
+            except Exception as e:
+                outcomes.append(e)
+        return False
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(scheduler, "run_pipeline", fake_run_pipeline)
+    _finished(_click(run_app(), "▶ RUN EVERYTHING"))
+    assert outcomes[0] == 7
+    assert "'enrich_pending'" in cmds[0] and '"limit": 100' in cmds[0]
+    assert isinstance(outcomes[1], RuntimeError) and "blocked" in str(outcomes[1])
+    assert isinstance(outcomes[2], TimeoutError) and "30-minute limit" in str(outcomes[2])
+
+
+def test_fill_missing_details_reports_what_it_found(populated_db, monkeypatch):
+    import subprocess
+    cmds = []
+
+    def fake(cmd, **k):
+        cmds.append(cmd[-1])
+        return subprocess.CompletedProcess(cmd, 0, (
+            'Found 3 listings to enrich (LIMIT=200)\n'
+            '{"ok": true, "n": {"checked": 3, "price": 1, "size": 2, "district": 0, '
+            '"gone": 1}}\n'), "")
+    monkeypatch.setattr(subprocess, "run", fake)
+    at = _finished(_click(run_app(), "🔎 FILL MISSING DETAILS"))
+    assert "'enrich_pending'" in cmds[0] and '"limit": 200' in cmds[0]
+    assert any("Re-read 3: +price 1, +size 2, +district 0, 1 taken down" in s.value
+               for s in at.success)
+
+
+def test_fill_missing_details_with_nothing_to_fill(db, monkeypatch):
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess(
+        cmd, 0, '{"ok": true, "n": {"checked": 0, "price": 0, "size": 0, "district": 0, '
+                '"gone": 0}}\n', ""))
+    at = _finished(_click(run_app(), "🔎 FILL MISSING DETAILS"))
+    assert any("No nehnutelnosti listing is missing" in i.value for i in at.info)
+
+
+def test_nothing_scored_yet_is_not_blamed_on_the_filters(db):
+    # The triage table said "No scored listings match the sidebar filters —
+    # 41 hidden by them" while a first scrape had scored nothing at all:
+    # widening the filters would not have helped.
+    seen = dict(last_seen_at=_now_iso(), scraped_at=_now_iso(1))
+    db.upsert_listing(make_listing("u1", district="Trnava", **seen))
+    db.upsert_listing(make_listing("u2", district="Trnava", size_m2=0.0, **seen))  # hidden
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    infos = [i.value for i in at.info]
+    assert not [i for i in infos if "hidden by them" in i]
+    nothing = [i for i in infos if "Nothing is scored yet — 2 listing(s) are waiting" in i]
+    assert len(nothing) == 2          # the triage table and the snag list
+    assert "FILL MISSING DETAILS" in nothing[0]
+
+
+def test_scored_listings_the_filters_hide_still_say_so(populated_db):
+    at = run_app()
+    next(s for s in at.slider if s.label == "Max Price €").set_value(10_000).run()
+    infos = [i.value for i in at.info]
+    assert [i for i in infos if "No scored listings match the sidebar filters" in i]
+    assert not [i for i in infos if "Nothing is scored yet" in i]
+
+
+def test_no_run_on_record_points_at_run_everything(db):
+    at = run_app()
+    assert any("No full run on record yet" in c.value and "RUN EVERYTHING" in c.value
+               for c in at.caption)

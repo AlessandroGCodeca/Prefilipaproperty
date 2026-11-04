@@ -15,7 +15,7 @@ import pytest
 from config import GREEN_DISCOUNT, YELLOW_DISCOUNT, NEAR_FLOOR_DISCOUNT
 from engine.financial import analyse, class_at_price, classify
 from engine.regional_prices import (
-    regional_median_price, is_plausible_regional_price,
+    regional_median_price, benchmark_median, is_plausible_regional_price,
     REGIONAL_PRICE_FLOOR_RATIO, BA_DISTRICT_MEDIAN_PRICE_PER_M2,
     CITY_MEDIAN_PRICE_PER_M2,
 )
@@ -25,8 +25,9 @@ REGIONS = (["Bratislava"] + [f"{d}, Bratislava" for d in BA_DISTRICT_MEDIAN_PRIC
 
 
 def _at(district, fraction_of_median, size=55.0):
-    """A flat priced at `fraction_of_median` × the region's median €/m²."""
-    return analyse(regional_median_price(district) * fraction_of_median * size,
+    """A 2-room flat priced at `fraction_of_median` × the benchmark it is
+    judged against: the region's median adjusted for its room count."""
+    return analyse(benchmark_median(district, 2) * fraction_of_median * size,
                    size, district, rooms=2)
 
 
@@ -78,7 +79,7 @@ class TestClassAtPrice:
     @pytest.mark.parametrize("fraction", [0.45, 0.55, 0.79, 0.8, 0.85, 0.9, 0.95, 1.2])
     def test_agrees_with_analyse(self, fraction):
         r = _at("Nitra", fraction)
-        assert class_at_price(r.price_eur, r.size_m2, "Nitra") == r.classification
+        assert class_at_price(r.price_eur, r.size_m2, "Nitra", 2) == r.classification
 
     def test_below_the_floor_is_white_not_a_bargain(self):
         median = regional_median_price("Nitra")

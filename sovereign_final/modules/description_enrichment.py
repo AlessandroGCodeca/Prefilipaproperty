@@ -70,7 +70,8 @@ def _to_features(parsed: dict) -> dict:
     }
 
 
-def run_description_enrichment(limit: int = 200, progress_callback=None) -> int:
+def run_description_enrichment(limit: int = 200, progress_callback=None,
+                               market: str | None = None) -> int:
     """Parse descriptions for up to `limit` un-parsed active listings.
 
     Returns the number of descriptions successfully parsed and stored.
@@ -79,7 +80,8 @@ def run_description_enrichment(limit: int = 200, progress_callback=None) -> int:
         log.info("ℹ️  Description enrichment skipped — no ANTHROPIC_API_KEY set.")
         return 0
 
-    pending = get_unparsed_descriptions(limit)
+    pending = (get_unparsed_descriptions(limit) if market is None
+               else get_unparsed_descriptions(limit, market=market))
     if not pending:
         log.info("✅ No descriptions to enrich.")
         return 0
@@ -90,7 +92,9 @@ def run_description_enrichment(limit: int = 200, progress_callback=None) -> int:
         if progress_callback:
             progress_callback(i, len(pending))
 
-        result = parse_description(row["description"])
+        row_market = row.get("market") or "sk"
+        result = (parse_description(row["description"]) if row_market == "sk"
+                  else parse_description(row["description"], market=row_market))
         if not result:
             # Leave desc_parsed=0 so a later run retries; `limit` caps the cost.
             continue

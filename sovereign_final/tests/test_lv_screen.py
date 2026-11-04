@@ -47,8 +47,8 @@ class TestInflectionAndSpelling:
         ("Poznámka o vyhlásení konkurzu na majetok vlastníka", "konkurz"),
         ("podaná žaloba o určenie vlastníctva", "súdny spor"),
         ("začaté súdne konanie o vypratanie", "súdny spor"),
-        ("Zriadenie vecného bremena — právo prechodu", "vecné bremeno"),
-        ("Predkupné právo v prospech Mesto Nitra", "predkupné právo"),
+        ("Vecné bremeno doživotného užívania bytu v prospech Mária Nová", "vecné bremeno"),
+        ("Predkupné právo v prospech Peter Kováč", "predkupné právo"),
         ("EXEKÚCIA EX 1/2020", "exekúcia"),
     ])
     def test_rejects(self, text, flag):

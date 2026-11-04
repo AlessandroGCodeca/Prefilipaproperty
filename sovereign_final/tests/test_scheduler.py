@@ -53,7 +53,7 @@ class TestCatchUpDue:
 
 
 _STEP_MODULES = ("scraper.nehnutelnosti", "scraper.bazos", "scraper.topreality",
-                 "scraper.rentals", "modules.debt_bot",
+                 "enrich_pending", "scraper.rentals", "modules.debt_bot",
                  "modules.address_enrichment", "modules.description_enrichment",
                  "modules.cashflow_runner", "modules.location_iq")
 
@@ -164,6 +164,91 @@ class TestRunRecord:
         scheduler.run_pipeline()
         names = sorted(os.listdir(tmp_path / "backups"))
         assert [n.split("-")[0] for n in names] == ["sovereign", "your"]
+
+
+def _fake_call(calls, fill=None):
+    """A run_pipeline `call` that records what it was asked to run."""
+    def call(module, func, **kwargs):
+        calls.append((module, func, kwargs))
+        if module == "enrich_pending":
+            return fill or {"checked": 4, "price": 1, "size": 2, "district": 0, "gone": 1}
+        return 5
+    return call
+
+
+class TestDashboardRun:
+    """The dashboard's ▶ RUN EVERYTHING runs run_pipeline: it already holds
+    the pipeline lock, reports progress, and runs the browser-driven steps
+    its own way."""
+
+    HOLDER = "dashboard: RUN EVERYTHING"
+
+    def test_progress_hears_every_step_in_order(self, run_file, full_db, steps_fail):
+        heard = []
+        scheduler.run_pipeline(call=_fake_call([]),
+                               progress=lambda i, n, note: heard.append((i, n, note)))
+        assert [i for i, _, _ in heard] == list(range(1, scheduler.STEP_COUNT + 1))
+        assert {n for _, n, _ in heard} == {scheduler.STEP_COUNT}
+        assert heard[0][2] == "Backup" and heard[-1][2] == "Merge portal copies"
+        # Every step on the status file was announced, and none twice.
+        assert [note for _, _, note in heard] == [s["step"] for s in _status()["steps"]]
+
+    def test_call_runs_the_scrapers_and_the_missing_details(self, run_file, full_db,
+                                                            steps_fail):
+        calls = []
+        assert scheduler.run_pipeline(call=_fake_call(calls)) is True
+        assert calls == [
+            ("scraper.nehnutelnosti", "run", {"max_pages": 10}),
+            ("scraper.bazos", "run", {"max_pages": 10}),
+            ("scraper.topreality", "run", {"max_pages": 10}),
+            ("enrich_pending", "run", {"limit": scheduler.FILL_DETAILS_LIMIT}),
+        ]
+        fill = next(s for s in _status()["steps"] if s["step"] == "Fill missing details")
+        assert fill["ok"] and "4 re-read" in fill["detail"] and "+size 2" in fill["detail"]
+
+    def test_no_fill_when_nehnutelnosti_could_not_be_read(self, run_file, full_db,
+                                                          steps_fail):
+        # A portal that just blocked the scrape would make each of up to
+        # FILL_DETAILS_LIMIT page reads wait out its timeout, on every retry.
+        calls = []
+
+        def call(module, func, **kwargs):
+            calls.append(module)
+            if module == "scraper.nehnutelnosti":
+                raise RuntimeError("blocked")
+            return 5
+        assert scheduler.run_pipeline(call=call) is True
+        assert "enrich_pending" not in calls
+        fill = next(s for s in _status()["steps"] if s["step"] == "Fill missing details")
+        assert fill["ok"] and "skipped" in fill["detail"]
+
+    def test_a_failed_fill_does_not_fail_the_run(self, run_file, full_db, steps_fail):
+        def call(module, func, **kwargs):
+            if module == "enrich_pending":
+                raise RuntimeError("no browser")
+            return 5
+        assert scheduler.run_pipeline(call=call) is True
+        fill = next(s for s in _status()["steps"] if s["step"] == "Fill missing details")
+        assert not fill["ok"] and "no browser" in fill["detail"]
+
+    def test_the_holder_runs_under_its_own_lock(self, run_file, full_db, steps_fail,
+                                                monkeypatch):
+        # The scheduler would wait for this lock and then fail the attempt
+        # (test_a_dashboard_job_holding_the_lock_fails_the_attempt).
+        from modules import pipeline_state
+        monkeypatch.setattr(scheduler, "LOCK_WAIT_S", 0)
+        with pipeline_state.PipelineLock(self.HOLDER):
+            assert scheduler.run_pipeline(trigger="dashboard", holder=self.HOLDER,
+                                          call=_fake_call([])) is True
+        st = _status()
+        assert st["state"] == "ok" and st["trigger"] == "dashboard"
+        assert st["holder"] == self.HOLDER
+        assert scheduler.read_last_run() is not None
+
+    def test_the_scheduler_records_itself_as_the_holder(self, run_file, full_db,
+                                                        steps_fail):
+        scheduler.run_pipeline(call=_fake_call([]))
+        assert _status()["holder"] == "scheduler"
 
 
 class TestRetryDue:

@@ -3,10 +3,11 @@ seed_market_data.py — populate the DB with realistic Slovak market listings.
 Run once to see the full app working.  Source is marked 'sample' so it's
 distinct from live scraped data (the dashboard's Source filter lists it).
 
-Each asking price is set against the engine's own regional median
-(engine/regional_prices), so the mix looks like a real feed — mostly at
-market, a few YELLOW, fewer GREEN — and stays that way when the medians are
-updated. Fixed prices had drifted to 34 GREEN of 50 against today's medians.
+Each asking price is set against the engine's own benchmark — the regional
+median adjusted for the room count (engine/regional_prices.benchmark_median)
+— so the mix looks like a real feed — mostly at market, a few YELLOW, fewer
+GREEN — and stays that way when the medians are updated. Fixed prices had
+drifted to 34 GREEN of 50 against today's medians.
 """
 import logging
 import sys, os, hashlib, random
@@ -14,7 +15,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(__file__))
 
 from database import init_db, upsert_listing
-from engine.regional_prices import regional_median_price
+from engine.regional_prices import benchmark_median
 from modules.cashflow_runner import run_scoring
 from scraper.textparse import rooms_from_title
 
@@ -84,7 +85,8 @@ def seed():
     inserted = 0
     for title, district, vs_market, size, energy, suffix in LISTINGS:
         uid = _uid(suffix)
-        price = round(regional_median_price(district) * size * vs_market, -3)
+        rooms = rooms_from_title(title)
+        price = round(benchmark_median(district, rooms) * size * vs_market, -3)
         upsert_listing({
             "id":                uid,
             "source":            "sample",
@@ -94,7 +96,7 @@ def seed():
             "description":       "",
             "price_eur":         float(price),
             "size_m2":           float(size),
-            "rooms":             rooms_from_title(title),
+            "rooms":             rooms,
             "floor":             None,
             "year_built":        None,
             "energy_class":      energy,

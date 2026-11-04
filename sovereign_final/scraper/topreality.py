@@ -18,13 +18,13 @@ from bs4 import BeautifulSoup
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import SCRAPE_DELAY_SEC, DETAIL_REFRESH_DAYS
+from config import SCRAPE_DELAY_SEC, DETAIL_REFRESH_DAYS, SALE_PRICE_MIN_EUR
 from database import (
     upsert_listing, init_db, get_fresh_detail_urls, mark_details_enriched,
     touch_listings,
 )
 from scraper._http import get, make_session
-from scraper.nehnutelnosti import _extract_location_from_text
+from scraper.nehnutelnosti import _detail_district, _extract_location_from_text
 from scraper.textparse import rooms_from_title, is_excluded_listing
 from engine.regional_prices import pick_sale_price as _pick_sale_price
 from scraper.geo import pin_from_ld, pin_from_meta
@@ -55,7 +55,9 @@ ENERGY_VALID = {"A0", "A1", "A", "B", "C", "D", "E", "F", "G"}
 # ── Field extraction helpers (mostly cribbed from nehnutelnosti.py) ───────────
 # Plausible apartment sale price range. Numbers below the floor are almost
 # always deposits / monthly fees / per-m² rates, not the actual sale price.
-_PRICE_MIN = 30_000
+# The floor is a setting (config.SALE_PRICE_MIN_EUR); the per-region check
+# comes after.
+_PRICE_MIN = SALE_PRICE_MIN_EUR
 _PRICE_MAX = 10_000_000
 
 
@@ -119,13 +121,6 @@ def _size_from_text(t: str) -> float:
         except ValueError:
             pass
     return 0.0
-
-
-def _district_from_text(t: str) -> str:
-    if not t:
-        return ""
-    parts = [p.strip() for p in t.split(",")]
-    return parts[-1] if parts else ""
 
 
 def _energy_from_text(t: str) -> str:
@@ -241,8 +236,11 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
     if not address:
         address = _extract_location_from_text(body_text)
 
+    # "Petržalka, Bratislava" stays whole, and a JSON-LD address that ends in
+    # its region gives the town (see nehnutelnosti._detail_district).
+    district = _detail_district(address)
     price = ld_data.get("price") or _price_from_text(
-        body_text, size_m2=size, district=_district_from_text(address) or address
+        body_text, size_m2=size, district=district or address
     )
 
     # Image
@@ -277,7 +275,7 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
         "rooms": rooms_from_title(title or ""), "floor": None, "year_built": None,
         "energy_class": energy,
         "address_raw": address,
-        "district": _district_from_text(address),
+        "district": district,
         "city": "",
         "primary_image_url": img, "image_urls": img,
         "classification": "PENDING", "lv_status": "PENDING",
