@@ -141,7 +141,7 @@ before; Czechia is added next to it.
 | Flood | ÚÚR national map, VÚV T. G. M. Q100 flood areas (indicative) | `modules/risk_data_cz.py` |
 | Noise | OpenStreetMap proxy + 2022 strategic noise map of main roads (MZ ČR) | ≥65 dB flags the flat |
 | Place names | RÚIAN okres names, Prague 1–22, Brno's districts; Czech locatives ("v Praze 2", "ve Zlíně"); every obec when `data/cz_obce.csv` (a RÚIAN export) is present | `scraper/czech_cases.py` |
-| Tax, mortgage, costs | ZDP 2026, ČNB limits (LTV 80 % / 70 % for investment mortgages from 1 Apr 2026), Swiss Life Hypoindex rate, SVJ fond oprav, daň z nemovitých věcí, katastr fee | `markets.py`, each with its source and date |
+| Tax, mortgage, costs | ZDP 2026, ČNB limits (LTV 80 % / 70 % for investment mortgages from 1 Apr 2026), Swiss Life Hypoindex rate, SVJ fond oprav, daň z nemovitých věcí (zákon 338/1992 Sb.; the coefficients of Prague, the 26 statutory cities and the 105 other towns over 10,000 people from their 2026 ordinances in sbirkapp.gov.cz; every municipality's size coefficient from its population, ČSÚ 1.1.2025; Prague quarters and postal districts, Ostrava quarters and city quarters' cadastral areas from ČÚZK RÚIAN — `dev/build_cz_property_tax_data.py` rebuilds `engine/property_tax_cz_data.json`), katastr fee | `markets.py`, `engine/property_tax_cz.py`, each with its source and date |
 | Contract | a Czech **kupní smlouva NÁVRH** for a Czech advokát or notář to review — not legal advice | `modules/contract_draft_cz.py` |
 
 No Czech host could be reached from the container this was built in. Every
@@ -156,7 +156,7 @@ named here override them.
 
 1. Czech sale-price medians: none (table empty); the rooms multiplier for them is 1.0.
 2. Deloitte Rent Index: whether its figures are asking or achieved rents.
-3. Property tax: each municipality's local coefficient (1.0, `CZ_PROPERTY_TAX_LOCAL_COEF`) and the size coefficient outside Prague (3.5, the upper bound).
+3. Property tax in a municipality under 10,000 people (other than a statutory city): its size coefficient follows its population, but its local coefficient is not read — 1.0, the law's when a municipality sets none, or `CZ_PROPERTY_TAX_LOCAL_COEF`; a place that names no municipality is taxed at 3.5. Prague's, the statutory cities' and the 105 other towns' over 10,000 coefficients are read from their 2026 ordinances (`engine/property_tax_cz.SOURCE`).
 4. Personal tax: whether an SVJ fond oprav payment is deductible when paid (modelled) or only when spent; the 40 mil. Kč cap on an exempt sale (not modelled).
 5. Lending: a ČNB stress add-on (the engine's +2 pp is used).
 6. SVJ správa fee per flat (0, `CZ_SVJ_SPRAVA_PER_UNIT`); fond oprav 20 Kč/m² (`CZ_SVJ_FOND_OPRAV_PER_M2`).
@@ -505,18 +505,35 @@ own by VZN. The 2026 rates used:
 | Place | €/m² a year |
 |--|--|
 | Bratislava, by pásmo | A 1.20 (Vajnory, Podunajské Biskupice, Vrakuňa, Devínska Nová Ves) · B 1.20 (Dúbravka, Karlova Ves, Lamač, Devín, Rača, Záhorská Bystrica, Jarovce, Rusovce, Čunovo) · C 1.25 (Nové Mesto, Petržalka) · D 1.35 (Staré Mesto; Ružinov, for its Nivy area) |
-| Košice | 1.27 (its highest category; the others pay 1.207 and 1.143) |
-| Žilina | 1.20 (Žilina and Závodie; elsewhere 1.10) |
+| Košice, by cadastral area | I 1.27 (Stredné Mesto) · II 1.207 (Terasa, Grunt, Furča, Južné Mesto, Nové Ťahanovce, Severné Mesto, …) · III 1.143 (Šaca, Myslava, Barca, Ťahanovce, Luník, Kavečany, …); a city part named without its area (Juh, Západ, KVP) 1.27 |
+| Žilina, by cadastral area | 1.20 (Žilina, Závodie) · 1.10 (Bánová, Budatín, Žilinská Lehota and the other areas) |
 | Trnava · Banská Bystrica | 1.00 |
 | Prešov | 0.953 |
 | Trenčín | 0.88 |
 | Nitra | 0.75 |
+| Pezinok · Modra · Poprad | 1.00 |
+| Piešťany | 0.75 |
+| Trebišov | 0.71 |
+| Dunajská Streda | 0.68 (Mliečany 0.61) |
+| Prievidza | 0.675 |
+| Malacky | 0.67 |
+| Senec · Stupava · Michalovce · Bardejov | 0.60 |
+| Ružomberok | 0.40 |
+| Spišská Nová Ves | 0.398 |
+| Humenné | 0.32 |
 | anywhere else | 1.35 (UNVERIFIED: the highest rate above, not a legal ceiling) |
 
-Each figure's source is in `property_tax_sk.SOURCE`. They were read via web
-search, as the ordinances themselves could not be fetched from here. A 60 m²
-flat pays €45–81 a year at these rates; until October 2026 the engine charged
-0.4 % of the price, roughly ten times as much.
+Martin, Zvolen, Liptovský Mikuláš, Považská Bystrica, Nové Zámky, Levice,
+Lučenec, Topoľčany, Čadca and Rimavská Sobota are not in the table: their
+sites block automated requests (a CAPTCHA, a refused connection or "Access
+Forbidden"). Šamorín's and Komárno's current flat rates could not be pinned to
+an adopted ordinance.
+
+Each figure was read from the act and the city's own ordinance or tax page in
+November 2026; `property_tax_sk.SOURCE` names each document. Prešov's comes
+from its tax page as quoted by web search, because presov.sk answers automated
+requests with a CAPTCHA. A 60 m² flat pays €19–81 a year at these rates; until
+October 2026 the engine charged 0.4 % of the price, roughly ten times as much.
 
 The s.r.o. is recommended only when it nets more than personal ownership
 after its running cost and loan terms **and** that gain repays

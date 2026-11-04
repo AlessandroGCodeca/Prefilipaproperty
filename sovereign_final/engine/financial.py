@@ -70,7 +70,7 @@ def _need(value, what: str, market, where: str = "markets.py"):
 # the room-adjusted benchmark, the rent fallbacks). A stored score from an
 # older model is redone on the next scoring run
 # (database.requeue_scores_from_older_model).
-SCORING_MODEL_VERSION = 4   # 4: Slovak property tax per m² by municipality (was 0.4 % of the price)
+SCORING_MODEL_VERSION = 5   # 5: property tax by area in Košice and Žilina; Czech coefficients by city, town and population
 
 
 @dataclass

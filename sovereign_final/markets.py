@@ -280,7 +280,7 @@ CZ = Market(
     tax_year_rules=CZ_TAX_YEAR_RULES,
     property_tax={"kind": "per_m2", "module": "engine.property_tax_cz",
                   "source": "see engine/property_tax_cz.SOURCE",
-                  "checked": "2026-10-16 (web search)"},
+                  "checked": "2026-11-04 (sbirkapp.gov.cz, zakonyprolidi.cz, csu.gov.cz, vdp.cuzk.gov.cz)"},
     # SVJ: fond oprav per m² plus the správa (management) fee per flat. The
     # tenant pays the services (water, heating, lift) through zálohy; the
     # owner pays these two. No national statistic exists: sources give a
