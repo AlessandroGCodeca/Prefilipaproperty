@@ -33,6 +33,7 @@ accepted or uploaded. Towns rated by cadastral area keep the table's rates.
 from __future__ import annotations
 
 import math
+import re
 import unicodedata
 
 from engine import regional_prices as rp
@@ -184,14 +185,55 @@ def table_rates(town: str) -> list[float]:
 
 # ── Rates read from the towns' sites (modules/tax_rates) ──────────────────────
 _stored: dict[str, list[dict]] | None = None
+_names: list[tuple[str, str, str, str]] | None = None
+_names_of: object = None            # the stored rates _names was built with
+
+
+def town_key(name: str) -> str:
+    """A town's key in the stored rates: its folded name, and for one of
+    several municipalities sharing a name ("Porúbka (okres Žilina)") the
+    name and district: "porubka|zilina"."""
+    m = re.match(r"^(.*?)\s*\((?:okres\s+)?([^)]*)\)\s*$", name or "")
+    return f"{_fold(m.group(1))}|{_fold(m.group(2))}" if m else _fold(name)
+
+
+def _known_names() -> list[tuple[str, str, str, str]]:
+    """(name, district required or "", key, district) of every Slovak
+    municipality the rates know of, the longest name first — so "Spišská
+    Nová Ves" is found before the village "Nová Ves" inside it. A name
+    several share counts only with its district named beside it."""
+    global _names, _names_of
+    if _names is None or _names_of is not stored_rates():
+        _names_of = stored_rates()
+        names: dict[str, tuple[str, str, str, str]] = {}
+        try:
+            import database
+            conn = database.get_conn()
+            try:
+                if database._has_table(conn, "sk_municipalities"):
+                    for r in conn.execute("SELECT name, okres, key FROM sk_municipalities"):
+                        k = town_key(r["key"])
+                        okres = _fold(r["okres"] or "")
+                        names[k] = (_fold(r["name"]), okres if "|" in k else "", k, okres)
+            finally:
+                conn.close()
+        except Exception:
+            pass
+        for k in stored_rates():
+            if k not in names:
+                n, _, okres = k.partition("|")
+                names[k] = (n, okres, k, okres)
+        _names = sorted(names.values(), key=lambda t: -len(t[0]))
+    return _names
 
 
 def reload() -> None:
     """Forget the stored rates read so far: the next lookup reads them again
     (after an update, and at the start of each scoring run — the dashboard
     and the scheduler are two processes)."""
-    global _stored
+    global _stored, _names
     _stored = None
+    _names = None
 
 
 def stored_rates() -> dict[str, list[dict]]:
@@ -327,13 +369,19 @@ def rate_source(district: str, year: int | None = None) -> tuple[float, str]:
         stored = stored_rates()
         if stored:
             folded = _fold(key)
-            # A town only the stored rates know ("Šamorín"). When the string
-            # also names a table city, the longer name wins, as among the
-            # table's own cities.
-            town = next((t for t in sorted(stored, key=len, reverse=True)
-                         if t not in CITY_RATE_PER_M2 and rp._has_place(t, folded, rp._CITY_TAIL)),
-                        None)
-            if town and (city is None or len(town) > len(_fold(city))):
+            # The municipality the string names most fully ("Spišská Nová
+            # Ves", not the village "Nová Ves" in it). One only the stored
+            # rates know ("Šamorín") takes its rate; when the string also
+            # names a table city, the longer name wins, as among the table's
+            # own cities.
+            name, town, district = next(((n, k, d) for n, okres, k, d in _known_names()
+                                         if rp._has_place(n, folded, rp._CITY_TAIL)
+                                         and (not okres or okres in folded)), ("", None, ""))
+            # A table city in the string that is the municipality's own
+            # district ("Ruská, Michalovce") is where it lies, not the place.
+            if (town and town in stored and name not in CITY_RATE_PER_M2
+                    and (city is None or len(name) > len(_fold(city))
+                         or _fold(city) == district)):
                 hit = _stored_rate(town, year, in_table=False)
                 if hit:
                     return hit

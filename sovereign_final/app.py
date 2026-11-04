@@ -763,17 +763,26 @@ def _rent_step(progress):
 
 
 def _tax_step(progress):
-    """🏛️ UPDATE TAX RATES: every town's rate from its site (modules/tax_rates),
-    then a scoring run for the listings whose tax it moved."""
-    from modules import tax_rates
+    """🏛️ UPDATE TAX RATES: every Slovak town's rate from its site
+    (modules/tax_rates) and every Czech municipality's coefficients from the
+    official sources (modules/tax_rates_cz), then a scoring run for the
+    listings whose tax it moved."""
+    from modules import tax_rates, tax_rates_cz
     from modules.cashflow_runner import run_scoring
-    summary = tax_rates.update(progress=progress)
-    if summary["requeued"]:
-        run_scoring(market="sk")
-    level = "warning" if summary["counts"].get("review") else "success"
-    return level, ("🏛️ " + tax_rates.summary_text(summary)
-                   + (" See the TAX RATES tab for the ones to review."
-                      if summary["counts"].get("review") else ""))
+    sk = tax_rates.update(progress=progress)
+    try:
+        cz, cz_error = tax_rates_cz.update(progress=progress), ""
+    except Exception as e:                     # Slovakia's result still stands
+        logging.getLogger("sovereign").exception("Czech tax coefficients failed")
+        cz, cz_error = None, f"{type(e).__name__}: {e}"
+    if sk["requeued"] or (cz and cz["requeued"]):
+        run_scoring()
+    review = sk["counts"].get("review")
+    level = "warning" if review or cz is None else "success"
+    return level, ("🏛️ 🇸🇰 " + tax_rates.summary_text(sk)
+                   + (" See the TAX RATES tab for the ones to review." if review else "")
+                   + "  " + (tax_rates_cz.summary_text(cz) if cz else
+                             f"🇨🇿 The Czech coefficients couldn't be updated: {cz_error}."))
 
 
 def _dupes_step(progress):
@@ -2649,9 +2658,22 @@ def _tax_rates_tab():
         _SHOW.get(msg[0], st.info)(msg[1])
 
     reviews = [r for r in rows if r["status"] == "review"]
+    # The table's towns and the user's first, then the municipalities.
+    reviews.sort(key=lambda r: (r["kind"] == "municipality", r["town"]))
     if reviews:
-        st.markdown("##### ⚠️ Waiting for your decision")
-        for r in reviews:
+        st.markdown(f"##### ⚠️ Waiting for your decision ({len(reviews)})")
+        if len(reviews) > 12:
+            single = [r["town"] for r in reviews if len(r["found"]) == 1 and not r["zoned"]]
+            with st.expander(f"Accept several at once — {len(single)} with a single rate"):
+                pick = st.multiselect("Municipalities", single, key="tax_bulk_pick",
+                                      format_func=lambda t: f"{t} — " + next(
+                                          tr.rate_text(r["found"][0]) for r in reviews
+                                          if r["town"] == t) + " €/m²")
+                if st.button("Accept the selected", key="tax_bulk_go", disabled=not pick):
+                    errs = [e for e in (tr.accept(t) for t in pick) if e]
+                    _tax_rescore(f"✅ {len(pick) - len(errs)} accepted."
+                                 + (f" {len(errs)} not: {errs[0]}" if errs else ""))
+        for r in reviews[:12]:
             with st.container(border=True):
                 st.markdown(f"**{_plain(r['town'])}** · charged now "
                             f"{tr.rate_text(r['charged'])} €/m²")
@@ -2686,8 +2708,20 @@ def _tax_rates_tab():
                         st.rerun()
 
     from engine import property_tax_sk as _ptx
+    villages = [r for r in rows if r["kind"] == "municipality"]
+    read = [r for r in villages if r["status"] in ("confirmed", "applied", "upcoming", "new",
+                                                   "review", "kept")]
+    st.caption(f"{len(rows) - len(villages)} towns in the table or added by you, and "
+               f"{len(villages):,} other municipalities from their own websites: "
+               f"{len(read):,} read with a rate, "
+               f"{sum(1 for r in villages if r['status'] == 'blocked'):,} blocked, "
+               f"{sum(1 for r in villages if r['status'] == 'not_found'):,} without a readable "
+               f"rate, {sum(1 for r in villages if not r['status']):,} not read yet. A village "
+               f"is read again once a month.")
+    everything = st.toggle("Show every municipality", key="tax_show_all", value=False)
+    shown = rows if everything else [r for r in rows if r["kind"] != "municipality" or r in read]
     table = []
-    for r in rows:
+    for r in shown:
         zoned = _ptx.table_rates(r["town"]) if r["zoned"] else []
         table.append({
             "Town": r["town"],
@@ -2701,7 +2735,7 @@ def _tax_rates_tab():
             "Checked": r["checked_at"][:10],
             "Note": r["message"],
         })
-    st.dataframe(pd.DataFrame(table), hide_index=True, width="stretch",
+    st.dataframe(pd.DataFrame(table), hide_index=True, width="stretch", height=420,
                  column_config={"Source": st.column_config.LinkColumn(display_text="open")})
     st.caption(f"Charged: the rate the engine uses now — the table checked by hand for "
                f"{_ptx.TABLE_YEAR}, a rate from a later year's ordinance, a town the table "
@@ -2775,12 +2809,74 @@ def _tax_rates_tab():
                 st.caption("⚠ " + _plain(p))
 
 
+def _tax_rates_tab_cz():
+    from modules import tax_rates_cz as trc
+    from engine import property_tax_cz as ptc
+    st.markdown('<div class="muted">🇨🇿 PROPERTY TAX — DAŇ Z NEMOVITÝCH VĚCÍ ON A FLAT: EVERY '
+                'MUNICIPALITY\'S SIZE AND LOCAL COEFFICIENTS, FROM ITS ORDINANCES IN SBIRKAPP.GOV.CZ '
+                'AND THE STATISTICAL OFFICE\'S POPULATION</div>', unsafe_allow_html=True)
+    rows = trc.table()
+    last = trc.last_run()
+    if not last:
+        st.caption("Not read yet: 🏛️ UPDATE TAX RATES reads every Czech municipality's "
+                   "coefficients (a few minutes the first time, about a minute after that). "
+                   "Until then every place outside Prague is taxed at the 3.5 size coefficient "
+                   "and local coefficient 1.0.")
+        if st.button("🏛️ UPDATE TAX RATES", key="tax_update_tab_cz", type="primary",
+                     disabled=jobs.running()):
+            _why = jobs.start("TAX RATES", _tax_step)
+            if _why:
+                st.warning(_why)
+            else:
+                st.session_state["_job_watch"] = jobs.current().id
+                st.rerun()
+        return
+    from engine.property_tax_sk import _year as _tax_year
+    ahead = len(trc.table(_tax_year() + 1)) - len(rows)
+    st.caption(f"Read {last[:16].replace('T', ' ')} UTC · {len(rows):,} municipalities set "
+               f"coefficients by ordinance for {_tax_year()}"
+               + (f" ({ahead:,} more from {_tax_year() + 1}, already published)" if ahead > 0 else "")
+               + "; the others pay the act's: the size coefficient by "
+               f"population (1.0–3.5, Prague 4.5) and local 1.0. A flat pays floor area × 1.22 × "
+               f"{ptc.RATE_PER_M2:.2f} Kč × size × local.")
+    place = st.text_input("Look up a place, as a listing names it", key="tax_cz_lookup",
+                          placeholder="Praha 3, Brno-střed, Olomouc …")
+    if place.strip():
+        size, local, why = ptc.coefficients(place)
+        st.markdown(f"**{_plain(place)}**: size {size:g} × local {local:g} → a 60 m² flat pays "
+                    f"**{ptc.annual_tax(60, place):,.0f} Kč** a year")
+        st.caption(_plain(why))
+    table = []
+    for r in rows:
+        main_size, main_local = r["size"][""], r["local"][""]
+        parts = sorted((set(r["size"]) | set(r["local"])) - {""})
+        table.append({
+            "Municipality": r["name"], "District": r["okres"],
+            "Population": r["population"],
+            "Size": main_size, "Local": main_local,
+            "By area": (f"{len(parts)} areas differ" if parts else ""),
+            "60 m² a year, Kč": round(60 * ptc.UNIT_COEFFICIENT * ptc.RATE_PER_M2
+                                      * main_size * main_local),
+            "Ordinances": "; ".join(r["sources"]),
+        })
+    st.dataframe(pd.DataFrame(table), hide_index=True, width="stretch", height=420,
+                 column_config={"Population": st.column_config.NumberColumn(format="%d")})
+    bad = trc.unreadable()
+    if bad:
+        with st.expander(f"📄 {len(bad)} ordinances couldn't be read — an old .doc file or a scan"):
+            st.caption("Those municipalities pay the act's defaults here. Each link opens the "
+                       "ordinance in the collection.")
+            st.dataframe(pd.DataFrame(bad), hide_index=True, width="stretch",
+                         column_config={"url": st.column_config.LinkColumn(display_text="open")})
+
+
 with t_tax:
-    if view_market == "cz":
-        st.info("A Czech flat's property tax comes from the act's coefficients (markets.py); "
-                "this tab keeps the Slovak towns' rates.")
-    else:
+    if view_market != "cz":
         _tax_rates_tab()
+    if view_market is None:
+        st.markdown('<hr class="div">', unsafe_allow_html=True)
+    if view_market != "sk":
+        _tax_rates_tab_cz()
 
 
 # ── Tab 2: Satellite Viewer ───────────────────────────────────────────────────

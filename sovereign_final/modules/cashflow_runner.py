@@ -38,14 +38,16 @@ def run_scoring(progress_callback=None, market: str | None = None) -> int:
     older = requeue_scores_from_older_model(market=market)
     if older:
         log.info(f"♻️  {older} scores came from an older model or tax table — re-scoring them.")
-    if market in (None, "sk"):
-        # Property-tax rates updated from the towns' sites, possibly by the
-        # other process (the dashboard's button while the scheduler scores).
-        from engine import property_tax_sk
-        property_tax_sk.reload()
-        taxed = requeue_scores_with_stale_property_tax()
+    # Property-tax rates and coefficients updated from the official sources,
+    # possibly by the other process (the dashboard's button while the
+    # scheduler scores).
+    from engine import property_tax_cz, property_tax_sk
+    property_tax_sk.reload()
+    property_tax_cz.reload()
+    for m in ([market] if market else ["sk", "cz"]):
+        taxed = requeue_scores_with_stale_property_tax(market=m)
         if taxed:
-            log.info(f"♻️  {taxed} scores used an older property-tax rate — re-scoring them.")
+            log.info(f"♻️  {taxed} {m.upper()} scores used an older property tax — re-scoring them.")
     listings = get_unscored_cashflow(market=market)
     if not listings:
         log.info("✅ No new listings to score.")

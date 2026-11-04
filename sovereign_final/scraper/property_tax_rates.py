@@ -440,7 +440,7 @@ def doc_from_bytes(url: str, content: bytes, content_type: str = "") -> Doc:
     return Doc(url, "html", text, html=raw, title=re.sub(r"\s+", " ", title)[:150])
 
 
-def _get(url: str, session=None):
+def _get(url: str, session=None, timeout: float = 45):
     """GET through ScraperAPI when it is configured, as the listing scrapers
     do; otherwise directly, with the browser headers but without "br" in
     Accept-Encoding. Brotli isn't installed, so requests can't unpack a
@@ -450,22 +450,25 @@ def _get(url: str, session=None):
     from config import SCRAPER_API_KEY
     from scraper._http import BROWSER_HEADERS, get
     if SCRAPER_API_KEY:
-        return get(url, session=session, timeout=45)
+        return get(url, session=session, timeout=int(timeout))
     s = session or requests.Session()
     s.headers.update({**BROWSER_HEADERS, "Accept-Encoding": "gzip, deflate"})
-    return s.get(url, timeout=45)
+    return s.get(url, timeout=timeout)
 
 
-def fetch(url: str, session=None) -> Doc:
+def fetch(url: str, session=None, timeout: float = 45, retry: bool = True) -> Doc:
     """GET a page or document. Raises Blocked when the site refuses the
-    request."""
+    request. A village's site is read with a shorter `timeout` and no
+    `retry`: one slow site mustn't hold up the hundreds behind it."""
     import requests
     try:
         try:
-            resp = _get(url, session)
+            resp = _get(url, session, timeout)
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if not retry:
+                raise
             time.sleep(2)               # a dropped connection is often just that
-            resp = _get(url, session)
+            resp = _get(url, session, timeout)
     except requests.exceptions.SSLError as e:
         raise Blocked(f"secure connection failed ({type(e).__name__})") from None
     except requests.exceptions.ConnectionError:
@@ -480,6 +483,11 @@ def fetch(url: str, session=None) -> Doc:
     doc = doc_from_bytes(resp.url or url, resp.content, resp.headers.get("content-type", ""))
     if doc.kind == "html" and len(doc.text) < 3000 and _BLOCK_MARKERS.search(fold(doc.html[:20000])):
         raise Blocked("the site answered with a CAPTCHA or bot check instead of the page")
+    low = doc.html.lower() if doc.kind == "html" else ""
+    if low and len(doc.text) < 400 and "<a " not in low and "<script" in low:
+        # hajske.sk, sisov.sk: 3 KB, no link — a bot check by script, or a
+        # page built in the browser. Nothing here for a program to read.
+        raise Blocked("the page is built by JavaScript or a bot check: nothing to read")
     return doc
 
 
@@ -494,8 +502,10 @@ _SKIP = re.compile(
     r"facebook|twitter|instagram|youtube|linkedin|zakonypreludi|slov-lex|\.jpg|\.png|\.zip|"
     r"psa(?![a-z])|ubytovan|parkovan|verejneho priestranstva|rozvoj|zrusen|neplatn|archiv|"
     r"ulav|znizeni|oslobodeni|elektronick|e-?sluzb|platit|zaplat|prevod|majet|kontrol")
-# From a home page, also its list of ordinances — a menu item there.
-_ORDINANCES = re.compile(r"vseobecne[\s_-]+zavazne[\s_-]+nariadeni|(?<![a-z])vzn(?![a-z])")
+# From a home page, also its list of ordinances or documents — a menu item
+# there ("VZN", "Dokumenty", "Zverejňovanie" on village sites).
+_ORDINANCES = re.compile(r"vseobecne[\s_-]+zavazne[\s_-]+nariadeni|(?<![a-z])vzn(?![a-z])|"
+                         r"(?<![a-z])dokument|zverejnovani|legislativ|(?<![a-z])predpisy")
 # A link to a file rather than a page.
 _FILE = re.compile(r"\.pdf|\.docx?(?![a-z])|\.odt|download|/file|\.dat\b|/uploads?/|/storage/|"
                    r"stiahnut|subor|\bpdf\b")
@@ -585,7 +595,9 @@ def _links(doc: Doc, site: str, about_tax: bool = False,
             (strong_own, is_file)]
         years = [int(y) for y in re.findall(r"(?<!\d)(20[0-4]\d)(?!\d)", own + " " + ctx)]
         if listing and not strong_own:
-            tier = -1
+            # An ordinance list before a generic "Dokumenty"/"Zverejňovanie"
+            # page, which leads to election minutes and contracts first.
+            tier = -1 if re.search(r"vseobecne|vzn|nariaden", own) else -2
         rank = tier * 100_000 + (max(years) if years else 2000) * 10 - min(i, 9)
         out.append((rank, href, label if strong_own or not ctx_text else ctx_text[:160]))
     out.sort(key=lambda t: -t[0])
@@ -640,15 +652,24 @@ def pick(readings: list[Reading], year: int, today: int | None = None
 
 
 def check_town(town: Town, year: int, session=None, delay: float = 0.4,
-               fetcher=None) -> TownResult:
-    """Read `town`'s flat rate for tax year `year` from its own site."""
+               fetcher=None, budget: int = MAX_FETCHES, stop_when_found: bool = False
+               ) -> TownResult:
+    """Read `town`'s flat rate for tax year `year` from its own site, in at
+    most `budget` pages and documents, the most promising link first (the
+    property-tax ordinance, then a list of ordinances, then a generic page
+    of documents). `stop_when_found`: stop at the first ordinance that
+    dates a rate for `year` or later (a village's site, read once a month)."""
+    import heapq
     fetcher = fetcher or fetch
     res = TownResult(town.name)
-    queue: list[tuple[str, int, str]] = [(u, 0, "") for u in town.start]
+    queue: list[tuple[int, int, str, int, str]] = [(-10**9, i, u, 0, "")
+                                                   for i, u in enumerate(town.start)]
+    heapq.heapify(queue)
+    order = len(queue)
     seen: set[str] = set()
     newer_mentions: list[tuple[int, str]] = []
-    while queue and res.fetched < MAX_FETCHES:
-        url, depth, label = queue.pop(0)
+    while queue and res.fetched < budget:
+        _, _, url, depth, label = heapq.heappop(queue)
         if url in seen:
             continue
         seen.add(url)
@@ -688,6 +709,8 @@ def check_town(town: Town, year: int, session=None, delay: float = 0.4,
             res.readings.append(reading)
             res.visited.append((url, f"{doc.kind}: flat rate {reading.rates}"
                                      f" for {reading.tax_year or 'an unstated year'}"))
+            if stop_when_found and reading.dated and (reading.tax_year or 0) >= year:
+                break
         else:
             res.visited.append((url, f"{doc.kind}: no flat rate"))
             if doc.kind != "html" and mentions_flat_tax(doc.text):
@@ -699,15 +722,74 @@ def check_town(town: Town, year: int, session=None, delay: float = 0.4,
         if doc.kind == "html" and (depth < MAX_DEPTH or about):
             site = _site(urlparse(doc.url).hostname or "")
             home = depth == 0 and urlparse(doc.url).path in ("", "/")
-            for _, href, lab in _links(doc, site, about_tax=about, home=home):
+            for rank, href, lab in _links(doc, site, about_tax=about, home=home):
                 # Past the last level, only an ordinance page's own files.
                 if href not in seen and (depth < MAX_DEPTH or _FILE.search(fold(lab + " " + href))):
-                    queue.append((href, depth + 1, lab))
+                    order += 1
+                    heapq.heappush(queue, (-rank, order, href, depth + 1, lab))
     res.current, res.upcoming, res.conflict = pick(res.readings, year)
     base = res.current.tax_year if res.current and res.current.tax_year else None
     if base:
         res.unread_newer = [t for y, t in newer_mentions if y > base]
     return res
+
+
+# ── Every Slovak municipality ─────────────────────────────────────────────────
+WIKIDATA = "https://query.wikidata.org/sparql"
+# Q6784672 "municipality of Slovakia": its Slovak name, okres and official
+# website (P856), as Wikidata has them — 2,886 municipalities, 2,806 with a
+# website, in November 2026.
+_MUNICIPALITIES_QUERY = """
+SELECT ?item ?name ?okres ?web ?pop WHERE {
+  ?item wdt:P31 wd:Q6784672 .
+  ?item rdfs:label ?name . FILTER(LANG(?name)="sk")
+  OPTIONAL { ?item wdt:P856 ?web }
+  OPTIONAL { ?item wdt:P131 ?o . ?o rdfs:label ?okres . FILTER(LANG(?okres)="sk") }
+  OPTIONAL { ?item wdt:P1082 ?pop }
+}"""
+
+
+@dataclass
+class Municipality:
+    name: str
+    okres: str                      # "Senec" (the district, without "okres")
+    web: str
+    population: int | None = None
+
+    @property
+    def key(self) -> str:
+        """Its name, or name and district where several share the name."""
+        return self.name
+
+
+def municipalities(session=None) -> list[Municipality]:
+    """Every Slovak municipality with its district and official website."""
+    import requests
+    s = session or requests.Session()
+    r = s.get(WIKIDATA, params={"query": _MUNICIPALITIES_QUERY},
+              headers={"Accept": "text/csv",
+                       "User-Agent": "SovereignPropertyTax/1.0 (municipal tax rates)"},
+              timeout=180)
+    r.raise_for_status()
+    import csv as _csv
+    items: dict[str, dict] = {}
+    for row in _csv.DictReader(io.StringIO(r.content.decode("utf-8"))):
+        it = items.setdefault(row["item"], {"name": row["name"], "okres": set(), "web": [],
+                                            "pop": row.get("pop")})
+        if row.get("okres"):
+            it["okres"].add(re.sub(r"^okres\s+", "", row["okres"]))
+        if row.get("web") and row["web"] not in it["web"]:
+            it["web"].append(row["web"])
+    out = []
+    for it in items.values():
+        try:
+            pop = int(float(it["pop"])) if it["pop"] else None
+        except ValueError:
+            pop = None
+        out.append(Municipality(it["name"], ", ".join(sorted(it["okres"])),
+                                (sorted(it["web"], key=lambda u: (not u.startswith("https"), len(u)))
+                                 or [""])[0], pop))
+    return out
 
 
 def read_upload(name: str, content: bytes, town: Town | None = None,

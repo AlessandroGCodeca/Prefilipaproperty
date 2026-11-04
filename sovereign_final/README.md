@@ -156,7 +156,7 @@ named here override them.
 
 1. Czech sale-price medians: none (table empty); the rooms multiplier for them is 1.0.
 2. Deloitte Rent Index: whether its figures are asking or achieved rents.
-3. Property tax: each municipality's local coefficient (1.0, `CZ_PROPERTY_TAX_LOCAL_COEF`) and the size coefficient outside Prague (3.5, the upper bound).
+3. Property tax: until 🏛️ UPDATE TAX RATES has read the Czech coefficients (see "Czech property tax" below), each municipality's local coefficient (1.0, `CZ_PROPERTY_TAX_LOCAL_COEF`) and the size coefficient outside Prague (3.5, the upper bound); after it, a municipality whose ordinance couldn't be read (an old .doc file or a scan, listed on the TAX RATES tab) or whose name several share with none of their districts named.
 4. Personal tax: whether an SVJ fond oprav payment is deductible when paid (modelled) or only when spent; the 40 mil. Kč cap on an exempt sale (not modelled).
 5. Lending: a ČNB stress add-on (the engine's +2 pp is used).
 6. SVJ správa fee per flat (0, `CZ_SVJ_SPRAVA_PER_UNIT`); fond oprav 20 Kč/m² (`CZ_SVJ_FOND_OPRAV_PER_M2`).
@@ -197,8 +197,10 @@ sovereign_final/
 │   ├── geo.py                ← A listing's own map pin (JSON-LD / API / meta)
 │   ├── slovak_cases.py       ← Locative place names ("v Nitre", "v Košiciach")
 │   ├── rentals.py            ← Prenájom (to-let) listings for live rent comps
-│   ├── property_tax_rates.py ← Each town's flat property-tax rate, read from its
-│   │                           own ordinance or rate page (🏛️ UPDATE TAX RATES)
+│   ├── property_tax_rates.py ← Each Slovak town's flat property-tax rate, read from
+│   │                           its own ordinance or rate page (🏛️ UPDATE TAX RATES)
+│   ├── tax_coefficients_cz.py ← Every Czech municipality's coefficients, from its
+│   │                           ordinances in sbirkapp.gov.cz
 │   ├── cz_common.py          ← Czech scrapers' shared parts: robots.txt, Kč, places
 │   ├── bezrealitky.py        ← Bezrealitky.cz (sitemap + listing pages)
 │   ├── idnes.py              ← Reality.iDNES.cz
@@ -215,7 +217,8 @@ sovereign_final/
 │   ├── rent_cz.py            ← Czech rent baseline (Deloitte Rent Index Q2 2026)
 │   ├── rent_comps_cz.py      ← Live Kč/m² rents from Czech rentals
 │   ├── property_tax_sk.py    ← Daň z bytov on a Slovak flat (€/m² by town)
-│   ├── property_tax_cz.py    ← Daň z nemovitých věcí on a flat
+│   ├── property_tax_cz.py    ← Daň z nemovitých věcí on a flat (every municipality's
+│   │                           coefficients once 🏛️ UPDATE TAX RATES has read them)
 │   └── duplicates.py         ← Same flat listed on several portals
 ├── modules/
 │   ├── debt_bot.py           ← LV title deed checker (PASS / UNVERIFIED / REJECTED)
@@ -232,7 +235,8 @@ sovereign_final/
 │   ├── contract_draft.py     ← ONE-CLICK CLOSE contract draft + internal analysis
 │   ├── pipeline_state.py     ← Pipeline lock + last full run's status
 │   ├── jobs.py               ← Runs the sidebar buttons in the background
-│   ├── tax_rates.py          ← 🏛️ UPDATE TAX RATES: apply, confirm or hold for review
+│   ├── tax_rates.py          ← 🏛️ UPDATE TAX RATES (Slovakia): apply, confirm or review
+│   ├── tax_rates_cz.py       ← 🏛️ UPDATE TAX RATES (Czechia): every municipality
 │   └── backup.py             ← Daily database copy + export of your data
 └── dev/                      ← Debug probes: LV check, nehnutelnosti, topreality
 ```
@@ -252,7 +256,7 @@ sovereign_final/
 | REJECTED | Every LV rejection with its reason, detail and LV risk read; re-verify from here |
 | LV TO-DO | Every GREEN / YELLOW deal whose title deed isn't verified, with what the plot check found; type the flats' own LV numbers in bulk, then save (checked on the next LV run) or save & verify now (in the background, like the pipeline buttons) |
 | RENT COMPS | Live €/m² per district from prenájom listings vs the baseline table |
-| TAX RATES | Each town's flat property-tax rate: what the engine charges, what the town's own site says, and the source; one click re-reads them all, a doubtful reading waits here to be accepted or turned down, and a town whose site blocks automated requests takes an uploaded ordinance |
+| TAX RATES | Slovakia: each town's flat property-tax rate — what the engine charges, what the town's own site says, and the source; a doubtful reading waits here to be accepted or turned down, and a town whose site blocks automated requests takes an uploaded ordinance. Czechia: every municipality's size and local coefficients with the ordinances they come from, and a lookup by place. One click re-reads both countries |
 | ONE-CLICK CLOSE | Pre-filled Slovak notary contract draft with download; the deal's numbers are a separate download, not part of the draft |
 
 A 🔻 banner above the tabs lists price cuts from the last 14 days, and says
@@ -289,9 +293,11 @@ stays PENDING. The pipeline does it for up to 100 listings a run — and skips
 it when nehnutelnosti blocked that run's scrape, as every read would only time
 out — the button for up to 200. Bazos and Topreality listings aren't re-read.
 
-**🏛️ UPDATE TAX RATES** re-reads every Slovak town's flat property-tax rate
-from its own site and re-scores the listings whose tax moved — see "Updating
-the rates with one click" below. It is not part of the daily run: rates change
+**🏛️ UPDATE TAX RATES** re-reads every Slovak municipality's flat
+property-tax rate from its own site and every Czech municipality's
+coefficients from the official collection, and re-scores the listings whose
+tax moved — see "Updating the rates with one click" and "Czech property tax"
+below. It is not part of the daily run: rates change
 once a year (most ordinances take effect on 1 January), so a click in December
 or January, or after a town adopts a new ordinance, is enough.
 
@@ -576,6 +582,63 @@ older ordinances, or none). A scanned PDF can't be read: Malacky's newest
 consolidated text and Spišská Nová Ves's ordinance are scans (their tax pages
 state the rate). `python -m scraper.property_tax_rates [town …] -v` prints
 what it reads, page by page.
+
+**Every other Slovak municipality.** Beyond those towns the button reads all
+~2,900 Slovak municipalities, each from the home page of its official website
+(the list and the sites come from Wikidata, refreshed monthly): it follows the
+site's menu to its ordinances, the property-tax ordinance first, and stops at
+the first dated rate. A municipality any listing is in is read on every click;
+the others at most once a month, as many as fit in 25 minutes a click (the
+never-read first) — the summary says how many are still due. Several
+municipalities share a name (four Porúbkas): such a one is charged its rate
+only when the listing names its district too. The first click, from a data
+centre in November 2026, read 487 municipalities: 83 villages gained their own
+rate (0.03–0.85 €/m², 0.16 on average, instead of the 1.35 fallback), 19 went
+to review, 107 sites refused the request and 255 had no rate a program can
+read — most often a scanned ordinance. A village that matters to you and isn't
+read: upload its ordinance on the tab.
+
+### Czech property tax
+
+A Czech flat (a zdanitelná jednotka) pays floor area × 1.22 × 3.50 Kč × the
+municipality's **size coefficient** × its **local coefficient** (zákon
+338/1992 Sb., `engine/property_tax_cz.py`). The size coefficient follows the
+population (§ 11 odst. 4: 1.0 / 1.4 / 1.6 / 2.0 / 2.5 / 3.5; every statutory
+city and four spa towns 3.5; Prague 4.5), counted as in the Finance Ministry's
+decree in force on 1 January (§ 12f), and an ordinance may raise it a step in
+chosen cadastral areas or city parts (§ 11 odst. 5). The local coefficient
+(0.5–5.0, § 12) is 1.0 unless an ordinance sets it — for the whole
+municipality, a cadastral area or city part, or the group of flats.
+
+🏛️ UPDATE TAX RATES reads both for all 6,258 municipalities
+(`modules/tax_rates_cz`, `scraper/tax_coefficients_cz`):
+
+- the population of every municipality from the Czech Statistical Office's
+  open data (once a year);
+- every valid ordinance on the coefficients from the Sbírka právních předpisů
+  územních samosprávných celků (sbirkapp.gov.cz), where every municipal
+  ordinance since 2021 is published — each read once, since a published
+  ordinance never changes;
+- the municipality behind each ordinance's publisher (by IČO, from ARES).
+
+It combines them as the act says: an ordinance counts for a tax year only if
+it was published by 1 October before it and is in effect on 1 January (§ 16a);
+a repealed one stops counting; an amendment's new annex replaces its
+ordinance's; the group of flats or an area replaces the municipality's own
+coefficient, and the higher of group and area counts (§ 12 odst. 5–8). A
+listing is charged its city part's or area's coefficients where it names one
+("Praha 3": size 5 × local 2 — 2,562 Kč a year on 60 m², against 1,729 Kč in
+Praha 2), its city's highest where it names none, and a municipality whose
+name several share only with its district named.
+
+The first run (3½ minutes; about a minute after that) read 2,147 ordinances of
+1,775 municipalities — 772 set coefficients for 2026, the rest from 2027. 231
+couldn't be read (an old .doc file or a scan); the tab lists them with links,
+and those municipalities pay the act's figures. An ordinance from before 2021
+that was never put in the collection isn't seen either. Nothing waits for
+review here: the figures come from the state's own collection in the Interior
+Ministry's model wording, and a flat's Czech property tax is a few thousand
+crowns a year at most.
 
 Each figure was read from the act and the city's own ordinance or tax page in
 November 2026; `property_tax_sk.SOURCE` names each document. Prešov's comes

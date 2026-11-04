@@ -264,13 +264,13 @@ class _Resp:
 
 def test_a_captcha_page_is_blocked_not_read(monkeypatch):
     page = b'<html><body><form action="/verify"><div class="g-recaptcha"></div></form></body></html>'
-    monkeypatch.setattr(p, "_get", lambda url, session=None: _Resp(content=page))
+    monkeypatch.setattr(p, "_get", lambda url, session=None, timeout=45: _Resp(content=page))
     with pytest.raises(p.Blocked, match="CAPTCHA"):
         p.fetch("https://www.presov.sk/")
 
 
 def test_access_forbidden_is_blocked(monkeypatch):
-    monkeypatch.setattr(p, "_get", lambda url, session=None: _Resp(status=403))
+    monkeypatch.setattr(p, "_get", lambda url, session=None, timeout=45: _Resp(status=403))
     with pytest.raises(p.Blocked, match="403"):
         p.fetch("https://www.levice.sk/")
 
@@ -279,7 +279,7 @@ def test_a_dropped_connection_is_tried_again_once(monkeypatch):
     import requests
     calls = []
 
-    def flaky(url, session=None):
+    def flaky(url, session=None, timeout=45):
         calls.append(url)
         if len(calls) == 1:
             raise requests.exceptions.ConnectionError("reset")
@@ -287,6 +287,10 @@ def test_a_dropped_connection_is_tried_again_once(monkeypatch):
     monkeypatch.setattr(p, "_get", flaky)
     monkeypatch.setattr(p.time, "sleep", lambda s: None)
     assert p.fetch("https://www.stupava.sk/").kind == "html" and len(calls) == 2
+    calls.clear()
+    with pytest.raises(p.Blocked, match="reset"):          # a village's site: no second try
+        p.fetch("https://www.obec.sk/", retry=False)
+    assert len(calls) == 1
 
 
 def test_brotli_is_not_asked_for(monkeypatch):

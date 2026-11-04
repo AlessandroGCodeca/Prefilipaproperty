@@ -22,8 +22,9 @@ def _no_stored_tax_rates(monkeypatch):
     the dashboard's 🏛️ UPDATE TAX RATES stored (engine.property_tax_sk). A
     test sees the table alone, whatever a real data/sovereign.db holds; one
     about stored rates sets them itself."""
-    from engine import property_tax_sk
+    from engine import property_tax_cz, property_tax_sk
     monkeypatch.setattr(property_tax_sk, "_stored", {})
+    monkeypatch.setattr(property_tax_cz, "_stored", {})
 
 
 @pytest.fixture

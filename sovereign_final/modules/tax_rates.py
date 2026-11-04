@@ -35,6 +35,7 @@ hand, so it goes to review and nothing is stored.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import re
@@ -56,7 +57,9 @@ STATUS_LABEL = {
     "new": "➕ added", "review": "⚠️ needs review", "kept": "🔒 table kept",
     "not_found": "❔ not found", "blocked": "⛔ site blocked",
 }
-WORKERS = 4                     # towns read at a time (each from its own site)
+WORKERS = 16                    # sites read at a time (each town its own site)
+RECHECK_DAYS = 30               # a village is read again after this long
+VILLAGE_TIME_BUDGET_S = 25 * 60 # per click: the villages due, as many as fit
 
 
 def _now() -> str:
@@ -86,7 +89,9 @@ def doc_name(title: str, url: str = "") -> str:
     ("VZN_17_2023.pdf 30.10.2025 (PDF, 4,96 MB)" → "VZN_17_2023.pdf")."""
     t = re.sub(r"\s+", " ", title or "")
     t = re.sub(r"(?i)stiahnu[tť]\w*|ve[lľ]kos[tť]:?\s*[\d.,]+\s*[kmg]b|typ:\s*[^,]*,?|"
-               r"otvori[tť] s[uú]bor:?|s[uú]bor na stiahnutie:?|\d{1,2}\.\s?\d{1,2}\.\s?20\d\d", " ", t)
+               r"otvori[tť] s[uú]bor:?|s[uú]bor na stiahnutie:?|\d{1,2}\.\s?\d{1,2}\.\s?20\d\d|"
+               r",?\s*otvor[ií] sa v novom okne\)?|ve[lľ]kos[tť] a typ s[uú]boru\s*/?|"
+               r"(?:^|\s)s[uú]bor:?\s|\bform[aá]t\b", " ", t)
     t = re.sub(r"\(?\s*(?:pdf|docx?|odt)?\s*,?\s*[\d.,]+\s*[kmg]b\s*\)?", " ", t, flags=re.I)
     t = re.sub(r"(?i)\bplatn[ée] znenie\b|\s[-–|]\s(?:ofici[aá]lne?|mesto)\b.*$", " ", t)
     t = re.sub(r"\s(?:\||::)\s.*$", " ", t)        # a page title's " | Dunajská Streda"
@@ -111,7 +116,7 @@ class Outcome:
 
 def _stored_rate(town: str, year: int) -> float | None:
     """The rate stored for `town` in force in `year`, if any."""
-    for r in tax.stored_rates().get(scr.fold(town), []):
+    for r in tax.stored_rates().get(tax.town_key(town), []):
         if r["tax_year"] <= year:
             return r["rate"]
     return None
@@ -150,7 +155,7 @@ def assess(town: scr.Town, res: scr.TownResult, year: int | None = None) -> Outc
     table = tax.table_rates(town.name)
     src = (lambda r: f"{doc_name(r.title, r.url)}, {_year_note(r)}")
 
-    if town.zoned or scr.fold(town.name) in tax.ZONED:
+    if town.zoned or tax.town_key(town.name) in tax.ZONED:
         notes, status = [], "confirmed"
         if cur:
             found = sorted(set(cur.rates))
@@ -185,10 +190,15 @@ def assess(town: scr.Town, res: scr.TownResult, year: int | None = None) -> Outc
     in_use = None
     if cur:
         rate = cur.rates[0]
-        in_use, label = tax.rate_source(town.name, year)
-        fallback = label.startswith("UNVERIFIED")
-        newest = next((r for r in tax.stored_rates().get(scr.fold(town.name), [])
+        newest = next((r for r in tax.stored_rates().get(tax.town_key(town.name), [])
                        if r["tax_year"] <= year), None)
+        if table:
+            in_use, label = tax.rate_source(town.name, year)
+            fallback = label.startswith("UNVERIFIED")
+        else:
+            # Not by name: "Brestov (okres Prešov)" would find Prešov's rate.
+            fallback = newest is None
+            in_use = tax.UNKNOWN_PLACE_RATE_PER_M2 if fallback else newest["rate"]
         if not fallback and _same(rate, in_use):
             notes.append(f"{rate_text(rate)} €/m² — as charged ({src(cur)}).")
         elif newest and newest["origin"] != "scraped" and not _same(rate, newest["rate"]):
@@ -265,7 +275,8 @@ def _schema() -> str:
     import database
     s = database.SQLITE_SCHEMA
     return "\n".join(m.group(0) for m in re.finditer(
-        r"CREATE TABLE IF NOT EXISTS property_tax_\w+ \(.*?\);", s, re.S))
+        r"CREATE TABLE IF NOT EXISTS (?:property_tax_(?:rates|checks|sources)|sk_municipalities) "
+        r"\(.*?\);", s, re.S))
 
 
 _SCHEMA = _schema()
@@ -281,7 +292,7 @@ def _save_rate(conn, name: str, tax_year: int, rate: float, url: str, document: 
             name=excluded.name, rate=excluded.rate, source_url=excluded.source_url,
             document=excluded.document, excerpt=excluded.excerpt, origin=excluded.origin,
             saved_at=excluded.saved_at
-    """, (scr.fold(name), name, int(tax_year), float(rate), url, document, excerpt, origin,
+    """, (tax.town_key(name), name, int(tax_year), float(rate), url, document, excerpt, origin,
           _now()))
 
 
@@ -292,7 +303,7 @@ def _save_check(conn, o: Outcome) -> None:
             (town, name, status, message, rates, tax_year, source_url, document, excerpt,
              detail, checked_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?)
-    """, (scr.fold(o.town), o.town, o.status, o.message,
+    """, (tax.town_key(o.town), o.town, o.status, o.message,
           json.dumps(c.rates) if c else None, c.tax_year if c else None,
           c.url if c else None, doc_name(c.title, c.url) if c else None,
           c.excerpt if c else None, json.dumps(o.detail, ensure_ascii=False), _now()))
@@ -312,18 +323,100 @@ def record(o: Outcome) -> None:
 
 
 # ── Towns ─────────────────────────────────────────────────────────────────────
-def towns() -> dict[str, scr.Town]:
-    """The towns checked: scraper.property_tax_rates.TOWNS and those a user
-    added on the dashboard."""
+def refresh_municipalities(session=None, force: bool = False) -> int:
+    """Every Slovak municipality and its website, from Wikidata, at most once
+    a month (`force`: now). Returns how many are on file."""
+    conn = _conn()
+    try:
+        n, newest = conn.execute("SELECT COUNT(*), MAX(refreshed_at) FROM sk_municipalities").fetchone()
+    finally:
+        conn.close()
+    fresh = newest and (datetime.now(timezone.utc) - datetime.fromisoformat(newest)).days < RECHECK_DAYS
+    if n and fresh and not force:
+        return n
+    try:
+        found = scr.municipalities(session)
+    except Exception as e:
+        log.warning(f"Tax rates: the list of municipalities couldn't be read ({e}); "
+                    f"keeping the {n} on file")
+        return n
+    shared: dict[str, int] = {}
+    for m in found:
+        shared[m.name] = shared.get(m.name, 0) + 1
+    now = _now()
+    rows = [(f"{m.name} (okres {m.okres})" if shared[m.name] > 1 and m.okres else m.name,
+             m.name, m.okres, m.web, m.population, now) for m in found]
+    conn = _conn()
+    try:
+        conn.execute("DELETE FROM sk_municipalities")
+        conn.executemany("INSERT OR REPLACE INTO sk_municipalities VALUES (?,?,?,?,?,?)", rows)
+        conn.commit()
+    finally:
+        conn.close()
+    tax.reload()
+    return len(rows)
+
+
+def towns(municipalities: bool = True) -> dict[str, scr.Town]:
+    """The towns checked: scraper.property_tax_rates.TOWNS, those a user
+    added on the dashboard, and (`municipalities`) every other Slovak
+    municipality with a website, from its home page."""
     out = dict(scr.TOWNS)
+    have = {tax.town_key(n) for n in out}
     conn = _conn()
     try:
         for r in conn.execute("SELECT name, start_url FROM property_tax_sources ORDER BY name"):
             if r["name"] not in out:
                 out[r["name"]] = scr.Town(r["name"], (r["start_url"],))
+                have.add(tax.town_key(r["name"]))
+        if municipalities:
+            for r in conn.execute("SELECT key, web FROM sk_municipalities ORDER BY key"):
+                if r["web"] and tax.town_key(r["key"]) not in have:
+                    out[r["key"]] = scr.Town(r["key"], (r["web"],))
     finally:
         conn.close()
     return out
+
+
+def _custom() -> set[str]:
+    conn = _conn()
+    try:
+        return {r[0] for r in conn.execute("SELECT name FROM property_tax_sources")}
+    finally:
+        conn.close()
+
+
+def _with_listings(names: list[str]) -> set[str]:
+    """The municipalities among `names` that Slovak listings are in."""
+    try:
+        import database
+        conn = database.get_conn()
+        try:
+            only, params = database._market_sql(conn, "sk")
+            districts = {tax._fold(r[0]) for r in conn.execute(
+                f"SELECT DISTINCT district FROM listings WHERE is_active = 1 AND district != ''{only}",
+                params) if r[0]}
+        finally:
+            conn.close()
+    except Exception:
+        return set()
+    if not districts:
+        return set()
+    from engine import regional_prices as rp
+    out = set()
+    for name in names:
+        n, _, okres = tax.town_key(name).partition("|")
+        if any(rp._has_place(n, d, rp._CITY_TAIL) and (not okres or okres in d) for d in districts):
+            out.add(name)
+    return out
+
+
+def _last_checked() -> dict[str, str]:
+    conn = _conn()
+    try:
+        return {r[0]: r[1] for r in conn.execute("SELECT name, checked_at FROM property_tax_checks")}
+    finally:
+        conn.close()
 
 
 def add_town(name: str, start_url: str) -> str | None:
@@ -352,8 +445,8 @@ def remove_town(name: str) -> None:
     conn = _conn()
     try:
         conn.execute("DELETE FROM property_tax_sources WHERE name=?", (name,))
-        conn.execute("DELETE FROM property_tax_checks WHERE town=?", (scr.fold(name),))
-        conn.execute("DELETE FROM property_tax_rates WHERE town=?", (scr.fold(name),))
+        conn.execute("DELETE FROM property_tax_checks WHERE town=?", (tax.town_key(name),))
+        conn.execute("DELETE FROM property_tax_rates WHERE town=?", (tax.town_key(name),))
         conn.commit()
     finally:
         conn.close()
@@ -362,40 +455,91 @@ def remove_town(name: str) -> None:
 
 # ── The button ────────────────────────────────────────────────────────────────
 def update(progress=None, year: int | None = None, only: list[str] | None = None,
-           fetcher=None) -> dict:
-    """Check every town (or `only` these), store what assess() says to, and
-    drop the scores whose property tax changed. Returns a summary:
-    {"outcomes": [Outcome], "counts": {status: n}, "requeued": n}."""
+           fetcher=None, full: bool = False,
+           time_budget_s: float = VILLAGE_TIME_BUDGET_S) -> dict:
+    """Check the towns (or `only` these), store what assess() says to, and
+    drop the scores whose property tax changed.
+
+    Every run reads the towns of TOWNS, those a user added and every
+    municipality a listing is in. The other ~2,800 municipalities are read
+    when due — never read, or last read RECHECK_DAYS ago — as many as fit in
+    `time_budget_s`, the never-read first; the rest wait for the next click
+    (`full`: all of them now). A village's site is read more briefly: at
+    most 14 pages and documents, stopping at the first dated rate.
+
+    Returns {"outcomes": [Outcome], "counts": {status: n}, "requeued": n,
+             "left": municipalities still due}."""
+    import time as _time
     import requests
+    from collections import deque
     year = year or _year()
+    if only is None:
+        refresh_municipalities()
     all_towns = towns()
-    names = [n for n in (only or list(all_towns)) if n in all_towns]
+    custom = _custom()
+    villages = [n for n in all_towns if n not in scr.TOWNS and n not in custom]
+    if only is not None:
+        names = [n for n in only if n in all_towns]
+        due: list[str] = []
+    else:
+        listed = _with_listings(villages)
+        names = [n for n in all_towns if n not in villages] + sorted(listed)
+        checked = _last_checked()
+        cutoff = (datetime.now(timezone.utc).timestamp() - RECHECK_DAYS * 86400)
+        due = [n for n in villages if n not in listed and (
+            full or n not in checked
+            or datetime.fromisoformat(checked[n]).timestamp() < cutoff)]
+        due.sort(key=lambda n: checked.get(n, ""))       # never read first, then the oldest
+    village = set(villages)
+    total = len(names) + len(due)
     outcomes: list[Outcome] = []
 
     def one(name: str) -> Outcome:
         try:
+            quick = name in village
+            read = fetcher or (functools.partial(scr.fetch, timeout=20, retry=False)
+                               if quick else None)
             res = scr.check_town(all_towns[name], year, session=requests.Session(),
-                                 fetcher=fetcher)
+                                 fetcher=read, delay=0.1 if quick else 0.4,
+                                 budget=12 if quick else scr.MAX_FETCHES,
+                                 stop_when_found=quick)
             return assess(all_towns[name], res, year)
         except Exception as e:                     # one town's failure isn't the run's
             log.exception(f"Tax rates: {name} failed")
             return Outcome(name, "not_found", f"The check failed: {type(e).__name__}: {e}")
 
+    pending = deque(names + due)
+    stop_villages_at = _time.monotonic() + time_budget_s
+    started = set()
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-        futures = {ex.submit(one, n): n for n in names}
-        for i, f in enumerate(as_completed(futures), 1):
-            o = f.result()
+        running = set()
+        while pending or running:
+            while pending and len(running) < WORKERS:
+                n = pending[0]
+                if n in due and not full and _time.monotonic() > stop_villages_at:
+                    pending.clear()                 # the rest wait for the next click
+                    break
+                pending.popleft()
+                started.add(n)
+                running.add(ex.submit(one, n))
+            if not running:
+                break
+            done = next(as_completed(running))
+            running.discard(done)
+            o = done.result()
             record(o)
             outcomes.append(o)
             log.info(f"  {STATUS_LABEL.get(o.status, o.status)} {o.town}: {o.message[:140]}")
             if progress:
-                progress(i, len(names), note=o.town)
+                progress(len(outcomes), total, note=o.town)
     requeued = _changed()
     counts: dict[str, int] = {}
     for o in outcomes:
         counts[o.status] = counts.get(o.status, 0) + 1
-    outcomes.sort(key=lambda o: names.index(o.town))
-    return {"outcomes": outcomes, "counts": counts, "requeued": requeued}
+    order = {n: i for i, n in enumerate(names + due)}
+    outcomes.sort(key=lambda o: order.get(o.town, 0))
+    return {"outcomes": outcomes, "counts": counts, "requeued": requeued,
+            "left": len([n for n in due if n not in started])}
 
 
 def _changed() -> int:
@@ -427,13 +571,17 @@ def summary_text(s: dict) -> str:
         line += " — " + "; ".join(f"{o.town}: {o.message.split(' (')[0]}" for o in changed[:6])
     if s.get("requeued"):
         line += f". {s['requeued']} listing(s) re-scored at the new rates"
+    if s.get("left"):
+        line += (f". {s['left']:,} more municipalities are due — click again to read them "
+                 f"(each is read at most once a month)")
     return line + "."
 
 
 # ── The user's decisions ──────────────────────────────────────────────────────
 def check_rows() -> list[dict]:
     """Every town's last check with the rate the engine charges there now,
-    for the dashboard table."""
+    for the dashboard table. A municipality outside TOWNS is charged its
+    stored rate, or the fallback."""
     tax.reload()
     conn = _conn()
     try:
@@ -444,12 +592,19 @@ def check_rows() -> list[dict]:
     finally:
         conn.close()
     year = _year()
+    custom = _custom()
     rows = []
     for name, town in towns().items():
         c = checks.get(name, {})
-        rate, label = tax.rate_source(name, year)
+        kind = "table" if name in scr.TOWNS else "custom" if name in custom else "municipality"
+        if kind == "municipality":
+            now = next((r for r in stored.get(name, []) if r["tax_year"] <= year), None)
+            rate, label = ((now["rate"], f"{name} — stored") if now else
+                           (tax.UNKNOWN_PLACE_RATE_PER_M2, "UNVERIFIED — fallback"))
+        else:
+            rate, label = tax.rate_source(name, year)
         rows.append({
-            "town": name, "custom": name not in scr.TOWNS, "zoned": town.zoned,
+            "town": name, "kind": kind, "custom": kind == "custom", "zoned": town.zoned,
             "status": c.get("status", ""), "message": c.get("message", "Not checked yet."),
             "charged": rate, "charged_from": label,
             "found": json.loads(c["rates"]) if c.get("rates") else [],
@@ -469,10 +624,10 @@ def accept(name: str, rate: float | None = None) -> str | None:
     conn = _conn()
     try:
         c = conn.execute("SELECT * FROM property_tax_checks WHERE town=?",
-                         (scr.fold(name),)).fetchone()
+                         (tax.town_key(name),)).fetchone()
         if not c or not c["rates"]:
             return f"Nothing to accept for {name}: check it first."
-        if scr.fold(name) in tax.ZONED:
+        if tax.town_key(name) in tax.ZONED:
             return (f"{name} is rated by area: its areas are mapped in engine/property_tax_sk.py, "
                     f"so a change there is made by hand.")
         found = json.loads(c["rates"])
@@ -486,7 +641,7 @@ def accept(name: str, rate: float | None = None) -> str | None:
                    c["excerpt"], "accepted")
         conn.execute("UPDATE property_tax_checks SET status='applied', message=? WHERE town=?",
                      (f"{rate_text(rate)} €/m² — accepted by you ({c['document'] or c['source_url']}).",
-                      scr.fold(name)))
+                      tax.town_key(name)))
         conn.commit()
     finally:
         conn.close()
@@ -500,7 +655,7 @@ def keep(name: str) -> None:
     try:
         conn.execute("UPDATE property_tax_checks SET status='kept', "
                      "message='You kept the table’s figure. ' || COALESCE(message, '') "
-                     "WHERE town=?", (scr.fold(name),))
+                     "WHERE town=?", (tax.town_key(name),))
         conn.commit()
     finally:
         conn.close()
@@ -512,10 +667,10 @@ def revert(name: str) -> int:
     conn = _conn()
     try:
         n = conn.execute("DELETE FROM property_tax_rates WHERE town=?",
-                         (scr.fold(name),)).rowcount
+                         (tax.town_key(name),)).rowcount
         conn.execute("UPDATE property_tax_checks SET status='kept', "
                      "message='Stored rates removed: the table’s figure is charged.' "
-                     "WHERE town=?", (scr.fold(name),))
+                     "WHERE town=?", (tax.town_key(name),))
         conn.commit()
     finally:
         conn.close()
@@ -534,7 +689,7 @@ def upload(name: str, filename: str, content: bytes, year: int | None = None
     if reading is None:
         return "error", f"{filename}: {why}."
     reading.title = filename
-    if town.zoned or scr.fold(name) in tax.ZONED:
+    if town.zoned or tax.town_key(name) in tax.ZONED:
         res = scr.TownResult(name, readings=[reading], fetched=1)
         res.current, res.upcoming, res.conflict = scr.pick([reading], year)
         o = assess(town, res, year)

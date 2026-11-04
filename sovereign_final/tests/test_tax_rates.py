@@ -320,6 +320,9 @@ def test_a_town_whose_check_fails_does_not_stop_the_others(db, monkeypatch):
     ("VZN č. 10/2023 o miestnych daniach stiahnuť (4,34 MB) Platné znenie",
      "VZN č. 10/2023 o miestnych daniach"),
     ("https://www.kosice.sk/obcan/miestne-dane", "miestne-dane"),
+    ("VZN o miestnych daniach a poplatku , otvorí sa v novom okne)", "VZN o miestnych daniach a poplatku"),
+    ("súbor VZN 4_2025 o miestnych daniach Veľkosť a typ súboru /", "VZN 4_2025 o miestnych daniach"),
+    ("Súbor: vzn-5-2025-dane-a-odpady.pdf Formát", "vzn-5-2025-dane-a-odpady.pdf"),
     ("Miestne dane :: Oficiálne stránky mesta Košice", "Miestne dane"),
     ("Miestne dane a poplatky | Dunajská Streda", "Miestne dane a poplatky"),
     ("VZN č. 8_2025 o miestnych daniach (DzN, pes, PA, NHP) 2. 2. 2026 · PDF · 5.23 MB",
@@ -357,3 +360,104 @@ def test_the_tab_shows_a_review_and_accepting_it_charges_it(monkeypatch, tmp_pat
     tax.reload()
     assert tax.rate_source("Pezinok")[0] == 1.5
     assert jobs.wait(60).label == "CASHFLOW SCORE"      # it re-scores what moved
+
+
+# ── Every Slovak municipality ─────────────────────────────────────────────────
+MUNICIPALITIES = [
+    scr.Municipality("Ivanka pri Dunaji", "Senec", "https://www.ivanka.sk", 7_000),
+    scr.Municipality("Nová Ves", "Veľký Krtíš", "https://www.novaves.sk", 300),
+    scr.Municipality("Porúbka", "Žilina", "https://www.porubkaza.sk", 1_200),
+    scr.Municipality("Porúbka", "Humenné", "https://www.porubkahe.sk", 300),
+    scr.Municipality("Senec", "Senec", "https://www.senec.sk", 21_000),     # in TOWNS
+    scr.Municipality("Bez webu", "Senec", "", 100),
+]
+
+
+@pytest.fixture
+def villages(db, monkeypatch):
+    monkeypatch.setattr(scr, "municipalities", lambda session=None: list(MUNICIPALITIES))
+    for name, rates in (("Ivanka pri Dunaji", [0.5]), ("Nová Ves", [0.1]),
+                        ("Porúbka (okres Žilina)", [0.2]), ("Porúbka (okres Humenné)", [0.15])):
+        SITES[name] = [reading(rates, 2026, kind="page")]
+    yield
+    for name in ("Ivanka pri Dunaji", "Nová Ves", "Porúbka (okres Žilina)",
+                 "Porúbka (okres Humenné)"):
+        SITES.pop(name, None)
+
+
+def test_every_municipality_with_a_website_is_a_town_to_read(villages):
+    assert tr.refresh_municipalities() == 6
+    t = tr.towns()
+    assert {"Ivanka pri Dunaji", "Nová Ves", "Porúbka (okres Žilina)",
+            "Porúbka (okres Humenné)"} <= set(t)
+    assert "Bez webu" not in t                      # nothing to read
+    assert t["Senec"] is scr.TOWNS["Senec"]         # the table's town keeps its own start page
+    assert t["Ivanka pri Dunaji"].start == ("https://www.ivanka.sk",)
+
+
+def test_the_list_is_refreshed_once_a_month(villages, monkeypatch):
+    tr.refresh_municipalities()
+    calls = []
+    monkeypatch.setattr(scr, "municipalities", lambda session=None: calls.append(1) or [])
+    assert tr.refresh_municipalities() == 6 and calls == []
+    tr.refresh_municipalities(force=True)
+    assert calls == [1]
+
+
+def test_a_village_is_charged_its_rate_and_shared_names_need_their_district(villages):
+    tr.refresh_municipalities()
+    tr.update(only=["Ivanka pri Dunaji", "Nová Ves", "Porúbka (okres Žilina)",
+                    "Porúbka (okres Humenné)"], year=YEAR)
+    assert tax.rate_source("Ivanka pri Dunaji")[0] == 0.5
+    assert tax.rate_source("Nová Ves")[0] == 0.1
+    # The village Nová Ves is not Spišská Nová Ves, which the table has.
+    assert tax.rate_source("Spišská Nová Ves")[0] == 0.398
+    assert tax.rate_source("Porúbka")[0] == tax.UNKNOWN_PLACE_RATE_PER_M2
+    assert tax.rate_source("Porúbka, okres Žilina")[0] == 0.2
+    assert tax.rate_source("Porúbka, Humenné")[0] == 0.15
+
+
+def test_a_click_reads_the_listing_towns_and_the_villages_due(villages, db, monkeypatch):
+    tr.refresh_municipalities()
+    db.upsert_listing(make_listing("v1", district="Ivanka pri Dunaji"))
+    monkeypatch.setattr(scr, "TOWNS", {"Pezinok": scr.TOWNS["Pezinok"]})
+    read = []
+
+    def check(t, year, **kw):
+        read.append((t.name, kw.get("budget"), kw.get("stop_when_found")))
+        return fake_check(t, year)
+    monkeypatch.setattr(scr, "check_town", check)
+    s = tr.update(year=YEAR)
+    names = [n for n, _, _ in read]
+    assert names[:2] == ["Pezinok", "Ivanka pri Dunaji"]       # the table's, then a listing's
+    # Senec is an ordinary municipality here: TOWNS is cut to Pezinok.
+    assert set(names) == {"Pezinok", "Ivanka pri Dunaji", "Nová Ves", "Porúbka (okres Žilina)",
+                          "Porúbka (okres Humenné)", "Senec"}
+    assert dict((n, (b, q)) for n, b, q in read)["Nová Ves"] == (12, True)   # a village: brief
+    assert dict((n, (b, q)) for n, b, q in read)["Pezinok"][1] is False
+    assert s["left"] == 0
+
+    read.clear()
+    tr.update(year=YEAR)                       # within the month: only the towns that always run
+    assert sorted(n for n, _, _ in read) == ["Ivanka pri Dunaji", "Pezinok"]
+
+
+def test_villages_that_dont_fit_in_the_time_wait_for_the_next_click(villages, monkeypatch):
+    tr.refresh_municipalities()
+    monkeypatch.setattr(scr, "TOWNS", {})
+    SITES["Senec"] = [reading([0.6], 2026, kind="page")]
+    try:
+        s = tr.update(year=YEAR, time_budget_s=0)
+        assert s["left"] == 5 and s["outcomes"] == []
+        assert "5 more municipalities are due" in tr.summary_text(s)
+        s = tr.update(year=YEAR)
+        assert s["left"] == 0 and len(s["outcomes"]) == 5
+    finally:
+        SITES["Senec"] = [reading([0.6], YEAR), reading([0.7], YEAR + 1)]
+
+
+def test_a_village_named_with_its_district_town_is_new_not_that_towns(villages):
+    # "Brestov (okres Prešov)" once read as "was 0.953" — Prešov's rate.
+    o = tr.assess(scr.Town("Brestov (okres Prešov)", ("https://brestov.sk",)),
+                  result("Brestov (okres Prešov)", reading([0.06], 2024)), YEAR)
+    assert o.status == "new" and "fallback" in o.message

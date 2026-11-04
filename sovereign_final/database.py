@@ -331,11 +331,71 @@ CREATE TABLE IF NOT EXISTS property_tax_checks (
     checked_at    TEXT NOT NULL
 );
 
+-- Every Slovak municipality with its official website (Wikidata), for the
+-- rates of the ones not in TOWNS — refreshed once a month.
+CREATE TABLE IF NOT EXISTS sk_municipalities (
+    key           TEXT PRIMARY KEY,    -- its name, or "Porúbka (okres Žilina)" when shared
+    name          TEXT NOT NULL,
+    okres         TEXT,
+    web           TEXT,
+    population    INTEGER,
+    refreshed_at  TEXT NOT NULL
+);
+
 -- Towns a user added, with the page the search starts from.
 CREATE TABLE IF NOT EXISTS property_tax_sources (
     name          TEXT PRIMARY KEY,
     start_url     TEXT NOT NULL,
     added_at      TEXT NOT NULL
+);
+
+-- Czechia (modules/tax_rates_cz): every municipality's population on
+-- 1 January (Czech Statistical Office), …
+CREATE TABLE IF NOT EXISTS cz_population (
+    code          TEXT NOT NULL,       -- kód obce
+    year          INTEGER NOT NULL,
+    name          TEXT NOT NULL,
+    okres         TEXT,                -- its district: tells same-named ones apart
+    population    INTEGER NOT NULL,
+    PRIMARY KEY (code, year)
+);
+
+-- … each ordinance on the coefficients read from sbirkapp.gov.cz once (a
+-- published ordinance never changes), …
+CREATE TABLE IF NOT EXISTS cz_ordinances (
+    id            TEXT PRIMARY KEY,    -- the collection's id, SPP…
+    ico           TEXT,
+    publisher     TEXT,
+    number        TEXT,
+    title         TEXT,
+    published     TEXT,
+    effective     TEXT,
+    parsed        TEXT,                -- JSON: what it sets for flats
+    problem       TEXT,                -- why it couldn't be read
+    fetched_at    TEXT NOT NULL
+);
+
+-- … the municipality behind each publisher's IČO (ARES), …
+CREATE TABLE IF NOT EXISTS cz_ico (
+    ico           TEXT PRIMARY KEY,
+    code          TEXT,
+    name          TEXT,
+    district      TEXT
+);
+
+-- … and what a flat pays there: the size and local coefficients by area
+-- ("" for the municipality's main part), per tax year.
+CREATE TABLE IF NOT EXISTS property_tax_cz (
+    code          TEXT NOT NULL,
+    tax_year      INTEGER NOT NULL,
+    name          TEXT NOT NULL,
+    okres         TEXT,
+    population    INTEGER,
+    size          TEXT NOT NULL,       -- JSON {area: coefficient}
+    local         TEXT NOT NULL,       -- JSON {area: coefficient}
+    sources       TEXT,                -- JSON list of the ordinances used
+    computed_at   TEXT NOT NULL,
+    PRIMARY KEY (code, tax_year)
 );
 """
 
@@ -1421,27 +1481,29 @@ def requeue_scores_with_stale_class(market: str | None = None) -> int:
     return n
 
 
-def requeue_scores_with_stale_property_tax() -> int:
-    """Drop the Slovak scores whose property tax is no longer what
-    engine.property_tax_sk charges — a town's rate was updated from its site
-    (modules/tax_rates) — so the next scoring run redoes them. Compares each
-    score's stored property_tax_monthly with the tax at today's rates, so it
-    drops only the listings the change reaches. Returns how many it dropped."""
-    from engine import property_tax_sk
+def requeue_scores_with_stale_property_tax(market: str = "sk") -> int:
+    """Drop the scores of `market` whose property tax is no longer what the
+    engine charges — a rate or coefficient was updated from the official
+    sources (modules/tax_rates, modules/tax_rates_cz) — so the next scoring
+    run redoes them. Compares each score's stored property_tax_monthly with
+    the tax at today's figures, so it drops only the listings the change
+    reaches. Returns how many it dropped."""
+    from engine.financial import property_tax_annual
     conn = get_conn()
     try:
         if not _has_table(conn, "cashflow_scores"):
             return 0
-        only, params = _market_sql(conn, "sk", "l.")
+        only, params = _market_sql(conn, market, "l.")
         rows = conn.execute(f"""
-            SELECT l.id, l.size_m2, l.district, c.property_tax_monthly
+            SELECT l.id, l.price_eur, l.size_m2, l.district, c.property_tax_monthly
             FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
             WHERE l.is_active = 1 AND l.price_eur > 0 AND l.size_m2 > 0
               AND l.lv_status != 'REJECTED'{only}
         """, params).fetchall()
         n = 0
         for r in rows:
-            now = round(property_tax_sk.annual_tax(r["size_m2"], r["district"] or "") / 12, 2)
+            now = round(property_tax_annual(r["price_eur"], r["size_m2"], r["district"] or "",
+                                            market=market) / 12, 2)
             if r["property_tax_monthly"] is None or abs(now - r["property_tax_monthly"]) > 0.011:
                 n += _drop_cashflow_score(conn, r["id"])
         conn.commit()
