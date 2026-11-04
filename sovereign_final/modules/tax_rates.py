@@ -516,7 +516,7 @@ def update(progress=None, year: int | None = None, only: list[str] | None = None
         while pending or running:
             while pending and len(running) < WORKERS:
                 n = pending[0]
-                if n in due and not full and _time.monotonic() > stop_villages_at:
+                if n in due and not full and _time.monotonic() >= stop_villages_at:
                     pending.clear()                 # the rest wait for the next click
                     break
                 pending.popleft()
