@@ -10,24 +10,38 @@ floor area, not its value (zákon 338/1992 Sb. as in force for 2026):
              × the local coefficient                           (§ 12)
              — each product rounded up to whole crowns         (§ 11d)
 
-The size coefficient is 3.5 in every statutory city and 4.5 in Prague; a city
-may raise it one step (to 4.5, or 5.0 in Prague) for chosen cadastral areas or
-districts (§ 11 odst. 5). The local coefficient (0.5–5.0) is set by each
-municipality's ordinance, for the whole municipality, an area or district, or
-a group of properties; a group or area coefficient replaces the municipality's
-(§ 12 odst. 5).
+The size coefficient follows the municipality's population (§ 11 odst. 4):
+1.0 up to 1,000 people, 1.4 to 6,000, 1.6 to 10,000, 2.0 to 25,000, 2.5 to
+50,000 and 3.5 above that, in every statutory city and in four spa towns;
+4.5 in Prague. A municipality may raise it one step for chosen cadastral areas
+or districts (§ 11 odst. 5). The local coefficient (0.5–5.0) is set by the
+municipality's ordinance for the whole municipality, an area or district, or a
+group of properties; a group or area coefficient replaces the municipality's
+(§ 12 odst. 5), and of a group's and an area's the higher applies (§ 12 odst. 7).
 
-Prague and the 26 statutory cities are taxed as their 2026 ordinances say
-(CITY_COEFFICIENTS, PRAHA_DISTRICTS). A part of a city named without its area
-pays the city's highest combination. Anywhere else is taxed at 3.5 — the
-highest size coefficient outside Prague, which a smaller town's may be lower
-than — times CZ_PROPERTY_TAX_LOCAL_COEF (1.0 unless set): that town's own
-coefficients are UNVERIFIED. A 60 m² flat comes to about 450 Kč a year in
-Třinec, 900 Kč in Brno, 1,750 Kč in Praha 2 and 2,600 Kč in Praha 3.
+Where the tax comes from:
+  * Prague and the 26 statutory cities, each per its 2026 ordinance
+    (PRAHA_DISTRICTS, CITY_COEFFICIENTS); the other 105 towns over 10,000
+    people per theirs (TOWN_COEFFICIENTS).
+  * Any other municipality: the size coefficient for its population (ČSÚ),
+    times CZ_PROPERTY_TAX_LOCAL_COEF (1.0, the law's when a municipality sets
+    none, unless set) — its own local coefficient is UNVERIFIED.
+  * A place that names no municipality: 3.5 × CZ_PROPERTY_TAX_LOCAL_COEF.
+
+engine/property_tax_cz_data.json (dev/build_cz_property_tax_data.py, from
+ČÚZK's RÚIAN and ČSÚ) supplies the populations and the geography: which city
+parts each Prague quarter and postal district ("Praha 9") covers, which
+Ostrava district each Ostrava quarter lies in, and which cadastral areas each
+quarter of a city that rates by area holds its flats in. A quarter that spans
+several gets the highest of them, as does a city part or town named without
+its area. A 60 m² flat comes to about 450 Kč a year in Třinec, 520 Kč in
+Klatovy, 900 Kč in Brno, 1,750 Kč in Praha 2 and 2,600 Kč in Praha 3.
 """
 
 from __future__ import annotations
 
+import functools
+import json
 import math
 import os
 import re
@@ -43,11 +57,43 @@ UNIT_COEFFICIENT = 1.22
 # down to one decimal place — 1.0 for 2026.
 INFLATION_COEFFICIENT = 1.0
 PRAGUE_COEFFICIENT = 4.5
-# The coefficient for a place whose population isn't known here: the highest
-# outside Prague (§ 11 odst. 4 písm. f).
+# The coefficient for a place that names no municipality: the highest outside
+# Prague (§ 11 odst. 4 písm. f).
 UNKNOWN_PLACE_COEFFICIENT = 3.5
-# A place not in the tables below: its local coefficient, if the user knows it.
+# A municipality whose ordinance isn't in the tables below: its local
+# coefficient, if the user knows it.
 LOCAL_COEFFICIENT = float(os.getenv("CZ_PROPERTY_TAX_LOCAL_COEF", "1.0") or 1.0)
+
+DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "property_tax_cz_data.json")
+
+
+def load_data(path: str = DATA_PATH) -> dict:
+    """The populations and geography dev/build_cz_property_tax_data.py writes,
+    or {} when the file is missing or unreadable — every place then falls
+    back to the tables below and 3.5 × CZ_PROPERTY_TAX_LOCAL_COEF."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+_DATA = load_data()
+
+
+def population_coefficient(population: int) -> float:
+    """§ 11 odst. 4 písm. a)–f): the size coefficient for a municipality of
+    `population` people (as the RUD decree in force on 1 January counts them)."""
+    for limit, coef in ((1000, 1.0), (6000, 1.4), (10000, 1.6), (25000, 2.0), (50000, 2.5)):
+        if population <= limit:
+            return coef
+    return 3.5
+
+
+# § 11 odst. 4 písm. f): 3.5 whatever their size.
+SPA_TOWNS = {("Františkovy Lázně", "Cheb"), ("Luhačovice", "Zlín"),
+             ("Mariánské Lázně", "Cheb"), ("Poděbrady", "Nymburk")}
 
 # Prague, OZV hl. m. Prahy 11/2024 as amended by 12/2025 (from 1.1.2026):
 # city part → (size coefficient, local coefficient). Příloha 1 sets the size
@@ -72,8 +118,6 @@ PRAHA_DISTRICTS = {
     "Troja": _P[5], "Újezd": _P[5], "Velká Chuchle": _P[4.5], "Vinoř": _P[4.5],
     "Zbraslav": _P[4.5], "Zličín": _P[4.5],
 }
-_PRAHA_NAMED = sorted(((rpcz._pattern(n), n) for n in PRAHA_DISTRICTS if not n[-1].isdigit()),
-                      key=lambda pn: len(pn[0].pattern), reverse=True)
 # "Praha-východ" / "-západ" are the okresy around Prague, not Prague.
 _PRAHA_RE = re.compile(r"(?<!\w)praha(?!\s+(?:vychod|zapad)(?!\w))")
 
@@ -140,62 +184,351 @@ CITY_COEFFICIENTS: dict[str, tuple[float, float, dict[str, tuple[float, float]]]
     "Mladá Boleslav": (3.5, 1.7, {}),
     "Třinec": (3.5, 0.5, {}),
 }
+
+# The other towns over 10,000 people (ČSÚ, 1.1.2025), keyed by (name, okres):
+# (size coefficient, local coefficient for a flat, {cadastral area: (size,
+# local)}, the ordinances read — "none" when the register holds none in force
+# on 1.1.2026). A pair is the highest anywhere in the town: the size
+# coefficient raised one step (§ 11 odst. 5, or an old § 11 odst. 3 písm. a)
+# raise kept by zákon 349/2023 part 2 point 11) where any of its areas is, and
+# the group coefficient for "ostatní zdanitelné jednotky" if set, else the
+# highest area coefficient, else the town's. Litvínov's 5.0 areas hold 3 of
+# its 12,338 flats (RÚIAN), so it is kept to them.
+TOWN_COEFFICIENTS: dict[tuple[str, str], tuple[float, float, dict[str, tuple[float, float]], str]] = {
+    # Středočeský kraj
+    ("Benešov", "Benešov"): (2.0, 2.0, {}, "3/2024"),
+    ("Vlašim", "Benešov"): (2.5, 2.0, {}, "2/2024"),
+    ("Beroun", "Beroun"): (2.5, 1.0, {}, "6/2011"),
+    ("Králův Dvůr", "Beroun"): (2.0, 2.0, {}, "2/2024"),
+    ("Slaný", "Kladno"): (2.0, 1.0, {}, "5/2024 (repeals 6/1993)"),
+    ("Kolín", "Kolín"): (2.5, 2.0, {}, "7/2024"),
+    ("Čáslav", "Kutná Hora"): (2.0, 1.0, {}, "3/2024"),
+    ("Kutná Hora", "Kutná Hora"): (2.0, 2.0, {}, "7/2024"),
+    ("Kralupy nad Vltavou", "Mělník"): (2.0, 1.6, {}, "5/2024"),
+    ("Mělník", "Mělník"): (2.0, 1.0, {}, "none"),
+    ("Neratovice", "Mělník"): (2.0, 2.5, {}, "2/2024"),
+    ("Lysá nad Labem", "Nymburk"): (2.0, 1.0, {}, "4/2024, 6/2024"),
+    ("Milovice", "Nymburk"): (2.0, 1.0, {}, "2/2003"),
+    ("Nymburk", "Nymburk"): (2.5, 2.0, {}, "3/2025"),
+    ("Poděbrady", "Nymburk"): (3.5, 0.7, {}, "4/2024"),
+    ("Brandýs nad Labem-Stará Boleslav", "Praha-východ"): (2.0, 2.0, {}, "4/2024"),
+    ("Čelákovice", "Praha-východ"): (2.0, 1.0, {}, "none"),
+    ("Říčany", "Praha-východ"): (2.5, 5.0, {}, "3/2024, 1/2025"),
+    ("Jesenice", "Praha-západ"): (2.0, 3.0, {}, "2/2024"),
+    ("Příbram", "Příbram"): (2.5, 2.0, {}, "3/2024"),
+    ("Rakovník", "Rakovník"): (2.5, 1.0, {}, "3/2024"),
+    # Jihočeský kraj
+    ("Český Krumlov", "Český Krumlov"): (2.5, 2.0, {}, "6/2024"),
+    ("Jindřichův Hradec", "Jindřichův Hradec"): (2.0, 1.4, {}, "3/2024"),
+    ("Písek", "Písek"): (3.5, 1.4, {}, "1/2023"),
+    ("Prachatice", "Prachatice"): (2.5, 1.0, {}, "3/2024"),
+    ("Strakonice", "Strakonice"): (2.0, 2.0, {}, "4/2024"),
+    ("Tábor", "Tábor"): (2.5, 2.0, {}, "5/2024"),
+    # Plzeňský a Karlovarský kraj
+    ("Domažlice", "Domažlice"): (2.0, 1.0, {}, "none"),
+    ("Klatovy", "Klatovy"): (2.0, 1.0, {}, "7/2024"),
+    ("Sušice", "Klatovy"): (2.5, 1.0, {}, "4/2024"),
+    ("Rokycany", "Rokycany"): (2.0, 1.0, {}, "4/2024"),
+    ("Tachov", "Tachov"): (2.0, 3.0, {}, "5/2021"),
+    ("Aš", "Cheb"): (2.0, 1.9, {}, "3/2024"),
+    ("Cheb", "Cheb"): (2.5, 2.0, {}, "4/2024"),
+    ("Mariánské Lázně", "Cheb"): (4.5, 1.2, {}, "3/2024"),
+    ("Ostrov", "Karlovy Vary"): (2.0, 1.0, {}, "4/2024"),
+    ("Chodov", "Sokolov"): (2.0, 1.0, {}, "4/2025"),
+    ("Sokolov", "Sokolov"): (2.0, 2.0, {}, "6/2024"),
+    # Ústecký kraj
+    ("Rumburk", "Děčín"): (2.0, 1.0, {}, "none"),
+    ("Varnsdorf", "Děčín"): (2.0, 1.0, {}, "3/2024"),
+    ("Jirkov", "Chomutov"): (2.0, 2.0, {}, "3/2024"),
+    ("Kadaň", "Chomutov"): (2.0, 1.0, {}, "2/2024"),
+    ("Klášterec nad Ohří", "Chomutov"): (2.5, 2.0, {}, "4/2024"),
+    ("Litoměřice", "Litoměřice"): (2.0, 2.5, {}, "5/2024"),
+    ("Roudnice nad Labem", "Litoměřice"): (2.0, 2.0, {}, "2/2024"),
+    ("Louny", "Louny"): (2.0, 1.5, {}, "6/2024 (repeals 5/2014)"),
+    ("Žatec", "Louny"): (2.0, 2.0, {}, "3/2024"),
+    ("Litvínov", "Most"): (2.0, 2.5, dict.fromkeys(("Záluží", "Růžodol"), (2.0, 5.0)), "2/2024"),
+    ("Bílina", "Teplice"): (2.0, 0.5, {}, "4/2024"),
+    ("Krupka", "Teplice"): (2.5, 2.0, {}, "5/2024"),
+    # Liberecký a Královéhradecký kraj
+    ("Česká Lípa", "Česká Lípa"): (2.5, 2.0, {}, "4/2024"),
+    ("Nový Bor", "Česká Lípa"): (2.0, 1.0, {}, "1/2024"),
+    ("Turnov", "Semily"): (2.0, 1.6, {}, "4/2024"),
+    ("Jičín", "Jičín"): (2.0, 1.0, {}, "2/2024 (repeals 6/2021)"),
+    ("Jaroměř", "Náchod"): (2.0, 1.0, {}, "none"),
+    ("Náchod", "Náchod"): (2.5, 1.0, {}, "4/2024"),
+    ("Rychnov nad Kněžnou", "Rychnov nad Kněžnou"): (2.0, 0.7, {}, "2/2024"),
+    ("Dvůr Králové nad Labem", "Trutnov"): (2.0, 1.0, {}, "4/2024"),
+    ("Trutnov", "Trutnov"): (2.5, 1.0, {}, "4/2024"),
+    ("Vrchlabí", "Trutnov"): (2.5, 1.0, {}, "3/2024"),
+    # Pardubický kraj
+    ("Chrudim", "Chrudim"): (2.0, 1.0, {}, "3/2011"),
+    ("Přelouč", "Pardubice"): (2.0, 1.0, {}, "7/2024"),
+    ("Litomyšl", "Svitavy"): (2.0, 3.0, {}, "4/2024"),
+    ("Svitavy", "Svitavy"): (2.0, 1.0, {}, "3/2024"),
+    ("Česká Třebová", "Ústí nad Orlicí"): (2.0, 1.0, {}, "5/2024"),
+    ("Ústí nad Orlicí", "Ústí nad Orlicí"): (2.5, 1.0, {}, "1/2024"),
+    ("Vysoké Mýto", "Ústí nad Orlicí"): (2.0, 1.0, {}, "4/2024"),
+    # Kraj Vysočina
+    ("Havlíčkův Brod", "Havlíčkův Brod"): (2.0, 2.3, {}, "5/2024"),
+    ("Humpolec", "Pelhřimov"): (2.0, 1.0, {}, "none"),
+    ("Pelhřimov", "Pelhřimov"): (2.0, 0.8, {}, "9/2025"),
+    ("Třebíč", "Třebíč"): (2.5, 1.0, {}, "4/2024"),
+    ("Velké Meziříčí", "Žďár nad Sázavou"): (2.0, 1.0, {}, "1/2024"),
+    ("Žďár nad Sázavou", "Žďár nad Sázavou"): (2.0, 1.0, {}, "none"),
+    # Jihomoravský kraj
+    ("Blansko", "Blansko"): (2.0, 1.0, {}, "4/2004"),
+    ("Boskovice", "Blansko"): (2.0, 1.0, {}, "none"),
+    ("Kuřim", "Brno-venkov"): (2.0, 1.0, {}, "3/2024"),
+    ("Břeclav", "Břeclav"): (2.5, 1.0, {}, "9/2024"),
+    ("Hodonín", "Hodonín"): (2.0, 1.0, {}, "none"),
+    ("Kyjov", "Hodonín"): (2.5, 1.0, {}, "11/2024"),
+    ("Veselí nad Moravou", "Hodonín"): (2.0, 2.0, {}, "2/2024"),
+    ("Vyškov", "Vyškov"): (2.0, 1.0, {}, "4/2024"),
+    ("Znojmo", "Znojmo"): (2.5, 1.8, {}, "7/2024"),
+    # Olomoucký a Zlínský kraj
+    ("Jeseník", "Jeseník"): (2.0, 1.0, {}, "2/2024"),
+    ("Šternberk", "Olomouc"): (2.5, 2.0, {}, "2/2024"),
+    ("Uničov", "Olomouc"): (2.0, 1.0, {}, "4/2025"),
+    ("Hranice", "Přerov"): (2.0, 1.0, {}, "5/2024"),
+    ("Šumperk", "Šumperk"): (2.0, 1.0, {}, "none"),
+    ("Zábřeh", "Šumperk"): (2.0, 1.0, {}, "none"),
+    ("Holešov", "Kroměříž"): (2.0, 2.0, {}, "3/2024"),
+    ("Kroměříž", "Kroměříž"): (2.5, 1.0, {}, "7/2024"),
+    ("Uherské Hradiště", "Uherské Hradiště"): (2.0, 2.2, {}, "3/2023 as amended by 3/2024"),
+    ("Uherský Brod", "Uherské Hradiště"): (2.0, 1.0, {}, "4/2024"),
+    ("Rožnov pod Radhoštěm", "Vsetín"): (2.0, 2.5, {}, "4/2024"),
+    ("Valašské Meziříčí", "Vsetín"): (2.5, 2.0, {}, "2/2024"),
+    ("Vsetín", "Vsetín"): (2.5, 2.0, {}, "3/2024"),
+    ("Otrokovice", "Zlín"): (2.0, 2.0, {}, "3/2024"),
+    # Moravskoslezský kraj
+    ("Bruntál", "Bruntál"): (2.0, 1.0, {}, "5/2024"),
+    ("Krnov", "Bruntál"): (2.0, 1.0, {}, "none (8/2023 repealed its coefficient)"),
+    ("Bohumín", "Karviná"): (2.0, 2.0, {}, "3/2024"),
+    ("Český Těšín", "Karviná"): (2.5, 2.0, {}, "6/2024"),
+    ("Orlová", "Karviná"): (2.5, 2.0, {}, "5/2024"),
+    ("Frenštát pod Radhoštěm", "Nový Jičín"): (2.0, 1.0, {}, "1/2025, 9/2024 (repeals 04/2006)"),
+    ("Kopřivnice", "Nový Jičín"): (2.5, 1.0, {}, "4/2025"),
+    ("Nový Jičín", "Nový Jičín"): (2.5, 1.5, {}, "2/2024"),
+    ("Hlučín", "Opava"): (2.0, 1.0, {}, "none"),
+}
+
+
+def _pair_key(pair: tuple[float, float]) -> tuple[float, float]:
+    return pair[0] * pair[1], pair[0]
+
+
+def _hits(text: str, needles) -> list:
+    """The values of the needles found in `text`, less any found only inside a
+    longer one's match ("Újezd" inside "Újezd nad Lesy")."""
+    found = [(m.start(), m.end(), value) for rx, value in needles for m in rx.finditer(text)]
+    return [v for s, e, v in found
+            if not any(s2 <= s and e <= e2 and e2 - s2 > e - s for s2, e2, _ in found)]
+
+
+def _needles(names: dict) -> list:
+    return sorted(((rpcz._pattern(n), v) for n, v in names.items()),
+                  key=lambda nv: len(nv[0].pattern), reverse=True)
+
+
+# Prague: a quarter (část obce) or a named city part → the city parts it spans;
+# "Praha N" → city part Praha N or, for N ≤ 10, the postal district of that
+# name (obvod Prahy N in RÚIAN).
+_PRAHA_QUARTERS = {q: parts for q, parts in _DATA.get("praha_quarters", {}).items()
+                   if parts and all(p in PRAHA_DISTRICTS for p in parts)}
+for _n in PRAHA_DISTRICTS:
+    if not _n[-1].isdigit():
+        _PRAHA_QUARTERS.setdefault(_n, [_n])
+_PRAHA_NEEDLES = _needles({q: q for q in _PRAHA_QUARTERS})
+_PRAHA_POSTAL = {d: [p for p in parts if p in PRAHA_DISTRICTS]
+                 for d, parts in _DATA.get("praha_old_districts", {}).items()}
+
+
+def _dearest(labels: list[str], pairs: dict[str, tuple[float, float]]) -> str:
+    return max(labels, key=lambda lab: _pair_key(pairs[lab]))
+
+
+def _praha(text: str, district: str) -> tuple[float, float, str]:
+    quarters = _hits(text, _PRAHA_NEEDLES)
+    if quarters:
+        parts = list(dict.fromkeys(p for q in quarters for p in _PRAHA_QUARTERS[q]))
+        best = _dearest(parts, PRAHA_DISTRICTS)
+        note = "" if len(parts) == 1 else f" (the dearest of {', '.join(parts)})"
+        return (*PRAHA_DISTRICTS[best], f"{', '.join(quarters)}, Praha — city part {best}{note}")
+    part = rpcz.praha_district(district)
+    if part in PRAHA_DISTRICTS:
+        parts = list(dict.fromkeys([part, *_PRAHA_POSTAL.get(part, [])]))
+        best = _dearest(parts, PRAHA_DISTRICTS)
+        if len(parts) == 1:
+            return (*PRAHA_DISTRICTS[part], part)
+        return (*PRAHA_DISTRICTS[best],
+                f"{part} — city part {part} or postal district {part}, the dearest of "
+                f"{', '.join(parts)} ({best})")
+    best = _dearest(list(PRAHA_DISTRICTS), PRAHA_DISTRICTS)
+    return (*PRAHA_DISTRICTS[best], "Praha — its dearest city part (none named)")
+
+
+class _Place:
+    """A city or town rated by area: its own pair, its areas' pairs, and its
+    quarters (části obce) → the areas or districts holding their flats."""
+
+    def __init__(self, name: str, size: float, local: float,
+                 areas: dict[str, tuple[float, float]], quarters: dict[str, list[str]]):
+        self.name, self.pair, self.areas = name, (size, local), areas
+        own = rpcz._words(name)
+        self.own = rpcz._pattern(name)
+        self.area_needles = _needles({a: a for a in areas})
+        names = {}
+        for q, targets in quarters.items():
+            if rpcz._words(q) != own:
+                names[q] = targets
+                # "Přerov VIII-Henčlov" is also written "Henčlov".
+                short = re.sub(r"^.+?\s[IVXL]+-", "", q)
+                if short != q and rpcz._words(short) not in ("mesto", own):
+                    names.setdefault(short, targets)
+        self.quarters = names
+        self.needles = _needles({**{a: ("area", a) for a in areas},
+                                 **{q: ("quarter", q) for q in names}})
+
+    def _target(self, target: str) -> tuple[float, float]:
+        words = rpcz._words(target)
+        for rx, area in self.area_needles:
+            if rx.search(words):
+                return self.areas[area]
+        return self.pair
+
+    def coefficients(self, text: str) -> tuple[float, float, str]:
+        # The place's own name isn't one of its quarters: "Frýdek-Místek"
+        # names neither Frýdek nor Místek.
+        text = self.own.sub(" ", text, count=1)
+        found: dict[str, tuple[float, float]] = {}
+        for kind, label in _hits(text, self.needles):
+            if kind == "area":
+                found[label] = self.areas[label]
+            else:
+                for target in self.quarters[label]:
+                    found[f"{label} ({target})"] = self._target(target)
+        if not found:
+            return (*self.pair, self.name)
+        best = _dearest(list(found), found)
+        note = "" if len(found) == 1 else " — the dearest of " + ", ".join(found)
+        return (*found[best], f"{best}, {self.name}{note}")
+
+
+_CITY_QUARTERS = {**_DATA.get("city_quarters", {}), "Ostrava": _DATA.get("ostrava_quarters", {})}
+_CITY_PLACES = {c: _Place(c, s, lo, areas, _CITY_QUARTERS.get(c, {}))
+                for c, (s, lo, areas) in CITY_COEFFICIENTS.items()}
+_TOWN_PLACES = {key: _Place(key[0], s, lo, areas, _CITY_QUARTERS.get(key[0], {}))
+                for key, (s, lo, areas, _) in TOWN_COEFFICIENTS.items()}
+
 # A city's name, not the okres around it: "Plzeň-jih" and "Brno-venkov" are
 # villages (Ostrava-Jih and Brno-sever are city districts).
 _CITY_NOT = {"Plzeň": r"(?!\s+(?:jih|sever)(?!\w))", "Brno": r"(?!\s+venkov(?!\w))"}
 _CITIES = sorted(((re.compile(rpcz._town_pattern(c).pattern + _CITY_NOT.get(c, "")), c)
                   for c in CITY_COEFFICIENTS), key=lambda pc: len(pc[1]), reverse=True)
-_AREAS = {c: sorted(((rpcz._pattern(a), a) for a in areas), key=lambda pa: len(pa[1]), reverse=True)
-          for c, (_, _, areas) in CITY_COEFFICIENTS.items()}
+_OKRES_WORD = re.compile(r"(?<!\w)okr(?:es)?\s+$")
 
-SOURCE = {
-    "source": (
-        "zákon 338/1992 Sb. as in force from 1.10.2025 (zakonyprolidi.cz): § 10 "
-        "odst. 3 (× 1.22 / 1.20), § 11 odst. 1 písm. j) (3.50 Kč/m²), § 11 odst. 4–5 "
-        "(size coefficients; 3.5 in a statutory city, 4.5 in Prague; one step up "
-        "by ordinance), § 11d (rounding), § 11f (inflation coefficient: CPI May "
-        "2025 / May 2023 = 155.0 / 147.6 per ČSÚ, rounded down → 1.0 for 2026), "
-        "§ 12 (local coefficient 0.5–5.0). Statutory cities per zákon 128/2000 Sb. "
-        "§ 4 (version from 1.1.2026). Each city's ordinances in force for 2026, "
-        "read from sbirkapp.gov.cz: Praha 11/2024 as amended by 12/2025; Ostrava "
-        "8/2024; Plzeň 2/2024; Liberec 7/2024; Olomouc 7/2024; Ústí nad Labem "
-        "3/2024; Hradec Králové 6/2024; Pardubice 9/2024; Havířov 3/2024; Zlín "
-        "8/2024; Most 5/2024; Karviná 7/2024; Opava 3/2024; Frýdek-Místek 4/2024; "
-        "Karlovy Vary 3/2024; Teplice 1/2024; Děčín 3/2025 (from 1.1.2026); "
-        "Chomutov 3/2024; Jihlava 10/2024; Jablonec nad Nisou 8/2024; Přerov "
-        "7/2024; Mladá Boleslav 5/2024; Třinec 9/2024. Brno (28/2024 repealed its "
-        "coefficient), Kladno (2/2025 repealed its zones), Prostějov (7/2024 "
-        "repealed its coefficient) and České Budějovice have none in force. "
-        "UNVERIFIED: the coefficients of any other municipality (3.5 × "
-        "CZ_PROPERTY_TAX_LOCAL_COEF is used); which cadastral areas make up a city "
-        "part named without one (the city's highest is used); a 'Praha N' that is a "
-        "postal district rather than city part Praha N."),
-    "checked": "2026-11-03 (sbirkapp.gov.cz, zakonyprolidi.cz, csu.gov.cz)",
-}
+# Every municipality by its folded name: [(name, okres, population)].
+_MUNICIPALITIES: dict[str, list[tuple[str, str, int]]] = {}
+for _name, _okres, _pop in _DATA.get("municipalities", []):
+    _MUNICIPALITIES.setdefault(rpcz._words(_name), []).append((_name, _okres, int(_pop)))
+# The statutory cities and Prague are found above; their namesakes elsewhere
+# (a village Kladno in okres Chrudim) stay.
+_CITY_OKRES = {}
+for _c in [*CITY_COEFFICIENTS, "Praha"]:
+    _rows = _MUNICIPALITIES.get(rpcz._words(_c), [])
+    if _rows:
+        _big = max(_rows, key=lambda r: r[2])
+        _CITY_OKRES[_c] = _big[1]
+        _MUNICIPALITIES[rpcz._words(_c)] = [r for r in _rows if r is not _big]
+for _u, _town in rpcz._TOWN_U_NAMES.items():      # "Benešov u Prahy" → Benešov
+    _MUNICIPALITIES.setdefault(rpcz._words(_u), _MUNICIPALITIES.get(rpcz._words(_town), []))
+_BY_FIRST: dict[str, list[tuple[str, ...]]] = {}
+for _w in _MUNICIPALITIES:
+    if _MUNICIPALITIES[_w]:
+        _BY_FIRST.setdefault(_w.split()[0], []).append(tuple(_w.split()))
+for _v in _BY_FIRST.values():
+    _v.sort(key=len, reverse=True)
+_TAIL = {"nad", "pod", "u", "v", "ve", "na"}
 
 
+def _city_hit(text: str, district: str) -> tuple[int, str] | None:
+    """(position, city) of the first statutory city `text` names — not one
+    named as the okres ("okres Karviná"), nor a namesake village in another
+    okres ("Kladno, Chrudim")."""
+    hits = []
+    for rx, city in _CITIES:
+        for m in rx.finditer(text):
+            if not _OKRES_WORD.search(text[:m.start()]):
+                hits.append((m.start(), city))
+                break
+    if not hits:
+        return None
+    pos, city = min(hits)
+    okres = rpcz.okres_for_district(district)
+    if okres and okres != _CITY_OKRES.get(city) and any(
+            r[1] == okres for r in _MUNICIPALITIES.get(rpcz._words(city), [])):
+        return None
+    return pos, city
+
+
+def _municipality_hit(text: str) -> tuple[int, str] | None:
+    """(position, folded name) of the first municipality `text` names — not
+    one named as the okres, nor the start of a longer name ("Benešov nad
+    Ploučnicí")."""
+    words, pos = text.split(), 0
+    for i, w in enumerate(words):
+        if not (i and words[i - 1] in ("okres", "okr")):
+            for cand in _BY_FIRST.get(w, ()):
+                n = len(cand)
+                if tuple(words[i:i + n]) == cand and not (
+                        len(words) > i + n + 1 and words[i + n] in _TAIL):
+                    return pos, " ".join(cand)
+        pos += len(w) + 1
+    return None
+
+
+def _town(name_words: str, district: str, text: str) -> tuple[float, float, str]:
+    rows = _MUNICIPALITIES[name_words]
+    if len(rows) > 1:
+        okres = rpcz.okres_for_district(district)
+        rows = [r for r in rows if r[1] == okres] or rows
+    results = []
+    for name, okres, pop in rows:
+        if (name, okres) in _TOWN_PLACES:
+            size, local, where = _TOWN_PLACES[(name, okres)].coefficients(text)
+            acts = TOWN_COEFFICIENTS[(name, okres)][3]
+            results.append((size, local, f"{where} (okres {okres}; OZV {acts})"))
+        else:
+            size = 3.5 if (name, okres) in SPA_TOWNS else population_coefficient(pop)
+            results.append((size, LOCAL_COEFFICIENT,
+                            f"{name} (okres {okres}): size coefficient {size:g} for "
+                            f"{pop:,} people; its local coefficient UNVERIFIED "
+                            "(CZ_PROPERTY_TAX_LOCAL_COEF)"))
+    size, local, where = max(results, key=lambda r: _pair_key(r[:2]))
+    if len(results) > 1:
+        where += f" — the dearest of {len(results)} municipalities of that name"
+    return size, local, where
+
+
+@functools.lru_cache(maxsize=4096)
 def coefficients(district: str) -> tuple[float, float, str]:
     """(size coefficient, local coefficient, where they come from) for a flat
     in `district`."""
     text = rpcz._words(district or "")
     if _PRAHA_RE.search(text):
-        for rx, name in _PRAHA_NAMED:
-            if rx.search(text):
-                return (*PRAHA_DISTRICTS[name], f"Praha-{name}")
-        part = rpcz.praha_district(district)
-        if part in PRAHA_DISTRICTS:
-            return (*PRAHA_DISTRICTS[part], part)
-        size, local = max(PRAHA_DISTRICTS.values(), key=lambda sl: sl[0] * sl[1])
-        return size, local, "Praha — its dearest city part (none named)"
-    for rx, city in _CITIES:
-        if rx.search(text):
-            size, local, _ = CITY_COEFFICIENTS[city]
-            for arx, area in _AREAS[city]:
-                if arx.search(text):
-                    return (*CITY_COEFFICIENTS[city][2][area], f"{area}, {city}")
-            return size, local, city
+        return _praha(text, district or "")
+    city = _city_hit(text, district or "")
+    town = _municipality_hit(text)
+    # "Orlová - Lutyně, Karviná": the town named first, unless it is a part
+    # of the city ("Nová Ves, Ostrava").
+    if city and town and town[0] < city[0] and not _hits(town[1], _CITY_PLACES[city[1]].needles):
+        city = None
+    if city:
+        return _CITY_PLACES[city[1]].coefficients(text)
+    if town:
+        return _town(town[1], district or "", text)
     return (UNKNOWN_PLACE_COEFFICIENT, LOCAL_COEFFICIENT,
-            "UNVERIFIED — place not in the table; 3.5 and CZ_PROPERTY_TAX_LOCAL_COEF")
+            "UNVERIFIED — no municipality named; 3.5 and CZ_PROPERTY_TAX_LOCAL_COEF")
 
 
 def size_coefficient(district: str) -> float:
@@ -212,3 +545,35 @@ def annual_tax(size_m2: float, district: str = "") -> float:
     tax = math.ceil(base * RATE_PER_M2 * size - 1e-9)
     tax = math.ceil(tax * INFLATION_COEFFICIENT - 1e-9)
     return float(math.ceil(tax * local - 1e-9))
+
+
+SOURCE = {
+    "source": (
+        "zákon 338/1992 Sb. as in force from 1.10.2025 (zakonyprolidi.cz): § 10 "
+        "odst. 3 (× 1.22 / 1.20), § 11 odst. 1 písm. j) (3.50 Kč/m²), § 11 odst. 4–5 "
+        "(size coefficients by population; 3.5 in a statutory city and Františkovy "
+        "Lázně, Luhačovice, Mariánské Lázně and Poděbrady, 4.5 in Prague; one step "
+        "up by ordinance), § 11d (rounding), § 11f (inflation coefficient: CPI May "
+        "2025 / May 2023 = 155.0 / 147.6 per ČSÚ, rounded down → 1.0 for 2026), "
+        "§ 12 (local coefficient 0.5–5.0), § 12f (population per the RUD decree in "
+        "force on 1 January: ČSÚ 'Počet obyvatel v obcích' at 1.1.2025). Statutory "
+        "cities per zákon 128/2000 Sb. § 4 (version from 1.1.2026). Each city's "
+        "ordinances in force for 2026, read from sbirkapp.gov.cz: Praha 11/2024 as "
+        "amended by 12/2025; Ostrava 8/2024; Plzeň 2/2024; Liberec 7/2024; Olomouc "
+        "7/2024; Ústí nad Labem 3/2024; Hradec Králové 6/2024; Pardubice 9/2024; "
+        "Havířov 3/2024; Zlín 8/2024; Most 5/2024; Karviná 7/2024; Opava 3/2024; "
+        "Frýdek-Místek 4/2024; Karlovy Vary 3/2024; Teplice 1/2024; Děčín 3/2025 "
+        "(from 1.1.2026); Chomutov 3/2024; Jihlava 10/2024; Jablonec nad Nisou "
+        "8/2024; Přerov 7/2024; Mladá Boleslav 5/2024; Třinec 9/2024. Brno (28/2024 "
+        "repealed its coefficient), Kladno (2/2025 repealed its zones), Prostějov "
+        "(7/2024 repealed its coefficient) and České Budějovice have none in force. "
+        "The 105 other towns over 10,000 people, each per the ordinances named in "
+        "TOWN_COEFFICIENTS (sbirkapp.gov.cz; 'none' where the register holds none "
+        "in force on 1.1.2026). Prague quarters and postal districts, Ostrava "
+        "quarters and the cadastral areas of quarters in cities rated by area from "
+        "ČÚZK RÚIAN (31.10.2026), a place under 10% of the addresses or flats left "
+        "out. UNVERIFIED: the local coefficient of any other municipality "
+        "(CZ_PROPERTY_TAX_LOCAL_COEF, 1.0 unless set, is used); a place that names "
+        "no municipality (3.5 is used)."),
+    "checked": "2026-11-04 (sbirkapp.gov.cz, zakonyprolidi.cz, csu.gov.cz, vdp.cuzk.gov.cz)",
+}
