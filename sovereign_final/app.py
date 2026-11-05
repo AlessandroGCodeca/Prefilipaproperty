@@ -565,7 +565,7 @@ def _run_in_subprocess(module: str, func: str, kwargs: dict) -> tuple[object, st
     _dir = os.path.dirname(__file__)
     wrapper = f"""
 import sys, os, json
-sys.path.insert(0, {repr(_dir)})
+sys.path.insert(0, {_dir!r})
 try:
     import importlib
     mod = importlib.import_module({module!r})
@@ -587,8 +587,7 @@ except Exception as e:
             data = _json.loads(line)
             if data.get("ok"):
                 return data["n"], "", False
-            else:
-                return None, data.get("error", "Unknown error"), False
+            return None, data.get("error", "Unknown error"), False
         except Exception:
             continue
     stderr = proc.stderr.strip()

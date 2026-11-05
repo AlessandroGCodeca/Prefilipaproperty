@@ -20,7 +20,6 @@ import math
 import re
 import statistics
 from dataclasses import dataclass
-from typing import Optional
 from datetime import datetime, timezone
 
 import sys, os
@@ -75,7 +74,7 @@ SCORING_MODEL_VERSION = 5   # 5: property tax by area in Košice and Žilina; Cz
 
 @dataclass
 class FinancialResult:
-    listing_id:             Optional[str]
+    listing_id:             str | None
     price_eur:              float
     size_m2:                float
     district:               str
@@ -118,13 +117,13 @@ class FinancialResult:
     principal_paydown_monthly: float
     total_return_annual:    float   # cashflow + principal paydown (excl. appreciation)
     total_roi:              float   # total return / total cash invested
-    regional_median_m2:     Optional[float]  # the region's median asking €/m²
-    market_discount:        Optional[float]  # 1 − (€/m²) / median; >0 = below market
+    regional_median_m2:     float | None  # the region's median asking €/m²
+    market_discount:        float | None  # 1 − (€/m²) / median; >0 = below market
 
     # Decision
     optimal_structure:      str
     annual_sro_saving:      float
-    sro_break_even_months:  Optional[int]
+    sro_break_even_months:  int | None
     classification:         str
     recommendation:         str
 
@@ -140,7 +139,7 @@ class FinancialResult:
     total_cash_invested_sro: float = 0.0
     sro_running_cost_monthly: float = 0.0
 
-    rooms:                  Optional[int] = None
+    rooms:                  int | None = None
     rent_key:               str   = ""      # RENT_PER_M2 / kraj key the rent came from
     tax_year:               int   = TAX_YEAR  # the tax table the taxes came from
     market:                 str   = "sk"
@@ -166,8 +165,8 @@ def is_cashflow_negative(surplus, market: str = "sk") -> bool:
     return surplus is not None and surplus < cashflow_min_surplus(market)
 
 
-def sro_financing(ltv: float, rate: float, sro_ltv: Optional[float] = None,
-                  sro_rate_premium: Optional[float] = None,
+def sro_financing(ltv: float, rate: float, sro_ltv: float | None = None,
+                  sro_rate_premium: float | None = None,
                   market: str = "sk") -> tuple[float, float]:
     """(LTV, rate) the s.r.o. borrows at, given the personal ones: a company
     loan is commercial, priced above the hypotéka rate and lent on a lower
@@ -279,7 +278,7 @@ def personal_rental_base(rules: dict, *, noi_annual: float, rent_annual: float,
     return max(rent_annual - max(flat, actual), 0)
 
 
-def calc_income_tax_personal(annual_net: float, rules: Optional[dict] = None) -> float:
+def calc_income_tax_personal(annual_net: float, rules: dict | None = None) -> float:
     """Personal income tax on `annual_net` under a year's tax table
     (config.tax_rules; default the current tax year)."""
     t = rules or tax_rules()
@@ -292,7 +291,7 @@ def calc_income_tax_personal(annual_net: float, rules: Optional[dict] = None) ->
             (annual_net - threshold) * t["personal_rate_high"])
 
 
-def sro_corporate_rate(annual_revenue: float, rules: Optional[dict] = None) -> float:
+def sro_corporate_rate(annual_revenue: float, rules: dict | None = None) -> float:
     """Reduced corporate rate applies below the small-company revenue limit."""
     t = rules or tax_rules()
     return (t["sro_rate_reduced"] if annual_revenue <= t["sro_reduced_revenue_limit"]
@@ -300,7 +299,7 @@ def sro_corporate_rate(annual_revenue: float, rules: Optional[dict] = None) -> f
 
 
 def calc_tax_sro(annual_taxable: float, annual_revenue: float,
-                 rules: Optional[dict] = None) -> float:
+                 rules: dict | None = None) -> float:
     """Combined s.r.o. tax on rental profit: corporate income tax PLUS dividend
     withholding tax on the distributed remainder (the double-taxation that makes
     s.r.o. less of a slam-dunk than a flat corporate rate suggests)."""
@@ -442,7 +441,7 @@ def baseline_rent(key: str, market: str = "sk") -> float:
     return RENT_PER_M2.get(key) or KRAJ_RENT_FALLBACK.get(key) or RENT_PER_M2["default"]
 
 
-def rent_fallback_kind(key: str, market: str = "sk") -> Optional[str]:
+def rent_fallback_kind(key: str, market: str = "sk") -> str | None:
     """"default" (the national €/m² — the town is in no table), "kraj" (the
     median of the kraj's towns), or None for a key that names the place."""
     if not _sk(market):
@@ -583,8 +582,8 @@ def is_industrial_zone(district: str, market: str = "sk") -> bool:
     return any(z in key for z in _rent_premiums(market)[0])
 
 
-def default_ltv(properties_owned: Optional[int] = None,
-                on: Optional[str] = None, market: str = "sk") -> float:
+def default_ltv(properties_owned: int | None = None,
+                on: str | None = None, market: str = "sk") -> float:
     """The LTV a bank will lend at for your next purchase.
 
     NBS caps a 3rd-and-subsequent residential property at 70% from
@@ -624,20 +623,20 @@ def analyse(
     price_eur: float,
     size_m2: float,
     district: str,
-    listing_id: Optional[str] = None,
-    rent_override: Optional[float] = None,
-    ltv: Optional[float] = None,
-    rooms: Optional[int] = None,
+    listing_id: str | None = None,
+    rent_override: float | None = None,
+    ltv: float | None = None,
+    rooms: int | None = None,
     parking=None,
     furnished=None,
     balcony=None,
-    rate: Optional[float] = None,
-    term_years: Optional[int] = None,
+    rate: float | None = None,
+    term_years: int | None = None,
     rent_rates=None,
-    tax_year: Optional[int] = None,
-    sro_ltv: Optional[float] = None,
-    sro_rate_premium: Optional[float] = None,
-    sro_running_cost: Optional[float] = None,
+    tax_year: int | None = None,
+    sro_ltv: float | None = None,
+    sro_rate_premium: float | None = None,
+    sro_running_cost: float | None = None,
     market: str = "sk",
 ) -> FinancialResult:
     """Score one property under both ownership structures.
@@ -876,7 +875,7 @@ def analyse(
     )
 
 
-def classify(market_discount: Optional[float]) -> str:
+def classify(market_discount: float | None) -> str:
     """GREEN / YELLOW / WHITE from the discount to the regional median €/m².
     No benchmark (blank or unknown district) is WHITE: nothing says it's cheap.
     Neither is a price below the sanity floor — the scrapers zero those as
@@ -895,7 +894,7 @@ def classify(market_discount: Optional[float]) -> str:
     return "WHITE"
 
 
-def below_sanity_floor(market_discount: Optional[float]) -> bool:
+def below_sanity_floor(market_discount: float | None) -> bool:
     """A discount so deep the price is under the regional floor — a deposit,
     an "od €X" price or another listing's, not a bargain. Judged at the 4
     decimals classify() uses, so the warning and the class always agree."""
@@ -904,7 +903,7 @@ def below_sanity_floor(market_discount: Optional[float]) -> bool:
 
 
 def discount_to_median(price_eur: float, size_m2: float, district: str,
-                       rooms=None, market: str = "sk") -> Optional[float]:
+                       rooms=None, market: str = "sk") -> float | None:
     """How far the asking €/m² sits below the regional median, adjusted for
     the room count (benchmark_median; 0.2 = 20% below; negative = above).
     None without a benchmark, a price or a size."""
@@ -929,8 +928,8 @@ OFFER_STEP_CZK = 10_000.0
 
 
 def max_offer_price(size_m2: float, district: str, target: str = "YELLOW", *,
-                    rooms=None, step: Optional[float] = None,
-                    market: str = "sk") -> Optional[float]:
+                    rooms=None, step: float | None = None,
+                    market: str = "sk") -> float | None:
     """The highest price at which the listing still classifies as `target`,
     rounded DOWN to `step`.
 
@@ -964,7 +963,7 @@ def max_offer_price(size_m2: float, district: str, target: str = "YELLOW", *,
 
 # ── Stress test ───────────────────────────────────────────────────────────────
 def rate_shock(price_eur: float, size_m2: float, district: str, *,
-               shock: Optional[float] = None, rate: Optional[float] = None,
+               shock: float | None = None, rate: float | None = None,
                market: str = "sk", **kwargs) -> FinancialResult:
     """analyse() at the mortgage rate + `shock` (default +2 pp, the NBS
     affordability stress; Czechia: the market's own). Whatever else is passed
@@ -1001,7 +1000,7 @@ def amortization_schedule(principal: float, rate: float = MORTGAGE_RATE_PA,
     return out
 
 
-def irr(cash_flows: list[float]) -> Optional[float]:
+def irr(cash_flows: list[float]) -> float | None:
     """Annual internal rate of return of yearly cash flows (t=0 first), by
     bisection. None when there is no sign change to solve for."""
     if not cash_flows or cash_flows[0] >= 0 or all(c <= 0 for c in cash_flows):
@@ -1030,8 +1029,8 @@ def irr(cash_flows: list[float]) -> Optional[float]:
 class IrrResult:
     structure:          str
     hold_years:         int
-    irr:                Optional[float]
-    equity_multiple:    Optional[float]
+    irr:                float | None
+    equity_multiple:    float | None
     cash_flows:         list
     sale_price:         float
     exit_costs:         float
@@ -1042,19 +1041,19 @@ class IrrResult:
 
 
 def project_irr(price_eur: float, size_m2: float, district: str, *,
-                structure: str = "SRO", rent: Optional[float] = None,
-                ltv: Optional[float] = None, rate: Optional[float] = None,
-                term_years: Optional[int] = None,
+                structure: str = "SRO", rent: float | None = None,
+                ltv: float | None = None, rate: float | None = None,
+                term_years: int | None = None,
                 hold_years: int = HOLD_YEARS,
-                appreciation: Optional[float] = None,
-                rent_growth: Optional[float] = None,
-                cost_inflation: Optional[float] = None,
-                exit_cost_rate: Optional[float] = None,
+                appreciation: float | None = None,
+                rent_growth: float | None = None,
+                cost_inflation: float | None = None,
+                exit_cost_rate: float | None = None,
                 rooms=None, parking=None, furnished=None, balcony=None,
-                rent_rates=None, tax_year: Optional[int] = None,
-                sro_ltv: Optional[float] = None,
-                sro_rate_premium: Optional[float] = None,
-                sro_running_cost: Optional[float] = None,
+                rent_rates=None, tax_year: int | None = None,
+                sro_ltv: float | None = None,
+                sro_rate_premium: float | None = None,
+                sro_running_cost: float | None = None,
                 market: str = "sk") -> IrrResult:
     """Buy, hold `hold_years`, sell — and the IRR of the equity cash flows.
 

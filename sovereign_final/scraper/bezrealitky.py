@@ -264,7 +264,7 @@ def run(max_pages: int = 10) -> int:
     touched = touch_listings([u for _, u in urls])
     todo = [(k, u) for k, u in urls if u not in fresh][:max_pages * DETAILS_PER_PAGE]
     total, enriched, statuses = 0, [], []
-    for key, url in todo:
+    for _key, url in todo:
         try:
             require_robots(url)
             r = get(url, session=session, timeout=25)

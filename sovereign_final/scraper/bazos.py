@@ -158,7 +158,7 @@ def _build_listing_from_link(link) -> dict | None:
         if card is None:
             return None
         cls = " ".join(card.get("class") or [])
-        if "inzeratyflex" in cls or "inzerat" in cls and card.name == "div":
+        if "inzeratyflex" in cls or ("inzerat" in cls and card.name == "div"):
             break
         card = card.parent
     return _build_listing_from_card(card, link) if card else None

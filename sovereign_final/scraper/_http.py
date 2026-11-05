@@ -68,7 +68,7 @@ def get(url: str, session: requests.Session = None, timeout: int = 20, render: b
         return sess.get(url, timeout=timeout)
 
 
-def make_session(warmup_url: str = None) -> requests.Session:
+def make_session(warmup_url: str | None = None) -> requests.Session:
     """Create a session, optionally warming up with a homepage request for cookies."""
     import time
     s = requests.Session()

@@ -119,12 +119,6 @@ def unit(unit_id) -> dict:
     return _api(f"/api/v1/Jednotky/{int(unit_id)}")
 
 
-def find_unit(kod_casti_obce, cislo_domovni, cislo_jednotky, typ_stavby: int = 1) -> dict:
-    return _api("/api/v1/Jednotky/Vyhledani",
-                {"KodCastiObce": int(kod_casti_obce), "TypStavby": int(typ_stavby),
-                 "CisloDomovni": int(cislo_domovni), "CisloJednotky": int(cislo_jednotky)})
-
-
 def proceeding_label(r: dict) -> str:
     """"V-1234/2026" from a RizeniDef."""
     if not isinstance(r, dict):

@@ -106,7 +106,7 @@ def _same_part_named_city(location: str, own: str, found: str, title: str = "") 
     """A bare city part in the location ("Staré Mesto") is placed in
     Bratislava by default; when the ad names the city ("… Košice"), the same
     part of that city is meant. A location that names its city keeps it."""
-    if not found or ", " not in own or found.split(", ")[0] != own.split(", ")[0]:
+    if not found or ", " not in own or found.split(", ", maxsplit=1)[0] != own.split(", ", maxsplit=1)[0]:
         return False
     if (found != "Staré Mesto, Košice"
             and _extract_location_from_text(f"{location} {title}") != found):
