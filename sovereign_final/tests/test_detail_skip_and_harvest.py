@@ -294,7 +294,7 @@ def temp_db(monkeypatch):
         ("no-size",         150000, 0,   1,    1),
         ("inactive",        150000, 60,  1,    0),
     ]
-    for rid, price, size, days_ago, active in rows:
+    for rid, price, size, _days_ago, active in rows:
         stamp = now.isoformat()
         conn.execute("""
             INSERT INTO listings (id, source, url, price_eur, size_m2,

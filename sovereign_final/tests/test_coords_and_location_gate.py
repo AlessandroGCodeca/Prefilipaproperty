@@ -7,7 +7,7 @@
 - run_location_scoring never fabricates coordinates (it used to jitter a city
   centre by ±2.5 km without a Google key): without a key it geocodes through
   Nominatim, real data either way.
-- check_construction / check_noise never invent a flag (they used to hash
+- construction / noise / flood never invent a flag (they used to hash
   coordinates into random 15%/20% penalties): an unreachable source is None.
 """
 
@@ -131,6 +131,7 @@ class TestLocationGate:
         monkeypatch.setattr(liq.risk_data.requests, "post", boom)
         monkeypatch.setattr(liq.risk_data.requests, "get", boom)
         for lat, lng in [(48.15, 17.11), (49.22, 18.74), (48.72, 21.26)]:
-            assert liq.check_construction(lat, lng) is None
-            assert liq.check_noise(lat, lng) is None
-            assert liq.check_flood(lat, lng) is None
+            risk = liq.risk_data.assess(lat, lng, "address")
+            assert risk["construction"] is None
+            assert risk["noise"] is None
+            assert risk["flood"] is None
