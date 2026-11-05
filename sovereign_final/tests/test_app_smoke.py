@@ -933,3 +933,17 @@ def test_no_run_on_record_points_at_run_everything(db):
     at = run_app()
     assert any("No full run on record yet" in c.value and "RUN EVERYTHING" in c.value
                for c in at.caption)
+
+
+def test_database_setup_runs_once_not_on_every_click(db, monkeypatch):
+    # Streamlit reruns app.py on every widget interaction. init_db() commits,
+    # so on each rerun it queued for the write lock behind the scheduler.
+    calls = []
+    real = db.init_db
+    monkeypatch.setattr(db, "init_db", lambda: (calls.append(1), real())[1])
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    next(s for s in at.slider if s.label == "Max Price €").set_value(60_000).run()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert len(calls) == 1

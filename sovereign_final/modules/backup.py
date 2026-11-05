@@ -74,6 +74,9 @@ def backup_database(day: date | None = None) -> tuple[str, bool]:
             dst.close()
     finally:
         src.close()
+    # An older backup may predate columns the code now expects. The dashboard
+    # only runs init_db() once per process, so bring the schema up to date here.
+    database.init_db()
     part = target + ".part"
     shutil.copyfile(tmp, part)
     os.replace(part, target)
@@ -147,6 +150,9 @@ def restore_database(path: str) -> None:
             dst.close()
     finally:
         src.close()
+    # An older backup may predate columns the code now expects. The dashboard
+    # only runs init_db() once per process, so bring the schema up to date here.
+    database.init_db()
 
 
 if __name__ == "__main__":
