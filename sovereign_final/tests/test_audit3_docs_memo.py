@@ -264,7 +264,10 @@ _NUMERIC_KEYS = ("PROPERTIES_OWNED", "TAX_YEAR", "SRO_ANNUAL_RUNNING_COST",
 
 
 def _config_in_subprocess(env_over: dict) -> list:
+    # The child gets an empty database of its own, never data/sovereign.db.
     code = ("import sys; sys.path.insert(0, '.'); import config; "
+            "import os, tempfile, database; "
+            "database.SQLITE_PATH = os.path.join(tempfile.mkdtemp(), 'sovereign.db'); "
             "from engine.financial import analyse; "
             "r = analyse(98000, 58, 'Žilina'); "
             f"print(repr([getattr(config, k) for k in {_NUMERIC_KEYS!r}] "

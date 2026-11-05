@@ -27,6 +27,16 @@ def _no_stored_tax_rates(monkeypatch):
     monkeypatch.setattr(property_tax_cz, "_stored", {})
 
 
+@pytest.fixture(autouse=True)
+def _no_real_database(monkeypatch, tmp_path):
+    """No test opens the real data/sovereign.db. A test that reaches
+    database.get_conn() without a database of its own (engine.property_tax_sk
+    reads the municipality list through it) gets an empty file of its own;
+    full_db, and a test that sets its own path, still replace this."""
+    import database
+    monkeypatch.setattr(database, "SQLITE_PATH", str(tmp_path / "sovereign.db"))
+
+
 @pytest.fixture
 def full_db(monkeypatch):
     import database as db

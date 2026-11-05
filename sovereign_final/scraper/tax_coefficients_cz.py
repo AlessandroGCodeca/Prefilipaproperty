@@ -145,7 +145,7 @@ class Parsed:
         return dict(self.__dict__)
 
     @classmethod
-    def from_json(cls, d: dict) -> "Parsed":
+    def from_json(cls, d: dict) -> Parsed:
         return cls(**{k: v for k, v in (d or {}).items() if k in cls.__dataclass_fields__})
 
 

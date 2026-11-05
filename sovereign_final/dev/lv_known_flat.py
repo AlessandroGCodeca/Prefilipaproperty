@@ -59,7 +59,7 @@ def _show_lv(label: str, result: dict) -> str | None:
     for e in entries:
         print(f"  {'BLOCKS' if e['blocking'] else 'ok    '} {describe(e)}")
     os.makedirs("logs", exist_ok=True)
-    path = os.path.join("logs", f"lv_probe_{label.split()[0].lower()}_{lv_no}.txt")
+    path = os.path.join("logs", f"lv_probe_{label.split(maxsplit=1)[0].lower()}_{lv_no}.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
     print(f"full text saved to {path}")

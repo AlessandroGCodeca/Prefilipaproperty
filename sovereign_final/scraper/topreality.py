@@ -332,8 +332,7 @@ def _detect_search_url(sess) -> str:
             if links:
                 log.info(f"  ✓ search URL works: {fmt} ({len(links)} links page 1)")
                 return fmt
-            else:
-                log.info(f"  · {fmt} → 200 but 0 links")
+            log.info(f"  · {fmt} → 200 but 0 links")
         else:
             log.warning(f"  · {fmt} → {'no response' if status == 0 else f'HTTP {status}'}, "
                         f"len={len(html)}")

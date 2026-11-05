@@ -78,7 +78,7 @@ def addresses(path: str) -> dict:
 
 
 def _local(tag: str) -> str:
-    return tag.split("}")[-1]
+    return tag.rsplit("}", maxsplit=1)[-1]
 
 
 def _child(el, name):

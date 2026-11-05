@@ -65,11 +65,6 @@ def geocode_precise(address: str, market: str = "sk") -> tuple[float | None, flo
     return None, None, ""
 
 
-def geocode(address: str) -> tuple[float | None, float | None]:
-    lat, lng, _ = geocode_precise(address)
-    return lat, lng
-
-
 # ── Places Queries ────────────────────────────────────────────────────────────
 def nearest_transit(lat: float, lng: float) -> float:
     """Metres to the nearest transit stop, or 9999.0 when none is found.
