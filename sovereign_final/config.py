@@ -27,7 +27,7 @@ def _env_int(name: str, default: int) -> int:
 
 # ── Database ──────────────────────────────────────────────────────────────────
 # SQLite only — see SQLITE_PATH below. DATABASE_URL is ignored: the old
-# PostgreSQL mode never worked (see the database.py docstring).
+# PostgreSQL mode never worked (see the database package docstring).
 
 # ── 2026 Slovak Financial Rates ───────────────────────────────────────────────
 # Mortgage: NBS new-housing-loan average sat ~3.5% in 2026, bank offers ~3.4–4.0%
