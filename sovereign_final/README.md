@@ -102,7 +102,8 @@ python3 -m pytest tests/
 
 Everything should pass (about 1,500 tests; the dashboard tests in
 `tests/test_app_smoke.py` need `streamlit` installed and are skipped without
-it). CI also runs `ruff check . --select=E9,F` and runs the suite on Windows.
+it). CI also runs `ruff check .` (the rule set is in `pyproject.toml`) and
+runs the suite on Python 3.11, 3.12 and 3.14, and on Windows.
 
 Dependencies are pinned to exact versions in `requirements.txt`, so a Docker
 rebuild installs what the tests last passed with. Dependabot opens a PR each

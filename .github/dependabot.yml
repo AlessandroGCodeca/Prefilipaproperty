@@ -1,8 +1,8 @@
 # Weekly upgrade PRs for the pinned dependencies (audit O6). CI runs the test
 # suite on each one, so an upgrade that breaks the app shows up red there
 # instead of in the next Docker rebuild. (The Docker base image stays on
-# python:3.12-slim by hand: CI tests on 3.12, so a Python bump belongs in a PR
-# that changes both.)
+# python:3.12-slim by hand: CI tests on 3.11, 3.12 and 3.14, so a Python bump
+# belongs in a PR that changes both.)
 version: 2
 updates:
   - package-ecosystem: pip
@@ -13,6 +13,12 @@ updates:
       python:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # Streamlit 1.66 still calls DataFrame.reset_index(inplace=True), which
+      # pandas 3.1 deprecates and pandas 4 removes. Lift this once a Streamlit
+      # release supports pandas 4.
+      - dependency-name: pandas
+        versions: [">=4"]
 
   - package-ecosystem: github-actions
     directory: /

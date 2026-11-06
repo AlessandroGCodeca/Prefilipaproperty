@@ -262,10 +262,10 @@ ADVERT = {"id": "1000002", "uri": "1000002-nabidka-prodej-bytu-testovaci-brno",
 
 
 def test_bezrealitky_sale_flat_urls():
-    assert bezrealitky.sale_flat_url(B + "1000002-nabidka-prodej-bytu-testovaci-brno") == "1000002"
-    assert bezrealitky.sale_flat_url(B + "1000003-nabidka-pronajem-bytu-testovaci-brno") is None
-    assert bezrealitky.sale_flat_url(B + "1000004-nabidka-prodej-domu-testovaci") is None
-    assert bezrealitky.sale_flat_url("https://www.bezrealitky.cz/vypis/x") is None
+    assert bezrealitky.flat_url(B + "1000002-nabidka-prodej-bytu-testovaci-brno") == "1000002"
+    assert bezrealitky.flat_url(B + "1000003-nabidka-pronajem-bytu-testovaci-brno") is None
+    assert bezrealitky.flat_url(B + "1000004-nabidka-prodej-domu-testovaci") is None
+    assert bezrealitky.flat_url("https://www.bezrealitky.cz/vypis/x") is None
 
 
 def test_bezrealitky_walks_a_gzipped_sitemap_index(robots):

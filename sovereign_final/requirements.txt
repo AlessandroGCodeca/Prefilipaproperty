@@ -7,7 +7,7 @@ pydeck==0.9.3          # the MAP tab imports it directly
 requests==2.34.2
 beautifulsoup4==4.15.0
 python-dotenv==1.2.4
-pandas==3.1.0
+pandas==3.1.0          # <4 until Streamlit stops calling reset_index(inplace=True) (.github/dependabot.yml ignores 4.x)
 apscheduler==3.11.3    # 4.x is a different API
 lxml==6.1.3
 pytz==2026.6

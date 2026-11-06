@@ -124,31 +124,6 @@ def count_amenities(lat: float, lng: float) -> dict:
     return counts
 
 
-def check_construction(lat: float, lng: float) -> bool | None:
-    """Construction site within CONSTRUCTION_RADIUS_M (OpenStreetMap), or None
-    when OSM can't be reached. Never a guess: this used to hash coordinates
-    into a random 15% flag."""
-    elements = risk_data.fetch_osm(lat, lng)
-    if elements is None:
-        return None
-    return risk_data.classify_osm(elements, lat, lng)["construction"]
-
-
-def check_noise(lat: float, lng: float) -> bool | None:
-    """Major road / railway / airport close enough for ≥65 dB Lden
-    (OpenStreetMap proxy for the strategic noise maps), or None when OSM can't
-    be reached."""
-    elements = risk_data.fetch_osm(lat, lng)
-    if elements is None:
-        return None
-    return risk_data.classify_osm(elements, lat, lng)["noise"]
-
-
-def check_flood(lat: float, lng: float) -> bool | None:
-    """Inside the SVP-mapped Q100 flood extent, or None when unknown."""
-    return risk_data.check_flood(lat, lng)[0]
-
-
 def _haversine(lat1, lng1, lat2, lng2) -> float:
     R = 6_371_000
     φ1, φ2 = math.radians(lat1), math.radians(lat2)
