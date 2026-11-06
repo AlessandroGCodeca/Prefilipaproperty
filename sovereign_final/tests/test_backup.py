@@ -87,3 +87,18 @@ def test_restore_puts_the_copy_back(db, dirs):
 def test_restore_refuses_a_missing_file(db, dirs):
     with pytest.raises(FileNotFoundError):
         backup.restore_database(str(dirs / "nope.db"))
+
+
+def test_restore_brings_an_old_backups_schema_up_to_date(db, dirs, tmp_path):
+    # The dashboard runs init_db() once per process, so a restored backup that
+    # predates a column must get it from the restore itself.
+    path, _ = backup.backup_database(date(2026, 10, 8))
+    old = sqlite3.connect(path)
+    old.execute("ALTER TABLE listings DROP COLUMN lv_number")
+    old.commit()
+    old.close()
+    backup.restore_database(path)
+    conn = db.get_conn()
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(listings)")}
+    conn.close()
+    assert "lv_number" in cols

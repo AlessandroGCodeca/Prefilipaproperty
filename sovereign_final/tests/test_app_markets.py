@@ -110,6 +110,29 @@ def test_a_slovak_only_database_looks_as_before(_isolated):
     assert any(c.endswith(" · SK") for c in captions)
 
 
+def test_an_old_eur_czk_rate_is_warned_about_where_czech_listings_are(two_markets, monkeypatch):
+    monkeypatch.setattr(config, "FX_RATE_DATE", "2026-01-02")
+    at = run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("EUR/CZK rate" in w.value and "days ago" in w.value for w in at.warning)
+
+
+def test_a_current_eur_czk_rate_raises_no_warning(two_markets, monkeypatch):
+    from datetime import date
+    monkeypatch.setattr(config, "FX_RATE_DATE", date.today().isoformat())
+    at = run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert not any("EUR/CZK" in w.value for w in at.warning)
+
+
+def test_no_eur_czk_warning_without_czech_listings(_isolated, monkeypatch):
+    monkeypatch.setattr(config, "FX_RATE_DATE", "2026-01-02")
+    now = datetime.now(timezone.utc).isoformat()
+    _isolated.upsert_listing(make_listing("sk1", district="Žilina", last_seen_at=now, scraped_at=now))
+    at = run()
+    assert not any("EUR/CZK" in w.value for w in at.warning)
+
+
 def test_no_czech_status_line_without_czech_portals(_isolated, monkeypatch):
     import scheduler
     monkeypatch.setitem(scheduler.SCRAPERS, "cz", ())

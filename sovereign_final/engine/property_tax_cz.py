@@ -49,12 +49,16 @@ from __future__ import annotations
 
 import functools
 import json
+import logging
 import math
 import os
 import re
+import sqlite3
 import unicodedata
 
 from engine import regional_prices_cz as rpcz
+
+log = logging.getLogger(__name__)
 
 # The tax year PRAHA_DISTRICTS, CITY_COEFFICIENTS and TOWN_COEFFICIENTS were
 # read for.
@@ -525,18 +529,23 @@ def _load() -> dict:
     """{"places": {code: {"name", "okres", "population", "years": {year:
     (size, local, sources)}}}} from the property_tax_cz table, or {}. `size`
     and `local` map "" (the municipality) and any area that differs to its
-    coefficient; `okres` is set only where municipalities share a name."""
+    coefficient; `okres` is set only where municipalities share a name.
+    A database error is logged and read as no update (the built-in tables)."""
+    import database
     try:
-        import database
         conn = database.get_conn()
-    except Exception:
+    except (sqlite3.Error, OSError) as e:
+        log.warning("Czech tax coefficients not read, the database did not open: %s: %s",
+                    type(e).__name__, e)
         return {}
     try:
         if not database._has_table(conn, "property_tax_cz"):
             return {}
         rows = conn.execute("SELECT code, tax_year, name, okres, population, size, local, "
                             "sources FROM property_tax_cz").fetchall()
-    except Exception:
+    except sqlite3.Error as e:
+        log.warning("Czech tax coefficients not read from property_tax_cz: %s: %s",
+                    type(e).__name__, e)
         return {}
     finally:
         conn.close()

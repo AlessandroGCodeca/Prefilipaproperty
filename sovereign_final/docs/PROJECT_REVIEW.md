@@ -307,6 +307,10 @@ source.
   and grows linearly. A full rerun at that size took 1.1–1.9 s.
 - **Fix:** cache the load with `st.cache_data` and a short time limit, and
   clear it when a pipeline step finishes.
+- **Done:** `app.py` caches the load for 60 s (`LISTINGS_TTL_S`). A cache
+  hit takes 0.02 s at 5,000 listings, against 0.36 s for the query. The cache
+  is cleared when a sidebar step finishes and after the page's own LV
+  re-checks and saves. A scheduler run shows within the time limit.
 
 **M6 · Some errors are swallowed without a trace** · Impact: hidden failures · Effort M
 
@@ -320,6 +324,13 @@ source.
 
 - **Fix:** log each at warning level with the exception type, and narrow the
   exceptions where the error type is known.
+- **Status: fixed.** Both examples, and the same pattern in
+  `property_tax_sk` (stored rates, municipality list), `rent_comps` and
+  `rent_comps_cz` (live rates, comps table) and
+  `contract_draft.figures_at_price`, now log a warning with the exception
+  type. The database reads catch only `sqlite3.Error` / `OSError`, so a
+  code bug surfaces; a missing `rent_comps` table is still a quiet empty
+  case. Tests: `tests/test_logged_fallbacks.py`.
 
 **M7 · A few very large files** · Impact: slower, riskier changes · Effort L
 

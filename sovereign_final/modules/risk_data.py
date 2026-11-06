@@ -1,7 +1,7 @@
 """
 modules/risk_data.py — real location-risk data in place of the old stubs.
 
-check_construction() and check_noise() in modules/location_iq used to return
+The construction and noise checks in modules/location_iq used to return
 False for every flat ("no data source = no flag"), and flood_zone was written
 as 0. This module answers all three from open data, with no API keys:
 

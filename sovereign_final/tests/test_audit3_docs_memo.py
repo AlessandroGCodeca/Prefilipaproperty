@@ -268,6 +268,9 @@ def _config_in_subprocess(env_over: dict) -> list:
     code = ("import sys; sys.path.insert(0, '.'); import config; "
             "import os, tempfile, database; "
             "database.SQLITE_PATH = os.path.join(tempfile.mkdtemp(), 'sovereign.db'); "
+            # nor a ČNB rate a real run saved (modules/fx_rate): the default stands
+            "from modules import fx_rate; "
+            "fx_rate.CACHE_PATH = os.path.join(tempfile.mkdtemp(), 'fx_rate.json'); "
             "from engine.financial import analyse; "
             "r = analyse(98000, 58, 'Žilina'); "
             f"print(repr([getattr(config, k) for k in {_NUMERIC_KEYS!r}] "
@@ -283,7 +286,7 @@ def test_blank_numeric_settings_get_their_defaults():
     from datetime import date
     # Blank keys are present, so a developer's own .env cannot fill them.
     blank = _config_in_subprocess({k: "" for k in _NUMERIC_KEYS})
-    assert blank[:9] == [0, date.today().year, 1200.0, 0.01, 0.70, 0.0, 15000, 24.355, 14]
+    assert blank[:9] == [0, date.today().year, 1200.0, 0.01, 0.70, 0.0, 15000, 24.290, 14]
     explicit = _config_in_subprocess({**{k: "" for k in _NUMERIC_KEYS},
                                       "SRO_ANNUAL_RUNNING_COST": "1200",
                                       "SRO_RATE_PREMIUM_PP": "0.01"})
