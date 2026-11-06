@@ -189,6 +189,7 @@ def scraped(chromium_ok, fake_site, tmp_path_factory):
     shared by every test below: a run takes about ten seconds."""
     import database as db
     from engine import property_tax_cz, property_tax_sk
+    from modules import fx_rate
     from scraper import nehnutelnosti as n
 
     local, server_log = fake_site
@@ -219,6 +220,11 @@ def scraped(chromium_ok, fake_site, tmp_path_factory):
         mp.setattr(db, "get_conn", conn_for)
         mp.setattr(property_tax_sk, "_stored", {})
         mp.setattr(property_tax_cz, "_stored", {})
+
+        def _offline(timeout=15):
+            raise fx_rate.FxError("no network in tests")
+        mp.setattr(fx_rate, "_fetch", _offline)
+        mp.setattr(fx_rate, "CACHE_PATH", str(tmp_path_factory.mktemp("fx") / "fx_rate.json"))
         mp.setattr(n, "_open_browser", _open_offline)
         mp.setattr(n, "SCRAPE_DELAY_SEC", 0)
 

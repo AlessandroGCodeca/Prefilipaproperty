@@ -461,3 +461,51 @@ def test_a_village_named_with_its_district_town_is_new_not_that_towns(villages):
     o = tr.assess(scr.Town("Brestov (okres Prešov)", ("https://brestov.sk",)),
                   result("Brestov (okres Prešov)", reading([0.06], 2024)), YEAR)
     assert o.status == "new" and "fallback" in o.message
+
+
+# ── Housekeeping (review L7) ──────────────────────────────────────────────────
+def test_each_towns_session_is_closed_once_it_is_read(db, monkeypatch):
+    import requests
+    sessions = []
+
+    class Tracked(requests.Session):
+        closed = False
+
+        def close(self):
+            self.closed = True
+            super().close()
+
+    def check(t, year, session=None, fetcher=None, **kw):
+        sessions.append(session)
+        assert not session.closed                   # open while the town is read
+        return fake_check(t, year, session, fetcher, **kw)
+
+    monkeypatch.setattr(requests, "Session", Tracked)
+    monkeypatch.setattr(scr, "check_town", check)
+    tr.update(only=["Pezinok", "Šamorín"], year=YEAR)
+    assert len(sessions) == 2 and len({id(s) for s in sessions}) == 2
+    assert all(s.closed for s in sessions)
+
+
+def test_a_fetch_without_a_session_closes_the_one_it_opens(monkeypatch):
+    import requests
+    import config
+    made = []
+
+    class Tracked(requests.Session):
+        closed = False
+
+        def get(self, url, **kw):
+            made.append(self)
+            return "page"
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(config, "SCRAPER_API_KEY", "", raising=False)
+    monkeypatch.setattr(requests, "Session", Tracked)
+    assert scr._get("https://obec.sk/dane") == "page"
+    assert made and made[0].closed
+    given = Tracked()
+    scr._get("https://obec.sk/dane", session=given)
+    assert not given.closed                         # the caller's stays open

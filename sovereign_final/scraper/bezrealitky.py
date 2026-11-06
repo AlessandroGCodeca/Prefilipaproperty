@@ -82,11 +82,6 @@ def flat_url(url: str, offer: str = "prodej") -> str | None:
     return m.group(1)
 
 
-def sale_flat_url(url: str) -> str | None:
-    """The advert id of a sale-flat listing URL, else None."""
-    return flat_url(url, "prodej")
-
-
 def sitemap_locs(xml: str) -> list[str]:
     return _LOC_RE.findall(xml or "")
 

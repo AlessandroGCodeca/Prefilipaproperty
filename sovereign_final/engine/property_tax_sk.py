@@ -32,11 +32,15 @@ accepted or uploaded. Towns rated by cadastral area keep the table's rates.
 
 from __future__ import annotations
 
+import logging
 import math
 import re
+import sqlite3
 import unicodedata
 
 from engine import regional_prices as rp
+
+log = logging.getLogger(__name__)
 
 # § 16 ods. 1 — what a municipality without its own rate would charge. Shown
 # for reference; the table and the fallback below are what the engine uses.
@@ -206,8 +210,8 @@ def _known_names() -> list[tuple[str, str, str, str]]:
     if _names is None or _names_of is not stored_rates():
         _names_of = stored_rates()
         names: dict[str, tuple[str, str, str, str]] = {}
+        import database
         try:
-            import database
             conn = database.get_conn()
             try:
                 if database._has_table(conn, "sk_municipalities"):
@@ -217,8 +221,9 @@ def _known_names() -> list[tuple[str, str, str, str]]:
                         names[k] = (_fold(r["name"]), okres if "|" in k else "", k, okres)
             finally:
                 conn.close()
-        except Exception:
-            pass
+        except (sqlite3.Error, OSError) as e:
+            log.warning("Slovak municipality list not read, only towns with a stored rate "
+                        "are recognised: %s: %s", type(e).__name__, e)
         for k in stored_rates():
             if k not in names:
                 n, _, okres = k.partition("|")
@@ -245,10 +250,14 @@ def stored_rates() -> dict[str, list[dict]]:
 
 
 def _load_stored() -> dict[str, list[dict]]:
+    """The property_tax_rates table by town. A database error is logged and
+    read as no stored rates (the built-in table)."""
+    import database
     try:
-        import database
         conn = database.get_conn()
-    except Exception:
+    except (sqlite3.Error, OSError) as e:
+        log.warning("Stored Slovak tax rates not read, the database did not open: %s: %s",
+                    type(e).__name__, e)
         return {}
     try:
         if not database._has_table(conn, "property_tax_rates"):
@@ -256,7 +265,9 @@ def _load_stored() -> dict[str, list[dict]]:
         rows = conn.execute(
             "SELECT town, name, tax_year, rate, origin, source_url, document, saved_at "
             "FROM property_tax_rates ORDER BY tax_year DESC, saved_at DESC").fetchall()
-    except Exception:
+    except sqlite3.Error as e:
+        log.warning("Stored Slovak tax rates not read from property_tax_rates: %s: %s",
+                    type(e).__name__, e)
         return {}
     finally:
         conn.close()

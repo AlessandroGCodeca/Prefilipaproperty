@@ -117,13 +117,26 @@ class TestCosts:
 
     def test_acquisition_is_the_katastr_fee_plus_a_share(self):
         assert fin.acquisition_costs(4_000_000, market="cz") == pytest.approx(
-            4_000_000 * CZ.acquisition_cost_rate + 2_000)
+            4_000_000 * CZ.acquisition_cost_rate + CZ.acquisition_cost_fixed)
         assert CZ.acquisition_costs["transfer_tax"] == 0
+        # Two vklad filings, an advokát's contract and úschova, a valuation:
+        # a fixed sum, not 1 % of the price.
+        c = CZ.acquisition_costs
+        assert CZ.acquisition_cost_fixed == (c["katastr_fee"] * c["katastr_filings"]
+                                             + c["legal_fees"] + c["valuation"]) == 19_000
+        assert CZ.acquisition_cost_rate == 0
 
     def test_unverified_figures_say_so(self):
-        assert "UNVERIFIED" in CZ.sro_costs["source"]
-        assert "UNVERIFIED" in CZ.hold_assumptions["source"]
-        assert "UNVERIFIED" in CZ.acquisition_costs["legal_fees"]
+        assert "UNVERIFIED" in CZ.sro_costs["source"]         # the loan terms
+        assert "UNVERIFIED" in CZ.hold_assumptions["source"]  # the growth rates
+
+    def test_verified_figures_name_their_source(self):
+        assert "Věstník ČNB 17/2025" in CZ.lending_rules["stress_pp_source"]
+        assert CZ.rate_shock_pp == 0.02
+        assert "UNVERIFIED" not in CZ.hoa["source"] and CZ.hoa["per_unit"] == 200
+        assert "196/2001" in CZ.sro_costs["source"]
+        assert (CZ.sro_setup_cost, CZ.sro_annual_running_cost) == (4_000, 20_000)
+        assert CZ.exit_cost_rate == 0.04
 
 
 class TestCzechScore:
@@ -136,8 +149,8 @@ class TestCzechScore:
         assert (r.market, r.currency, r.tax_year) == ("cz", "CZK", 2026)
         assert r.ltv == 0.70 and r.mortgage_rate == CZ.mortgage_rate_pa
         assert r.sro_mortgage_rate == pytest.approx(CZ.mortgage_rate_pa + 0.01)
-        assert r.hoa_monthly == pytest.approx(55 * CZ.hoa["per_m2"])
-        assert r.acquisition_costs == pytest.approx(4_500_000 * 0.01 + 2_000)
+        assert r.hoa_monthly == pytest.approx(55 * CZ.hoa["per_m2"] + CZ.hoa["per_unit"])
+        assert r.acquisition_costs == pytest.approx(19_000)
         assert "Kč" in r.recommendation and "€" not in r.recommendation
 
     def test_extras_and_stress_run_in_the_market(self):
@@ -172,12 +185,12 @@ def test_a_czech_place_without_a_rent_figure_waits_unscored(full_db, caplog):
     import database as db
     from modules.cashflow_runner import run_scoring
     from tests.conftest import make_listing
-    with pytest.raises(LookupError, match="rent figure for 'Plzeň 3'"):
-        fin.get_rent_estimate("Plzeň 3", 55, market="cz")
-    db.upsert_listing(make_listing("cz1", market="cz", currency="CZK", district="Plzeň 3",
+    with pytest.raises(LookupError, match="rent figure for 'Kladno 3'"):
+        fin.get_rent_estimate("Kladno 3", 55, market="cz")
+    db.upsert_listing(make_listing("cz1", market="cz", currency="CZK", district="Kladno 3",
                                    price_eur=4_500_000.0, url="https://example.cz/1"))
     db.upsert_listing(make_listing("sk1", district="Žilina"))
     with caplog.at_level(logging.INFO):
         assert run_scoring() == 1
     assert "Score error" not in caplog.text
-    assert "1 CZ listing(s) not scored — Czechia: no rent figure for 'Plzeň 3'" in caplog.text
+    assert "1 CZ listing(s) not scored — Czechia: no rent figure for 'Kladno 3'" in caplog.text

@@ -252,7 +252,7 @@ class TestDashboardRun:
 
 
 class TestRetryDue:
-    def status(self, state="failed", slot=at(2026, 10, 4, 6), retry=at(2026, 10, 4, 7, 5)):
+    def status(self, state="failed", slot=at(2026, 10, 4, 6), retry=at(2026, 10, 4, 7, 5)):  # noqa: B008 (immutable datetimes)
         return {"state": state, "slot": slot.isoformat(),
                 "next_retry_at": retry.isoformat() if retry else None}
 

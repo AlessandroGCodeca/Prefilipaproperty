@@ -37,6 +37,18 @@ def _no_real_database(monkeypatch, tmp_path):
     monkeypatch.setattr(database, "SQLITE_PATH", str(tmp_path / "sovereign.db"))
 
 
+@pytest.fixture(autouse=True)
+def _no_live_fx_rate(monkeypatch, tmp_path):
+    """No test fetches the ČNB rate or reads or writes the real
+    data/fx_rate.json; one about modules/fx_rate stubs _fetch itself."""
+    from modules import fx_rate
+
+    def _offline(timeout=15):
+        raise fx_rate.FxError("no network in tests")
+    monkeypatch.setattr(fx_rate, "_fetch", _offline)
+    monkeypatch.setattr(fx_rate, "CACHE_PATH", str(tmp_path / "fx_rate.json"))
+
+
 def make_full_db(path: str):
     """Give the SQLite file at `path` the real schema; return a connect()
     for it. full_db wraps this; a module-scoped fixture can call it itself."""
@@ -84,3 +96,32 @@ def make_listing(lid: str, **over) -> dict:
     }
     row.update(over)
     return row
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "keeps_listing_cache: the dashboard's listing cache is not "
+                   "cleared before each AppTest run")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_listings_each_run(request, monkeypatch):
+    """The dashboard caches its listing load for LISTINGS_TTL_S seconds (app.py),
+    so a write from outside the page shows on it after that limit, not at
+    once. A dashboard test writes to the database and reruns at once: each
+    AppTest run starts as if the limit had passed. A test of the cache itself
+    is marked keeps_listing_cache."""
+    if "keeps_listing_cache" in request.keywords:
+        return
+    try:
+        import streamlit as st
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        return
+    real = AppTest._run
+
+    def _run(self, *args, **kwargs):
+        st.cache_data.clear()
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(AppTest, "_run", _run)

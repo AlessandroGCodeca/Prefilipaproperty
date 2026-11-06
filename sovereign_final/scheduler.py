@@ -475,6 +475,19 @@ def _record_failure(market: str, trigger: str, holder: str | None, error: str) -
         log.error(f"Couldn't write the run status: {e}")
 
 
+def _refresh_fx() -> None:
+    """Today's ČNB EUR/CZK rate before the run ranks and costs Czech listings.
+    A failure keeps the last rate (modules/fx_rate logs it); never the run's."""
+    try:
+        from modules import fx_rate
+        fx_rate.refresh()
+        warn = fx_rate.stale_warning()
+        if warn:
+            log.warning(f"⚠ {warn}")
+    except Exception as e:
+        log.warning(f"EUR/CZK refresh skipped: {type(e).__name__}: {e}")
+
+
 def run_all_markets(trigger: str = "06:00", holder: str | None = None,
                     call=call_here, progress=None, which=None,
                     owed_at: datetime | None = None) -> dict[str, bool]:
@@ -492,6 +505,7 @@ def run_all_markets(trigger: str = "06:00", holder: str | None = None,
     results: dict[str, bool] = {}
 
     def run_them():
+        _refresh_fx()
         offset = 0
         for m in todo:
             # The scheduler's run (owed_at: the time it found m owed) may have

@@ -180,8 +180,18 @@ _require_password()
 
 # ── Init ──────────────────────────────────────────────────────────────────────
 import markets
+import database
 from database import init_db, get_all_active, backfill_dev_project_flags
-init_db()
+
+@st.cache_resource
+def _init_db_once(db_path: str) -> bool:
+    # Streamlit reruns this whole script on every click. init_db() re-applies
+    # the schema, runs the column checks and backfills, and commits, which takes
+    # the write lock: while the scheduler commits a big batch, a click could
+    # wait up to the 30 s lock timeout. Once per process per database is enough.
+    init_db()
+    return True
+_init_db_once(database.SQLITE_PATH)
 
 @st.cache_resource
 def _startup_backfill():
@@ -189,6 +199,18 @@ def _startup_backfill():
     # session instead of on every Streamlit rerun (every widget interaction).
     return backfill_dev_project_flags()
 _startup_backfill()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fx_refresh_if_due() -> bool:
+    # The ČNB EUR/CZK rate (modules/fx_rate) when the saved one is over 6 h
+    # old — at most once an hour across reruns, with a short timeout so a
+    # slow bank site can't hold the page.
+    from modules import fx_rate
+    try:
+        return fx_rate.refresh_if_due(timeout=5)
+    except Exception:
+        return False
 
 # ── Demo data (when DB is empty) ──────────────────────────────────────────────
 DEMO = [
@@ -480,6 +502,10 @@ with st.sidebar:
             st.warning(f"No {_p.name} tax table for {_trm['requested']} yet — scoring uses "
                        f"the {_trm['year']} rules. Add {_trm['requested']} to "
                        f"{_m.upper()}_TAX_YEAR_RULES in markets.py.")
+    # The EUR/CZK rate the combined ranking converts with (modules/fx_rate):
+    # fetched from the ČNB when the saved one is over 6 h old, at most hourly.
+    # It is shown, and its age warned about, where Czech listings are.
+    _fx_refresh_if_due()
 
     st.markdown("---")
     st.markdown('<div class="muted">Private use. Verify all data.<br>Notárska úschova always.</div>', unsafe_allow_html=True)
@@ -885,7 +911,46 @@ from database import (
     days_on_market, DEAL_STAGES,
 )
 
-raw_data = get_all_active()
+# The listing load is cached: it grew with the database (0.39 s for 5,000
+# listings) and ran on every click. A cache hit costs a few hundredths of a
+# second. Whatever the dashboard changes clears the cache, here (a pipeline
+# step finishing) and next to the in-page writes. The time limit covers
+# writes from elsewhere: the scheduler, which runs in its own process.
+LISTINGS_TTL_S = 60
+
+
+@st.cache_data(ttl=LISTINGS_TTL_S, show_spinner=False)
+def _load_active(rejected: bool, db_path: str) -> list[dict]:
+    # db_path is part of the key only, so a different database (one per
+    # test) never gets another database's rows.
+    return get_all_active(rejected=rejected)
+
+
+def load_active(rejected: bool = False) -> list[dict]:
+    import database
+    return _load_active(rejected, database.SQLITE_PATH)
+
+
+def clear_listing_cache() -> None:
+    """After the dashboard changes listings: the next load reads the database."""
+    _load_active.clear()
+
+
+@st.cache_resource
+def _cleared_for() -> dict:
+    # Process-wide, as the cache and the jobs are: the last finished job the
+    # listing cache was cleared for.
+    return {"job": None}
+
+
+_done = jobs.current()
+if _done is not None and not _done.running and _cleared_for()["job"] != _done.id:
+    # A pipeline step has finished since the last clear: every tab reloads,
+    # whether or not it watched the step run.
+    _cleared_for()["job"] = _done.id
+    clear_listing_cache()
+
+raw_data = load_active()
 
 using_demo = show_demo or not raw_data
 if using_demo:
@@ -896,7 +961,7 @@ if using_demo:
 else:
     data = raw_data
 # LV-rejected listings never reach the lists; the Rejected tile counts them.
-rejected_rows = [] if using_demo else get_all_active(rejected=True)
+rejected_rows = [] if using_demo else load_active(rejected=True)
 # The market picked at the top filters everything below.
 data = [_tag_market(l) for l in data if in_view(l)]
 rejected_rows = [_tag_market(l) for l in rejected_rows if in_view(l)]
@@ -1062,6 +1127,11 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 # With both markets on the page, how the tiles split between them.
 _per_market = {m: sum(1 for l in data if l.get("_market") == m) for m in markets.MARKET_CODES}
+if _per_market.get("cz"):
+    from modules import fx_rate as _fx
+    _fx_warn = _fx.stale_warning()
+    if _fx_warn:
+        st.warning(f"⚠ {_fx_warn}")
 if view_market is None and sum(1 for n in _per_market.values() if n) > 1:
     st.markdown('<div class="muted" style="margin:-10px 0 14px">'
                 + " · ".join(f'{"🇸🇰" if m == "sk" else "🇨🇿"} {m.upper()} {n}'
@@ -1727,6 +1797,7 @@ def render_card(l):
                                  cadastral_area=ku_in if changed else "")
                 from database import mark_duplicates
                 mark_duplicates()   # the flat's other copies carry its LV result
+                clear_listing_cache()
                 if r["status"] == "REJECT":
                     st.error(f"❌ REJECTED: {r['detail']}")
                 elif r["status"] == "PASS":
@@ -2424,6 +2495,7 @@ with t_rej:
                     # A copy that is no longer rejected rejoins its group and
                     # lifts "a copy failed LV" from the others (or the reverse).
                     mark_duplicates()
+                    clear_listing_cache()
                     if res["status"] == "REJECT":
                         msg = ("error", f"Still rejected: {res.get('detail')}")
                     elif res["status"] == "PASS":
@@ -2524,6 +2596,7 @@ with t_lv:
             # Storing the numbers is quick and offline; checking them is not.
             from modules.debt_bot import save_flat_lvs
             res = save_flat_lvs(changed)
+            clear_listing_cache()
             st.session_state["lv_todo_msg"] = (
                 "success", f"✅ Saved {res['saved']} LV number(s) — the next "
                            f"🔒 LV DEBT FILTER run checks them.")

@@ -7,17 +7,25 @@ Slovak RENT_PER_M2 keys and matching rules don't apply to Czech places.
 
 The table holds the figures one source published for one period — the
 Deloitte Rent Index for the 2nd quarter of 2026 (released August 2026) — for
-the places it named: Prague (and Praha 7, its dearest district), Brno, Hradec
-Králové, Pardubice, Jihlava, Ostrava and Ústí nad Labem. Plzeň, Liberec,
-České Budějovice, Olomouc, Zlín, Karlovy Vary and the rest have no figure
-here: nothing was found for that quarter, and no figure is borrowed from a
-neighbour or invented. Such a place still gets its own key (its town's
-name), so live rental comps (engine.rent_comps_cz) can supply its rate; with
-neither, the listing is not scored and the run says why.
+every place it names: Prague and its ten districts (Praha 1–10), the regional
+capitals Brno, Ostrava, Plzeň, Olomouc, Liberec, Hradec Králové, Pardubice,
+Zlín, České Budějovice, Jihlava, Karlovy Vary and Ústí nad Labem. Its
+Středočeský kraj figure is a whole region's, so it is not used for any town
+in it. Kladno, Opava, Písek and the rest have no figure here, and none is
+borrowed from a neighbour or invented. Such a place still gets its own key
+(its town's name), so live rental comps (engine.rent_comps_cz) can supply its
+rate; with neither, the listing is not scored and the run says why.
 
-Deloitte's index is an average over flats advertised on the portals (whether
-asking or achieved rents is described differently by the reports that cite
-it: UNVERIFIED), across all sizes — so the Czech rooms multiplier is 1.0.
+What the figures are: Deloitte's own report says it "collects data from real
+estate portals" and gives the "rent from realised offers" (cena nájmu ze
+zrealizovaných nabídek) — the asking rent of listings that were let, as last
+advertised. That is the same measure the Ministry of Finance's official rent
+map uses ("realizované nabídkové nájemné": the asking rent when the listing
+comes down, taken as the sign a lease was signed — vyhláška 456/2024 Sb.).
+It is an asking rent, not a contract rent: no Czech source publishes those.
+It is the closing ask of a flat that let, not a fresh ask, so the live comps'
+asking haircut is not applied to it. The figures cover all sizes — so the
+Czech rooms multiplier is 1.0.
 """
 
 from __future__ import annotations
@@ -25,15 +33,31 @@ from __future__ import annotations
 import re
 import unicodedata
 
-# Kč per m² per month (Deloitte Rent Index, Q2 2026).
+# Kč per m² per month (Deloitte Rent Index, Q2 2026: the ČR map and the
+# Praha map of its report).
 RENT_PER_M2_CZ: dict[str, float] = {
+    "praha 1":        490.0,
+    "praha 2":        482.0,
+    "praha 3":        480.0,
+    "praha 4":        443.0,
+    "praha 5":        461.0,
+    "praha 6":        454.0,
     "praha 7":        493.0,
+    "praha 8":        465.0,
+    "praha 9":        468.0,
+    "praha 10":       442.0,
     "praha":          462.0,
     "brno":           390.0,
     "hradec králové": 318.0,
     "pardubice":      314.0,
+    "plzeň":          301.0,
+    "olomouc":        296.0,
+    "liberec":        289.0,
+    "zlín":           287.0,
+    "české budějovice": 283.0,
     "jihlava":        257.0,
     "ostrava":        254.0,
+    "karlovy vary":   246.0,
     "ústí nad labem": 221.0,
 }
 # The national average the same release gives — shown for context, never
@@ -42,12 +66,13 @@ RENT_PER_M2_CZ: dict[str, float] = {
 NATIONAL_AVERAGE_CZ = 343.0
 
 RENT_SOURCE = {
-    "source": ("Deloitte Rent Index, Q2 2026 (released August 2026), as reported by "
-               "hrot24.cz, ceskenoviny.cz and MAX Reality and Deloitte's own press "
-               "release list (deloitte.com/cz-sk … rent-index) — read via web search, "
-               "the index's own table not fetched. Whether its figures are asking or "
-               "achieved rents is UNVERIFIED."),
-    "checked": "2026-10-16 (web search)",
+    "source": ("Deloitte Rent Index Q2 2026 (released August 2026), its report "
+               "2026-Q2-cz-rent-index.pdf from deloitte.com/cz-sk … rent-index: the ČR "
+               "map (13 regional capitals) and the Praha map (Praha 1–10). Asking rents "
+               "of listings that were let, collected from the portals ('cena nájmu ze "
+               "zrealizovaných nabídek') — the measure MF's official rent map uses "
+               "(vyhláška 456/2024 Sb.); not contract rents."),
+    "checked": "2026-11-05 (the report itself)",
 }
 
 # Okresy around a city that are not the city: a "Praha-východ", "Brno-venkov"
