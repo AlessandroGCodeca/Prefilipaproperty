@@ -68,7 +68,7 @@ def parse_cnb(text: str, code: str = "EUR") -> tuple[float, date]:
     try:
         fixed = datetime.strptime(lines[0].split()[0], "%d.%m.%Y").date()
     except (ValueError, IndexError):
-        raise FxError(f"no date on the ČNB file's first line: {lines[0][:40]!r}")
+        raise FxError(f"no date on the ČNB file's first line: {lines[0][:40]!r}") from None
     for line in lines[2:]:
         parts = line.split("|")
         if len(parts) == 5 and parts[3].strip().upper() == code:
@@ -76,7 +76,7 @@ def parse_cnb(text: str, code: str = "EUR") -> tuple[float, date]:
                 amount = float(parts[2].replace(" ", ""))
                 rate = float(parts[4].replace(" ", "").replace(",", "."))
             except ValueError:
-                raise FxError(f"unreadable {code} row in the ČNB file: {line[:60]!r}")
+                raise FxError(f"unreadable {code} row in the ČNB file: {line[:60]!r}") from None
             # A misread file (a wrong column, a thousands separator) gives a
             # number far from the euro's 15–40 Kč, which would scramble the
             # combined ranking: refuse it and keep the last rate.
