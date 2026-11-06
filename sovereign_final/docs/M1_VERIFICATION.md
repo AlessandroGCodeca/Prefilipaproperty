@@ -24,6 +24,7 @@ Every default below can still be overridden in `.env` (names in brackets).
 | 12 | Exit costs (`CZ_EXIT_COST_RATE`) | 3.5 % | 4 % | **Verified** (market practice) |
 | 13 | Growth rates (price, rent, costs) | SK's | SK's | UNVERIFIED: these are forecasts |
 | 14 | s.r.o. loan premium and LTV | SK's | SK's | UNVERIFIED: needs a bank's quote |
+| 15 | Rent where Deloitte names no figure | not scored (live comps only) | MF's rent map, 240 towns | **Verified** (MF's own file) — see §15 |
 
 ## 1. The Deloitte Rent Index measures asking rents of flats that let
 
@@ -165,6 +166,10 @@ times the documented cost.
 
   The description parser sets one parking flag for either a garage or a
   space, so no published figure can confirm a single premium for it.
+- **On a rent from the rent map itself** (§15) the % premiums for a balcony
+  and furniture give way to MF's own Kč/m² above, for the listing's size
+  category; the parking blend and the semi-furnished premium still apply as
+  %, as on any Czech rate.
 
 ## 12–13. Hold assumptions
 
@@ -188,7 +193,40 @@ times the documented cost.
 - The growth rates.
 - Fond oprav: the building's own figure.
 
-MF's rent map also gives a reference rent for every municipality and
-cadastral area (7 630 of them), with lower and upper bounds. That could fill
-the Czech rent table for the towns Deloitte doesn't cover. It would be a
-separate change.
+## 15. Rent where Deloitte names no figure: MF's rent map
+
+- **Source:** the same release (`2026-08-15_Cenova-mapa.xlsx`, ID
+  26.15.08.001, data 1 Jul 2021 – 30 Jun 2026), sheet *Cenové mapy
+  nájemného*. It has 7 630 rows: an obec, or each katastrální území (KÚ) of
+  an ORP town and of Prague. For each size category (VK 1 1+kk/1+1, VK 2
+  2+kk/2+1, VK 3 3+kk/3+1, VK 4 four rooms and more) a row gives the
+  reference rent, its 95 % interval, the new-build rent, min, max, median
+  and data coverage 1–5 (0–30 … 150+ observations).
+- **Read into the app:** `dev/build_cz_rent_map.py` extracts it to
+  `data/cz_rent_map.csv`, and the surcharges table to
+  `data/cz_rent_map_surcharges.csv`. It checks each header and stops if the
+  layout changes. `engine/rent_map_cz.py` loads them, and
+  `engine/rent_cz.baseline_rate` asks the map only where Deloitte names no
+  figure, so every Deloitte figure above is unchanged. Run the script again
+  on each quarter's file.
+- **What the file shows, and the choices it led to:**
+
+  | Found | Choice |
+  |---|---|
+  | "Kód obce" is the KÚ's code on a KÚ row | rows are keyed by that code, a town by kraj + name |
+  | 575 obec names repeat ("Kladno" is also a village near Chrudim, at coverage 1; "Písek" is three places) | the okres the district names picks the kraj; else the one ORP town of that name; else no figure |
+  | An ORP town has no row of its own, only its KÚs | the KÚ the district names after the town ("Kladno - Kročehlavy"); else the town's own KÚ: its name ("Kladno"), or its single "-město" / "u …" one ("Opava-Město", "Benešov u Prahy"); Most (Most I, Most II) and Chomutov have none, so a bare "Most" is not scored |
+  | Rents differ by size (Benice, Prague: 460 / 377 / 325 / 354 Kč/m² for VK 1–4) | the listing's own VK, from its rooms (VK 2 when unknown); the rooms multiplier stays 1.0 |
+  | VK 2 coverage is 1 in 6 912 of 7 630 rows | a figure needs coverage ≥ 3 in the VK used. Below that MF's hedonic model mostly pools the areas around, which amounts to a neighbour's figure. A named KÚ with too little data falls back to its town's own figure; a town with too little has none. 527 rows pass for VK 2 — 240 towns, besides the places Deloitte names |
+  | The reference flat is unfurnished, over 5 years old, without balcony, terrace, garage or lift | MF's Kč/m² for a balcony and furniture are added (§8–11); nothing is scaled up to Deloitte's level, so a map rent is the cautious one. A lift (+44 Kč/m² for VK 2) isn't parsed from descriptions, and the new-build rent isn't used, because the listing's age isn't known |
+
+- **Against Deloitte**, for the town-wide KÚ in VK 2, the map's reference
+  rent is lower in every regional capital it resolves: Brno 324 vs 390 (−17 %),
+  Hradec Králové 258 vs 318 (−19 %), Pardubice 250 vs 314 (−20 %), Plzeň 238
+  vs 301 (−21 %), Olomouc 251 vs 296 (−15 %), Liberec 231 vs 289 (−20 %), Zlín
+  242 vs 287 (−16 %), Jihlava 230 vs 257 (−11 %), Karlovy Vary 220 vs 246
+  (−11 %), Ústí nad Labem 193 vs 221 (−13 %). The two measures aren't mixed in
+  one place: Deloitte keeps its towns, the map takes the rest.
+- **Live comps** for a map town blend with its VK 2 figure as the prior, as
+  they do with Deloitte's. Before, they stood alone. The scoring model version
+  goes to 7, so stored Czech scores are redone.

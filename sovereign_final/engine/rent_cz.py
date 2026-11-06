@@ -11,10 +11,14 @@ every place it names: Prague and its ten districts (Praha 1–10), the regional
 capitals Brno, Ostrava, Plzeň, Olomouc, Liberec, Hradec Králové, Pardubice,
 Zlín, České Budějovice, Jihlava, Karlovy Vary and Ústí nad Labem. Its
 Středočeský kraj figure is a whole region's, so it is not used for any town
-in it. Kladno, Opava, Písek and the rest have no figure here, and none is
-borrowed from a neighbour or invented. Such a place still gets its own key
-(its town's name), so live rental comps (engine.rent_comps_cz) can supply its
-rate; with neither, the listing is not scored and the run says why.
+in it. Kladno, Opava, Písek and the rest have no Deloitte figure. Such a
+place gets its own key (its town's name), and its baseline comes from the
+Ministry of Finance's official rent map (engine.rent_map_cz) when
+data/cz_rent_map.csv is present and MF has enough data there; live rental
+comps (engine.rent_comps_cz) blend with that baseline, or supply the rate
+alone. Deloitte comes first wherever it names the place, so its figures never
+change. No figure is borrowed from a neighbour or invented: with none of the
+three, the listing is not scored and the run says why.
 
 What the figures are: Deloitte's own report says it "collects data from real
 estate portals" and gives the "rent from realised offers" (cena nájmu ze
@@ -141,9 +145,37 @@ def match_rent_key(district: str) -> str:
     return town or "default"
 
 
+def mf_rent(district: str, rooms=None):
+    """The MF rent map's figure (engine.rent_map_cz.MfRent) for a district
+    Deloitte doesn't name, in the listing's size category — or None."""
+    from engine import rent_map_cz
+    key = match_rent_key(district)
+    if key == "default" or key in RENT_PER_M2_CZ:
+        return None
+    return rent_map_cz.lookup(key, district, rooms)
+
+
+def baseline_rate(district: str, rooms=None) -> tuple[float | None, str]:
+    """(Kč/m², "baseline" for Deloitte's figure or "mf" for the rent map's)
+    for a district: Deloitte first, then MF; (None, "baseline") for neither."""
+    key = match_rent_key(district)
+    if key in RENT_PER_M2_CZ:
+        return RENT_PER_M2_CZ[key], "baseline"
+    mf = mf_rent(district, rooms)
+    return (mf.rate, "mf") if mf else (None, "baseline")
+
+
 def baseline_rent(key: str) -> float | None:
-    """Kč/m² for a key with a published figure; None for any other."""
-    return RENT_PER_M2_CZ.get(key)
+    """Kč/m² for a key with a published figure — Deloitte's, else the MF rent
+    map's for the town as a whole in a two-room flat's size category (what
+    live comps of every size blend with); None for any other."""
+    if key in RENT_PER_M2_CZ:
+        return RENT_PER_M2_CZ[key]
+    if not key or key == "default":
+        return None
+    from engine import rent_map_cz
+    mf = rent_map_cz.lookup(key, key)
+    return mf.rate if mf else None
 
 
 def rent_fallback_kind(key: str) -> str | None:
