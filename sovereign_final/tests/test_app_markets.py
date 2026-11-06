@@ -205,3 +205,17 @@ def test_the_page_says_which_czech_towns_wait_for_a_rent(two_markets):
     assert "WAITING FOR A RENT FIGURE — 2 CZECH LISTINGS IN 1 TOWN" in md
     at = _pick(at, "🇸🇰 Slovakia")
     assert "wait unscored for a rent figure" not in _md(at)
+
+
+def test_a_quiet_portal_is_flagged_in_its_market(two_markets):
+    """A portal with no listings on its last two runs gets a warning over the
+    tabs — in its own market's view and the combined one, not the other's."""
+    from database.portal_runs import now_iso
+    for _ in range(2):
+        two_markets.record_portal_run("cz", "bazos_cz", now_iso(), 0, "PortalBlocked: HTTP 403")
+    at = run()
+    assert any("Bazos.cz returned no listings on its last 2 runs" in w.value for w in at.warning)
+    at = _pick(at, "🇨🇿 Czechia")
+    assert any("Bazos.cz returned no listings" in w.value for w in at.warning)
+    at = _pick(at, "🇸🇰 Slovakia")
+    assert not any("returned no listings" in w.value for w in at.warning)

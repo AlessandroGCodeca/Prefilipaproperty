@@ -27,6 +27,25 @@ def waiting_note(waiting: dict[str, int]) -> str:
             + " · the RENT COMPS tab lists them all")
 
 
+def quiet_portal_note(q: dict) -> str:
+    """The warning for a portal whose last runs returned no listings or failed."""
+    import scheduler
+    from datetime import datetime
+    from modules.pipeline_state import LOCAL_TZ, _short_time
+    name = scheduler.portal_name(q["market"], q["source"])
+
+    def local(iso):
+        return _short_time(datetime.fromisoformat(iso).astimezone(LOCAL_TZ).isoformat())
+    latest = q["runs"][0]
+    why = latest["error"] or "ran, but returned no listings"
+    since = (f"last listings {local(q['last_good_at'])}" if q.get("last_good_at")
+             else "no listings from it on record")
+    return (f"⚠ {'🇸🇰' if q['market'] == 'sk' else '🇨🇿'} {name} returned no listings on its last "
+            f"{len(q['runs'])} runs ({since}; latest: {why[:160]}). Nothing new comes in from "
+            f"it, and its listings are kept, not retired as stale, until it returns listings "
+            f"again. It may be blocked, or its page layout changed — 🔗 TEST SITES checks it.")
+
+
 def render(v, sb) -> None:
     """The banners, tiles and price-cut list over the tabs."""
     _OTHER_RUNS = sb.other_runs
@@ -52,6 +71,14 @@ def render(v, sb) -> None:
     for _m, (_lvl, _txt) in _OTHER_RUNS.items():
         if _lvl == "error" and (view_market in (None, _m)):
             st.error(f"{_m.upper()} — {_txt}")
+
+    # A portal that has gone quiet: nothing new from it, and its listings are
+    # kept rather than retired (database/portal_runs.py).
+    if not using_demo:
+        from dashboard.listing_cache import quiet_portals
+        for _q in quiet_portals():
+            if view_market in (None, _q["market"]):
+                st.warning(quiet_portal_note(_q))
 
     # ── Stats bar ─────────────────────────────────────────────────────────────────
     # The tiles count the listings the page shows, so they move with the sidebar

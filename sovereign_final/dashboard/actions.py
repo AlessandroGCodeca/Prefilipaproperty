@@ -170,9 +170,19 @@ def _scrape_step(module: str, name: str, button: str, market: str | None = None)
     kw = {} if market is None else {"market": market}
 
     def step(progress):
+        import scheduler
+        from database.portal_runs import now_iso
+        started = now_iso()
         n, err, timed_out = _run_scraper_subprocess(module)
+        # What the portal returned, for the dashboard's quiet-portal flag.
+        seen = scheduler._record_portal(
+            market or "sk", f"scraper.{module}", started, n,
+            err or (f"stopped at the {SCRAPER_TIMEOUT_S // 60}-minute limit" if timed_out else ""))
         if err:
             return "error", f"❌ {name}: {err}"
+        if not seen and not timed_out:
+            return "warning", (f"⚠ {name} ran but returned no listings — it may be blocked, "
+                               f"or its page layout changed. 🔗 TEST SITES checks it.")
         # Stopped or not, what was stored gets the usual follow-up steps.
         from modules.address_enrichment import run_address_enrichment
         run_address_enrichment(**kw)
@@ -306,11 +316,20 @@ def _dupes_step(progress):
 
 
 def _stale_step(progress):
-    from database import deactivate_stale_listings
-    n = deactivate_stale_listings(days=21)
+    """🧹 CLEAN STALE: every portal's listings not seen for 21 days — but not
+    a quiet portal's (blocked or broken on its last runs), whose listings
+    weren't seen because it couldn't be read."""
+    import scheduler
+    from database import deactivate_stale_listings, quiet_portals
+    quiet = quiet_portals()
+    n = deactivate_stale_listings(days=21, exclude_sources=[q["source"] for q in quiet])
+    kept = (" Kept the listings of " + ", ".join(scheduler.portal_name(q["market"], q["source"])
+                                                 for q in quiet)
+            + ": no listings from it on its last runs, so not seeing them says nothing."
+            if quiet else "")
     if n:
-        return "success", f"✅ Deactivated {n} stale listings (last seen > 21 days ago)"
-    return "info", "ℹ️ No stale listings — all active rows seen within the last 21 days"
+        return "success", f"✅ Deactivated {n} stale listings (last seen > 21 days ago).{kept}"
+    return "info", f"ℹ️ No stale listings — all active rows seen within the last 21 days.{kept}"
 
 
 def dispatch(sb) -> None:

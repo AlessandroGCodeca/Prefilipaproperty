@@ -341,7 +341,15 @@ once a year (most ordinances take effect on 1 January), so a click in December
 or January, or after a town adopts a new ordinance, is enough.
 
 Housekeeping = deactivate stale listings (>21d unseen) + flag dev projects.
-(Skipped on a day no portal could be read: "unseen" then says nothing.)
+The stale check runs per portal, and only for the portals that returned
+listings this run: a portal that is blocked, or whose page layout changed so
+the parser finds nothing, shows none of its listings, and "unseen" then says
+nothing about them. A portal that runs without an error but returns no
+listings fails its step, so the run reports it. Every scrape (the pipeline's
+and a portal button's) records how many listings its portal returned
+(`portal_runs`), and a portal with none, or a failure, on its last 2 runs gets
+a ⚠ warning above the tabs until it returns listings again. 🧹 CLEAN STALE
+leaves such a portal's listings alone too.
 A nehnutelnosti listing is deactivated sooner, the moment any read of its page
 finds a grid of similar listings where the listing was — that is what a
 removed listing's URL serves.
