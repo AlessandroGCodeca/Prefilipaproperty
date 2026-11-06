@@ -39,6 +39,7 @@ import functools
 import json
 import logging
 import re
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -387,9 +388,10 @@ def _custom() -> set[str]:
 
 
 def _with_listings(names: list[str]) -> set[str]:
-    """The municipalities among `names` that Slovak listings are in."""
+    """The municipalities among `names` that Slovak listings are in. A
+    database error is logged and read as none (no village is put first)."""
+    import database
     try:
-        import database
         conn = database.get_conn()
         try:
             only, params = database._market_sql(conn, "sk")
@@ -398,7 +400,9 @@ def _with_listings(names: list[str]) -> set[str]:
                 params) if r[0]}
         finally:
             conn.close()
-    except Exception:
+    except (sqlite3.Error, OSError) as e:
+        log.warning("Listing districts not read, villages with listings lose their priority: "
+                    "%s: %s", type(e).__name__, e)
         return set()
     if not districts:
         return set()

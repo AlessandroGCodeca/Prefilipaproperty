@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
 import statistics
 import unicodedata
 from datetime import datetime, timedelta, timezone
@@ -178,11 +179,15 @@ def _stored_comps(conn) -> dict[str, dict]:
 
 def load_live_rates() -> dict[str, float]:
     """The Czech live rates scoring should use now; {} when none are built."""
-    from database import get_conn
+    from database import get_conn, _has_table
     conn = get_conn()
     try:
+        if not _has_table(conn, "rent_comps"):
+            return {}
         return rates_from_comps(_stored_comps(conn))
-    except Exception:
+    except sqlite3.Error as e:
+        log.warning("Czech live rent comps not read, scoring uses the baseline rents: %s: %s",
+                    type(e).__name__, e)
         return {}
     finally:
         conn.close()
@@ -242,12 +247,13 @@ def rebuild_rent_comps(max_age_days: int = RENT_COMP_MAX_AGE_DAYS) -> dict:
 
 def comps_table() -> list[dict]:
     """Rows for the dashboard's comps tab, Czech keys."""
-    from database import get_conn
+    from database import get_conn, _has_table
     from engine.rent_cz import baseline_rent
     conn = get_conn()
     try:
-        stored = _stored_comps(conn)
-    except Exception:
+        stored = _stored_comps(conn) if _has_table(conn, "rent_comps") else {}
+    except sqlite3.Error as e:
+        log.warning("Czech live rent comps not read for the comps table: %s: %s", type(e).__name__, e)
         stored = {}
     finally:
         conn.close()
