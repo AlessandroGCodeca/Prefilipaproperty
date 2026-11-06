@@ -151,9 +151,19 @@ def test_a_zoned_towns_rates_are_never_replaced(monkeypatch):
     assert tax.rate_source("Košice - Terasa", YEAR + 1)[0] == 1.207
 
 
+def test_a_town_zoned_by_street_is_confirmed_by_its_whole_table():
+    # Zvolen's zone II rate is charged to no listing (its streets aren't
+    # matched), yet the ordinance lists it: all three confirm the table.
+    o = assess("Zvolen", reading([0.636, 0.588, 0.447], 2026))
+    assert (o.status, o.store) == ("confirmed", [])
+    assert assess("Čadca", reading([0.4, 0.25], 2026)).status == "confirmed"
+    assert assess("Liptovský Mikuláš", reading([0.5, 0.3, 0.45], 2026)).status == "confirmed"
+
+
 def test_the_table_reports_each_towns_own_rates():
     assert tax.table_rates("Bratislava") == [1.2, 1.25, 1.35]
     assert tax.table_rates("Žilina") == [1.1, 1.2]
+    assert tax.table_rates("Zvolen") == [0.447, 0.588, 0.636]
     assert tax.table_rates("Pezinok") == [1.0]
     assert tax.table_rates("Šamorín") == []
 

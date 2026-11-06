@@ -523,6 +523,9 @@ own by VZN. The 2026 rates used:
 | Bratislava, by pásmo | A 1.20 (Vajnory, Podunajské Biskupice, Vrakuňa, Devínska Nová Ves) · B 1.20 (Dúbravka, Karlova Ves, Lamač, Devín, Rača, Záhorská Bystrica, Jarovce, Rusovce, Čunovo) · C 1.25 (Nové Mesto, Petržalka) · D 1.35 (Staré Mesto; Ružinov, for its Nivy area) |
 | Košice, by cadastral area | I 1.27 (Stredné Mesto) · II 1.207 (Terasa, Grunt, Furča, Južné Mesto, Nové Ťahanovce, Severné Mesto, …) · III 1.143 (Šaca, Myslava, Barca, Ťahanovce, Luník, Kavečany, …); a city part named without its area (Juh, Západ, KVP) 1.27 |
 | Žilina, by cadastral area | 1.20 (Žilina, Závodie) · 1.10 (Bánová, Budatín, Žilinská Lehota and the other areas) |
+| Liptovský Mikuláš, by cadastral area | 0.50 (Liptovský Mikuláš) · 0.45 (Bodice, Demänová, Liptovská Ondrašová, Okoličné, Palúdzka, Ráztoky) · 0.30 (Benice, Iľanovo, Ploštín, Svätý Štefan) |
+| Zvolen, by zone | I 0.636 (the centre's streets) · II 0.588 (most other streets, listed one by one) · III 0.447 (Zolná, Lukové, Kráľová, Sekierska dolina, Bakova Jama); a listing that names no zone III part 0.636 |
+| Čadca, by part | 0.40 (the town's streets) · 0.25 (the outlying settlements: Drahošanka, Čadečka, Podzávoz, Milošová, Vojty, Rieka, U Siheľníka) |
 | Trnava · Banská Bystrica | 1.00 |
 | Prešov | 0.953 |
 | Trenčín | 0.88 |
@@ -539,11 +542,13 @@ own by VZN. The 2026 rates used:
 | Humenné | 0.32 |
 | anywhere else | 1.35 (UNVERIFIED: the highest rate above, not a legal ceiling) |
 
-Martin, Zvolen, Liptovský Mikuláš, Považská Bystrica, Nové Zámky, Levice,
-Lučenec, Topoľčany, Čadca and Rimavská Sobota are not in the table: their
-sites block automated requests (a CAPTCHA, a refused connection or "Access
-Forbidden"). Šamorín's and Komárno's current flat rates could not be pinned to
-an adopted ordinance.
+Martin, Považská Bystrica, Nové Zámky, Levice, Lučenec, Topoľčany and
+Rimavská Sobota are not in the table: their sites block automated requests (a
+CAPTCHA, a refused connection or "Access Forbidden") and they publish no
+ordinance on CUET. Zvolen's site blocks them too, but Zvolen puts its
+ordinances on CUET (cuet.slovensko.sk, the state's central official notice
+board), where they were read. Komárno's current flat rate could not be pinned
+to an adopted ordinance; Šamorín's (0.85) is added by the update below.
 
 **Updating the rates with one click.** 🏛️ UPDATE TAX RATES (sidebar, or the
 TAX RATES tab) reads every town's rate from its own site, in the background:
@@ -562,8 +567,8 @@ charged the next year). What it does with a reading (`modules/tax_rates`):
 | a new rate in a dated ordinance for a later year than the table's (2026) | 🔄 / 📅 stored, and charged from that year |
 | a rate for a town the table lacks | ➕ stored and charged, instead of the 1.35 fallback |
 | another rate for a year the table covers, several flat rates, two documents that disagree, an undated ordinance for a new town, or a newer ordinance about flats it can't read | ⚠️ waits on the TAX RATES tab: accept it (it is then charged even over the table) or keep the table's figure |
-| a change in a town rated by area (Bratislava, Košice, Žilina, Dunajská Streda) | ⚠️ review only — the areas are mapped by hand in `engine/property_tax_sk.py` |
-| nothing readable, or the site refuses the request | ❔ / ⛔ with the reasons; save the ordinance in your browser and upload it on the tab |
+| a change in a town rated by area (Bratislava, Košice, Žilina, Dunajská Streda, Liptovský Mikuláš, Zvolen, Čadca) | ⚠️ review only — the areas are mapped by hand in `engine/property_tax_sk.py` |
+| nothing readable, or the site refuses the request | ❔ / ⛔ with the reasons; save the ordinance in your browser and upload it on the tab. A town that publishes on CUET (Zvolen) is read from there instead |
 
 Then the listings whose tax moved are re-scored; the others keep their score.
 The stored rates live in `property_tax_rates` (with the document and the words
@@ -571,14 +576,16 @@ each was read from); ↩️ Undo on the tab forgets a town's and charges the tab
 figure again, and ➕ Add a town adds any other town with the page its search
 starts from.
 
-Run from a data centre in November 2026, it read every reachable town in the
-table at the table's own rate, and added Šamorín (0.85 €/m², VZN 7/2024; its
-amendment 5/2025 changes only other taxes). Prešov, Zvolen, Považská Bystrica,
-Levice, Lučenec, Topoľčany and Rimavská Sobota answer automated requests with a
+Run from a data centre on 6 November 2026, it read every reachable town in
+the table at the table's own rate — Liptovský Mikuláš and Čadca from their own
+sites, Zvolen from CUET — and added Šamorín (0.85 €/m², VZN 7/2024; its
+amendment 5/2025 changes only other taxes). Prešov, Považská Bystrica, Levice,
+Lučenec, Topoľčany and Rimavská Sobota answer automated requests with a
 CAPTCHA there, and Martin and Nové Zámky reset the connection — from a home
-connection these usually open; if not, upload the ordinance. Stupava, Čadca,
-Komárno and Liptovský Mikuláš gave no readable current rate (their sites link
-older ordinances, or none). A scanned PDF can't be read: Malacky's newest
+connection these usually open; if not, upload the ordinance. Bardejov's tax
+pages answered 404 that day (the table keeps its checked 0.60). Stupava and
+Komárno gave no readable current rate (their sites link older ordinances, or
+none). A scanned PDF can't be read: Malacky's newest
 consolidated text and Spišská Nová Ves's ordinance are scans (their tax pages
 state the rate). `python -m scraper.property_tax_rates [town …] -v` prints
 what it reads, page by page.

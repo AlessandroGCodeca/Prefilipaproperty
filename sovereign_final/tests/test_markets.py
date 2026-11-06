@@ -68,7 +68,9 @@ class TestRegistry:
 # (plus two corrections from the second review — the s.r.o.'s setup cost is
 # paid in the IRR's year 0, and a Bratislava city part named alone —
 # "Ružinov" — takes its own median, not the kraj's — and the property tax,
-# per m² by municipality since October 2026 instead of 0.4 % of the price)
+# per m² by municipality since October 2026 instead of 0.4 % of the price;
+# Liptovský Mikuláš's at its own 0.50 €/m² since November 2026, not the 1.35
+# fallback)
 def _golden():
     with open(os.path.join(HERE, "fixtures", "sk_golden.json"), encoding="utf-8") as f:
         return json.load(f)

@@ -63,9 +63,28 @@ class TestRates:
     def test_other_towns(self, district, rate):
         assert _rate(district) == rate
 
+    @pytest.mark.parametrize("district, rate", [
+        # Liptovský Mikuláš VZN 3/2025 § 9, by cadastral area.
+        ("Liptovský Mikuláš", 0.50), ("Liptovsky Mikulas - Palúdzka", 0.45),
+        ("Liptovský Mikuláš, Okoličné", 0.45), ("Liptovský Mikuláš - Iľanovo", 0.30),
+        # Zvolen VZN 230 as amended: zone III's city parts 0.447, anything else
+        # zone I's 0.636 (zone II is drawn street by street).
+        ("Zvolen", 0.636), ("Zvolen - Zolná", 0.447), ("Zvolen, Sekierska dolina", 0.447),
+        # Čadca VZN 9/2023: the town 0.40, its outlying settlements 0.25.
+        ("Čadca", 0.40), ("Cadca - Milošová", 0.25), ("Čadca, Horelica", 0.40),
+    ])
+    def test_towns_rated_by_area_or_zone(self, district, rate):
+        assert _rate(district) == rate
+
+    def test_a_zone_part_is_not_called_a_cadastral_area(self):
+        assert ptax.rate_source("Zvolen - Zolná")[1] == "Zolna, Zvolen — zone III"
+        assert "cadastral area" in ptax.rate_source("Liptovský Mikuláš - Ráztoky")[1]
+
     @pytest.mark.parametrize("district", [
         "Barca",                  # also a village near Rimavská Sobota
         "Modrany",                # not Modra
+        "Zvolenská Slatina",      # a village, not Zvolen
+        "Demänovská Dolina",      # a village, not Liptovský Mikuláš's Demänová
         "Martin",                 # its rate could not be read from martin.sk
         "Staré Mesto",            # Košice has one too: not Bratislava's on its own
         "Nové Mesto nad Váhom",   # a town, not Bratislava's Nové Mesto

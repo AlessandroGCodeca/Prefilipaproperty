@@ -81,9 +81,43 @@ def test_a_flat_rate_as_each_town_writes_it(town, text, expected):
     ("Bratislava (by pásmo)", "Predmet dane z bytov Ročná sadzba dane v €/m2 podlahovej plochy "
                               "Pásmo A Pásmo B Pásmo C Pásmo D i byty 1,20 1,20 1,25 1,35 ii "
                               "nebytové priestory", [1.20, 1.25, 1.35]),
+    # One class for flats and other premises, a column per part of the town,
+    # the euro only in the header.
+    ("Čadca (by part)", "§ 5 Sadzba dane z bytov Mesto Čadca ustanovuje ročnú sadzbu dane z "
+                        "bytov za byt a nebytový priestor takto: Byty a nebytové priestory Ročná "
+                        "sadzba dane z bytov za byt a nebytový priestor v eurách/m2 j. č. 1 j. č. "
+                        "2 j. č. 3 Byty a nebytové priestory 0,4 0,25 0,25 Nebytové priestory "
+                        "slúžiace ako garáž 0,3 0,25 0,25", [0.4, 0.25]),
+    # A zone header between the flat and its rates; the "na" ending "zóna" is
+    # not "na 0,447 €".
+    ("Zvolen (by zone)", "§ 5 Daň z bytov 1. Mesto Zvolen stanovuje ročnú sadzbu dane za byty v "
+                         "bytových domoch za každý aj začatý m2 podlahovej plochy bytu: I. zóna "
+                         "II. zóna III. zóna 0,636 € 0,588 € 0,447 € 2. Mesto Zvolen stanovuje "
+                         "ročnú sadzbu dane za nebytové priestory", [0.636, 0.588, 0.447]),
 ])
 def test_a_zoned_town_gives_each_of_its_rates_once(town, text, expected):
     assert rates(text) == expected, town
+
+
+def test_rows_by_group_of_areas_are_read_by_their_last_area():
+    # Liptovský Mikuláš, VZN 3/2025 § 9.
+    text = ("DAŇ Z BYTOV Základ dane Základom dane z bytov je výmera podlahovej plochy bytu "
+            "alebo nebytového priestoru v m2. Sadzba dane (1) Správca dane stanovuje ročnú "
+            "sadzbu dane z bytov za každý aj začatý m2 podlahovej plochy bytu sa v jednotlivých "
+            "katastrálnych územiach nasledovne: a) Benice, Iľanovo, Ploštín, Svätý Štefan 0,30 € "
+            "b) Bodice, Demänová, Liptovská Ondrašová, Okoličné, Palúdzka, Ráztoky 0,45 € "
+            "c) Liptovský Mikuláš 0,50 € (2) Správca dane stanovuje ročnú sadzbu dane za každý "
+            "aj začatý m2 podlahovej plochy nebytového priestoru slúžiaci ako garáž na 1,10 €")
+    r = p.read_text(text, areas=p.TOWNS["Liptovský Mikuláš"].areas)
+    assert r.areas == {"svaty stefan": 0.3, "raztoky": 0.45, "liptovsky mikulas": 0.5}
+    assert sorted(set(r.rates)) == [0.3, 0.45, 0.5]
+
+
+def test_a_scanned_t_with_an_apostrophe_still_dates_the_ordinance():
+    # Liptovský Mikuláš's scan of VZN 3/2025 reads "účinnosť" as "účinnost‘".
+    r = p.read_text("a) 0,50 € za byty. Toto VZN o miestnych daniach nadobúda účinnost‘ "
+                    "01.01.2026.")
+    assert (r.rates, r.tax_year) == ([0.5], 2026)
 
 
 def test_a_table_by_cadastral_area_is_read_row_by_row():
@@ -375,6 +409,90 @@ def test_an_ordinance_page_s_own_file_is_followed_whatever_its_label():
         return p.doc_from_bytes(url, site[url].encode())
     res = p.check_town(p.Town("M", ("https://m.sk/vzn",)), 2026, delay=0, fetcher=fetch)
     assert res.current.rates == [1.0] and res.current.url == "https://cdn.m.sk/2022/12/VZN-14.pdf"
+
+
+def test_an_ordinance_on_several_taxes_is_followed_but_one_on_dogs_is_not():
+    # Čadca files its property tax with four others in one ordinance.
+    page = p.doc_from_bytes("https://mesto.sk/vzn", """<html><body><ul>
+        <li><a href="/files/vzn-9-2023.pdf">VZN o dani z nehnuteľností, dani za psa, dani za
+            ubytovanie, dani za predajné automaty a dani za nevýherné hracie prístroje 9/2023</a></li>
+        <li><a href="/files/vzn-4-2023.pdf">VZN o dani za psa 4/2023</a></li>
+        </ul></body></html>""".encode())
+    followed = [href for _, href, _ in p._links(page, "mesto.sk")]
+    assert followed == ["https://mesto.sk/files/vzn-9-2023.pdf"]
+
+
+# ── CUET, for a town whose own site refuses ──────────────────────────────────
+def _cuet_item(href, name, note, published):
+    return f"""<div class="resultItem">
+        <div class="item3"><div class="metadataDocumentName">Zverejnené od:</div>{published}</div>
+        <div class="item1"><div class="metadataDocumentName">Názov dokumentu:</div>{name}</div>
+        <div class="item1"><div class="metadataDocumentName">Anotácia dokumentu:</div>{note}</div>
+        <div class="item1 button"><a href="{href}">Zobraziť</a></div></div>"""
+
+
+CUET_SEARCH = p.cuet_search_url("Mesto Zvolen", p.date(2026 - p.CUET_YEARS, 1, 1))
+CUET_SITE = {
+    CUET_SEARCH: "<html><body><div class='searchWrapper'>" + "".join([
+        _cuet_item("/sk/dokument/old", "VZN Mesta Zvolen č.230 o miestnych daniach a miesy",
+                   "Mesto Zvolen zverejňuje VZN č.230 o miestnych daniach", "14.12.2023"),
+        _cuet_item("/sk/dokument/draft", "Návrh Novelizácie č.1 VZN č.230 o miestnych",
+                   "Mesto Zvolen zverejňuje Návrh Novelizácie č.1 o miestnych daniach",
+                   "22.11.2024"),
+        _cuet_item("/sk/dokument/new", "Novelizácia č. 1 VZN č.230 o miestnych daniach a",
+                   "Mesto Zvolen zverejňuje Novelizáciu č. 1 VZN č.230 o miestnych daniach",
+                   "13.12.2024"),
+        _cuet_item("/sk/dokument/dogs", "Oznámenie o dražbe", "Mesto Zvolen — dražba bytu",
+                   "05.11.2026"),
+    ]) + "</div></body></html>",
+    "https://cuet.slovensko.sk/sk/dokument/new":
+        '<html><body><a href="/sk/priloha/zobraz/n1">Zobraziť</a>'
+        '<a href="/sk/priloha/uloz/n1">Stiahnuť</a></body></html>',
+    "https://cuet.slovensko.sk/sk/dokument/old":
+        '<html><body><a href="/sk/priloha/zobraz/o1">Zobraziť</a></body></html>',
+}
+CUET_FILES = {
+    "https://cuet.slovensko.sk/sk/priloha/zobraz/n1":
+        "Schválené: 12.12.2024 Účinnosť: 01.01.2025 § 5 Daň z bytov ročnú sadzbu dane za byty "
+        "… plochy bytu: I. zóna II. zóna III. zóna 0,636 € 0,588 € 0,447 €",
+    "https://cuet.slovensko.sk/sk/priloha/zobraz/o1":
+        "Schválené: 12.12.2023 Účinnosť: 01.01.2024 § 5 Daň z bytov ročnú sadzbu dane za byty "
+        "… plochy bytu: I. zóna II. zóna III. zóna 0,612 € 0,560 € 0,426 €",
+}
+
+
+def test_a_refused_town_is_read_from_cuet():
+    asked = []
+
+    def fetch(url, session=None):
+        asked.append(url)
+        if url == "https://www.zvolen.sk/":
+            raise p.Blocked("the site answered with a CAPTCHA or bot check instead of the page")
+        if url in CUET_FILES:
+            return p.Doc(url, "pdf", CUET_FILES[url])
+        if url not in CUET_SITE:
+            raise AssertionError(f"opened what it shouldn't: {url}")
+        return p.doc_from_bytes(url, CUET_SITE[url].encode())
+    res = p.check_town(p.TOWNS["Zvolen"], 2026, delay=0, fetcher=fetch)
+    assert "CAPTCHA" in res.blocked
+    assert res.current.rates == [0.636, 0.588, 0.447] and res.current.tax_year == 2025
+    assert [r.tax_year for r in res.readings] == [2025, 2024]     # the newest first
+    # Neither the draft, nor what isn't about the tax, nor a file twice.
+    assert not any(u.endswith(("/draft", "/dogs", "/uloz/n1")) for u in asked)
+
+
+def test_a_town_without_cuet_is_just_blocked():
+    def refuse(url, session=None):
+        raise p.Blocked("the site refused or reset the connection")
+    res = p.check_town(p.TOWNS["Martin"], 2026, delay=0, fetcher=refuse)
+    assert res.blocked and res.fetched == 1 and not res.readings
+
+
+def test_cuet_is_searched_by_annotation():
+    # CUET cuts a title at 50 characters ("… č.230 o miestnyy"): the
+    # annotation still says "o miestnych daniach".
+    assert "DocumentAbstract=miestnych+daniach" in CUET_SEARCH
+    assert "PublisherName=Mesto+Zvolen" in CUET_SEARCH
 
 
 def test_every_town_has_a_start_page_on_the_web():

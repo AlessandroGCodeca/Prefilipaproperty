@@ -261,6 +261,20 @@ source.
   PDFs on the TAX RATES tab. The Czech Financial Administration's own
   coefficient lookup could cover every municipality, but it refused
   connections from the review machine.
+- **Progress, 6 November 2026:** Liptovský Mikuláš (0.50/0.45/0.30 by area)
+  and Čadca (0.40, settlements 0.25) now open and are in the table. Zvolen
+  (zones 0.636/0.588/0.447) is too, read from CUET, the state's central
+  notice board; the update now falls back to CUET for a town whose own site
+  refuses. The update also reads Čadca's kind of ordinance, which it had
+  skipped. Seven towns still refuse and publish nothing on CUET (Martin,
+  Považská Bystrica, Nové Zámky, Levice, Lučenec, Topoľčany, Rimavská
+  Sobota): run the update from a home connection, or upload their PDFs. The
+  Czech update ran cleanly end to end (6,258 municipalities, 2,147
+  ordinances, 231 scans or .doc files it can't read). It found 585
+  municipalities under 10,000 people with a local coefficient other than 1.0:
+  one click on 🏛️ UPDATE TAX RATES charges them. The Financial
+  Administration's lookup now answers, but it is a JavaScript app with no
+  published data to read.
 
 **M3 · CI never runs the browser scraper** · Impact: Nehnutelnosti.sk can break unnoticed · Effort S
 
