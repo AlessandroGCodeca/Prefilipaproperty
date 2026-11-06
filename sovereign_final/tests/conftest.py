@@ -49,12 +49,10 @@ def _no_live_fx_rate(monkeypatch, tmp_path):
     monkeypatch.setattr(fx_rate, "CACHE_PATH", str(tmp_path / "fx_rate.json"))
 
 
-@pytest.fixture
-def full_db(monkeypatch):
+def make_full_db(path: str):
+    """Give the SQLite file at `path` the real schema; return a connect()
+    for it. full_db wraps this; a module-scoped fixture can call it itself."""
     import database as db
-
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
 
     def _conn():
         c = sqlite3.connect(path)
@@ -69,6 +67,16 @@ def full_db(monkeypatch):
     db._ensure_location_columns(conn)
     db._ensure_rent_comps_columns(conn)
     conn.close()
+    return _conn
+
+
+@pytest.fixture
+def full_db(monkeypatch):
+    import database as db
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    _conn = make_full_db(path)
     monkeypatch.setattr(db, "get_conn", _conn)
     yield _conn
     os.unlink(path)
