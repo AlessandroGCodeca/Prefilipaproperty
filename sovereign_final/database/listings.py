@@ -294,7 +294,8 @@ def get_active_sources() -> list[str]:
     return [r[0] for r in rows]
 
 
-def deactivate_stale_listings(days: int = 21, market: str | None = None) -> int:
+def deactivate_stale_listings(days: int = 21, market: str | None = None,
+                              sources=None, exclude_sources=()) -> int:
     """Mark listings as inactive when last_seen_at is older than `days` days.
 
     Each scraper run touches last_seen_at on every listing it sees, so any
@@ -306,12 +307,29 @@ def deactivate_stale_listings(days: int = 21, market: str | None = None) -> int:
     couldn't be read skips its market's check, not the other's. None (the
     default) checks every market.
 
+    `sources`, when given, limits it to those portals' listings: the pipeline
+    passes the portals that returned listings this run, so a blocked or
+    broken portal's listings are kept, not retired for not being seen (an
+    empty `sources` retires nothing). `exclude_sources` leaves those
+    portals' listings out.
+
     Returns the number of rows deactivated.
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    if sources is not None:
+        sources = [s for s in sources if s]
+        if not sources:
+            return 0
+    exclude = [s for s in (exclude_sources or ()) if s]
     conn = _db.get_conn()
     try:
         only, params = _market_sql(conn, market)
+        if sources is not None:
+            only += f" AND source IN ({','.join('?' * len(sources))})"
+            params = (*params, *sources)
+        if exclude:
+            only += f" AND source NOT IN ({','.join('?' * len(exclude))})"
+            params = (*params, *exclude)
         n = conn.execute(
             "UPDATE listings SET is_active=0 "
             f"WHERE is_active=1 AND last_seen_at < ?{only}",

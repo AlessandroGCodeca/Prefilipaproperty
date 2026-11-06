@@ -98,8 +98,16 @@ from database.deals import (
 from database.pipeline import (
     try_lock_pipeline, heartbeat_pipeline_lock, unlock_pipeline, get_pipeline_lock,
 )
+from database.portal_runs import (
+    QUIET_RUNS, count_seen_since, record_portal_run, portal_runs, quiet_portals,
+)
 
 __all__ = [
+    "QUIET_RUNS",
+    "count_seen_since",
+    "record_portal_run",
+    "portal_runs",
+    "quiet_portals",
     "SQLITE_PATH",
     "get_conn",
     "SQLITE_SCHEMA",

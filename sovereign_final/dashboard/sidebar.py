@@ -141,8 +141,10 @@ def render() -> SimpleNamespace:
                              help="Give listings located before the real risk data "
                                   "existed their noise / flood / construction answers.")
         do_rent  = st.button("🏘️ RENT COMPS", width="stretch", disabled=_busy,
-                             help="Scrape prenájom listings, rebuild live €/m² rents per "
-                                  "district and queue affected listings for re-scoring.")
+                             help="Scrape Slovak (prenájom) and Czech (pronájem) rentals, "
+                                  "rebuild the live rents per district / town and re-score "
+                                  "the listings whose rate moved — and the Czech ones that "
+                                  "waited for a rent figure.")
         do_tax   = st.button("🏛️ UPDATE TAX RATES", width="stretch", disabled=_busy,
                              help="Read each Slovak town's flat property-tax rate (daň z bytov) "
                                   "from its own site, apply the new ones, hold anything doubtful "

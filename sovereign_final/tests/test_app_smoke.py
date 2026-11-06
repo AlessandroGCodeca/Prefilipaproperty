@@ -776,7 +776,7 @@ def test_a_button_runs_its_step_in_the_background(db, monkeypatch):
     from modules import jobs
     release = threading.Event()
 
-    def slow_stale(days=21):
+    def slow_stale(days=21, **kw):
         release.wait(30)
         return 3
     monkeypatch.setattr(db, "deactivate_stale_listings", slow_stale)

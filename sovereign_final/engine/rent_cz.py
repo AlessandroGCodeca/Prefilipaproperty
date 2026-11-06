@@ -141,6 +141,20 @@ def match_rent_key(district: str) -> str:
     return town or "default"
 
 
+_LOWER_WORDS = {"nad", "pod", "na", "u", "v", "ve", "východ", "západ", "venkov",
+                "jih", "sever", "město"}
+
+
+def key_label(key: str) -> str:
+    """A rent key as a place name to show: "kladno" → "Kladno", "ústí nad
+    labem" → "Ústí nad Labem", "praha-východ" → "Praha-východ"."""
+    def word(w: str) -> str:
+        return "-".join(p if p in _LOWER_WORDS and i else p[:1].upper() + p[1:]
+                        for i, p in enumerate(w.split("-")))
+    return " ".join(w if w in _LOWER_WORDS and i else word(w)
+                    for i, w in enumerate((key or "").split()))
+
+
 def baseline_rent(key: str) -> float | None:
     """Kč/m² for a key with a published figure; None for any other."""
     return RENT_PER_M2_CZ.get(key)

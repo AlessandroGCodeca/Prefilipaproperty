@@ -29,9 +29,49 @@ def load_active(rejected: bool = False) -> list[dict]:
     return _load_active(rejected, database.SQLITE_PATH)
 
 
+@st.cache_data(ttl=LISTINGS_TTL_S, show_spinner=False)
+def _waiting_for_rent(market: str, db_path: str) -> dict[str, int]:
+    from modules.cashflow_runner import waiting_for_rent
+    return waiting_for_rent(market)
+
+
+def waiting_for_rent(market: str = "cz") -> dict[str, int]:
+    """{rent key: listings} of `market`'s listings that wait unscored for a
+    rent figure (modules.cashflow_runner.waiting_for_rent), cached as the
+    listing load is. {} when it can't be worked out: the page still draws."""
+    import database
+    try:
+        return _waiting_for_rent(market, database.SQLITE_PATH)
+    except Exception:                       # a banner, never a broken page
+        import logging
+        logging.getLogger("sovereign").exception("Listings waiting for a rent not counted")
+        return {}
+
+
+@st.cache_data(ttl=LISTINGS_TTL_S, show_spinner=False)
+def _quiet_portals(db_path: str) -> list[dict]:
+    import database
+    return database.quiet_portals()
+
+
+def quiet_portals() -> list[dict]:
+    """The portals whose last runs returned no listings or failed
+    (database.quiet_portals), cached as the listing load is. [] when they
+    can't be read: the page still draws."""
+    import database
+    try:
+        return _quiet_portals(database.SQLITE_PATH)
+    except Exception:
+        import logging
+        logging.getLogger("sovereign").exception("Quiet portals not read")
+        return []
+
+
 def clear_listing_cache() -> None:
     """After the dashboard changes listings: the next load reads the database."""
     _load_active.clear()
+    _waiting_for_rent.clear()
+    _quiet_portals.clear()
 
 
 @st.cache_resource

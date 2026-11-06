@@ -135,21 +135,60 @@ def _fill_step(progress):
                        f"{counts['gone']} taken down. Scored {scored}.")
 
 
+# How old the Czech rentals may be before a Czech portal's button reads them
+# again ahead of scoring. Under a day, so the 06:00 run's read counts for the
+# day; a button clicked with none read since gets fresh comps first.
+CZ_RENTALS_FRESH_H = 20
+
+
+def _czech_rentals_if_stale() -> str:
+    """Read the Czech rentals (scraper.rentals_cz) and rebuild their comps
+    when none were read in the last CZ_RENTALS_FRESH_H hours — so a Czech
+    town with no published rent figure can be scored from its live comps.
+    Returns a note for the button's message ("" when they were fresh). A
+    failure is only a note: scoring still runs on what is there."""
+    from datetime import datetime, timedelta, timezone
+    from engine.rent_comps_cz import last_rental_read
+    last = last_rental_read()
+    if last is not None and datetime.now(timezone.utc) - last < timedelta(hours=CZ_RENTALS_FRESH_H):
+        return ""
+    try:
+        from scraper.rentals_cz import run as rentals_cz
+        summary = rentals_cz(max_pages=5)
+    except Exception as e:
+        logging.getLogger("sovereign").exception("Czech rent comps failed")
+        return f" Czech rent comps couldn't be read ({type(e).__name__}: {e})."
+    return (f" Read {summary.get('rentals', 0)} Czech rentals first "
+            f"({summary.get('keys', 0)} towns).")
+
+
 def _scrape_step(module: str, name: str, button: str, market: str | None = None):
     """A portal's button. `market` (a Czech portal's "cz") keeps the
     follow-up steps to that market's listings; a Slovak button runs them as
-    it always did."""
+    it always did. A Czech button reads the Czech rentals before it scores
+    when they are stale, as the Czech pipeline does."""
     kw = {} if market is None else {"market": market}
 
     def step(progress):
+        import scheduler
+        from database.portal_runs import now_iso
+        started = now_iso()
         n, err, timed_out = _run_scraper_subprocess(module)
+        # What the portal returned, for the dashboard's quiet-portal flag.
+        seen = scheduler._record_portal(
+            market or "sk", f"scraper.{module}", started, n,
+            err or (f"stopped at the {SCRAPER_TIMEOUT_S // 60}-minute limit" if timed_out else ""))
         if err:
             return "error", f"❌ {name}: {err}"
+        if not seen and not timed_out:
+            return "warning", (f"⚠ {name} ran but returned no listings — it may be blocked, "
+                               f"or its page layout changed. 🔗 TEST SITES checks it.")
         # Stopped or not, what was stored gets the usual follow-up steps.
         from modules.address_enrichment import run_address_enrichment
         run_address_enrichment(**kw)
         from modules.description_enrichment import run_description_enrichment
         run_description_enrichment(**kw)
+        rent_note = _czech_rentals_if_stale() if market == "cz" else ""
         from modules.cashflow_runner import run_scoring
         scored = run_scoring(**kw)
         from database import mark_duplicates
@@ -160,8 +199,8 @@ def _scrape_step(module: str, name: str, button: str, market: str | None = None)
                 f"⏱ {name} hit the {SCRAPER_TIMEOUT_S // 60}-minute limit and was stopped. "
                 f"The pages it finished are saved; scored {scored}. Click {button} again "
                 f"to carry on — detail pages read in the last {DETAIL_REFRESH_DAYS} days "
-                f"are not opened again, so each run gets further.")
-        return "success", f"✅ {name}: scraped {n} listings, scored {scored}."
+                f"are not opened again, so each run gets further.{rent_note}")
+        return "success", f"✅ {name}: scraped {n} listings, scored {scored}.{rent_note}"
     return step
 
 
@@ -223,13 +262,29 @@ def _risk_step(progress):
 
 
 def _rent_step(progress):
-    from scraper.rentals import run as _run_rentals
+    """🏘️ RENT COMPS: the Slovak (prenájom) and Czech (pronájem) rentals,
+    each on its own — one failing leaves the other's comps — then a scoring
+    run on the new rates. Czech listings in a town with no published rent
+    figure are scored only once its live comps exist."""
+    from importlib import import_module
     from modules.cashflow_runner import run_scoring as _run_cf
-    summary = _run_rentals(max_pages=5)
+    parts, failed = [], []
+    for flag, label, module in (("🇸🇰", "districts", "scraper.rentals"),
+                                ("🇨🇿", "towns", "scraper.rentals_cz")):
+        try:
+            summary = import_module(module).run(max_pages=5)
+        except Exception as e:
+            logging.getLogger("sovereign").exception(f"{flag} rent comps failed")
+            failed.append(f"{flag} rent comps failed: {type(e).__name__}: {e}")
+            continue
+        parts.append(f"{flag} {summary.get('rentals', 0)} rentals across "
+                     f"{summary.get('keys', 0)} {label} · "
+                     f"{len(summary.get('changed', []))} rates moved")
     scored = _run_cf()
-    return "success", (f"✅ {summary.get('rentals', 0)} rentals across "
-                       f"{summary.get('keys', 0)} districts · "
-                       f"{len(summary.get('changed', []))} rates moved · re-scored {scored}.")
+    text = " | ".join(parts + failed) + f" · re-scored {scored}."
+    if not parts:
+        return "error", "❌ " + text
+    return ("warning", "⚠ " + text) if failed else ("success", "✅ " + text)
 
 
 def _tax_step(progress):
@@ -261,11 +316,20 @@ def _dupes_step(progress):
 
 
 def _stale_step(progress):
-    from database import deactivate_stale_listings
-    n = deactivate_stale_listings(days=21)
+    """🧹 CLEAN STALE: every portal's listings not seen for 21 days — but not
+    a quiet portal's (blocked or broken on its last runs), whose listings
+    weren't seen because it couldn't be read."""
+    import scheduler
+    from database import deactivate_stale_listings, quiet_portals
+    quiet = quiet_portals()
+    n = deactivate_stale_listings(days=21, exclude_sources=[q["source"] for q in quiet])
+    kept = (" Kept the listings of " + ", ".join(scheduler.portal_name(q["market"], q["source"])
+                                                 for q in quiet)
+            + ": no listings from it on its last runs, so not seeing them says nothing."
+            if quiet else "")
     if n:
-        return "success", f"✅ Deactivated {n} stale listings (last seen > 21 days ago)"
-    return "info", "ℹ️ No stale listings — all active rows seen within the last 21 days"
+        return "success", f"✅ Deactivated {n} stale listings (last seen > 21 days ago).{kept}"
+    return "info", f"ℹ️ No stale listings — all active rows seen within the last 21 days.{kept}"
 
 
 def dispatch(sb) -> None:

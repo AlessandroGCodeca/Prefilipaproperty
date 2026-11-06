@@ -687,6 +687,8 @@ def init_db():
         _ensure_location_columns(conn)
         _ensure_rent_comps_columns(conn)
         _ensure_market_columns(conn)
+        from database.portal_runs import _ensure_portal_runs
+        _ensure_portal_runs(conn)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_listings_market "
                      "ON listings(market, is_active)")
         _backfill_listing_coords(conn)

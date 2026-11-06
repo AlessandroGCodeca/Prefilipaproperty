@@ -7,7 +7,9 @@ Restarting the container, Docker Desktop or the PC does not re-run a pipeline
 that already ran today. A 06:00 the machine slept through (the process was
 suspended, not restarted) runs once when it wakes. A catch-up that runs
 past the next 06:00 then runs the markets that 06:00 still owes.
-A run succeeds when at least one portal was read. A failed run (every scraper
+A run succeeds when at least one portal returned listings; a portal that
+returns none fails its step, and its listings are not retired as stale
+(each portal's count per run: database/portal_runs.py). A failed run (every scraper
 blocked, say) is retried hourly, up to three times; each attempt's outcome is
 written to data/pipeline_status.json, which the dashboard shows.
 Keep this running alongside the dashboard.
@@ -182,10 +184,54 @@ def call_here(module: str, func: str, **kwargs):
     return getattr(importlib.import_module(module), func)(**kwargs)
 
 
-def _scrape(module: str, call=call_here):
+def source_of(module: str) -> str:
+    """The listings.source a portal's scraper stores: its module's name
+    ("scraper.bazos_cz" → "bazos_cz")."""
+    return module.rsplit(".", 1)[-1]
+
+
+def portal_name(market: str, source: str) -> str:
+    """A portal's name to show ("Bazos.cz") from its source, or the source
+    itself for a portal no longer read (Sreality.cz's old listings)."""
+    portals = [(n, m) for n, m in SCRAPERS.get(market, ())]
+    portals += [(n, m) for n, m, _why in BLOCKED.get(market, ())]
+    return next((n for n, m in portals if source_of(m) == source), source)
+
+
+def _record_portal(market: str, module: str, started: str, returned, error: str) -> int:
+    """Record what a portal returned this run (database.record_portal_run);
+    the count of listings it returned. A failure to record is logged, never
+    the step's failure."""
+    from database import record_portal_run, count_seen_since
+    try:
+        return record_portal_run(market, source_of(module), started, returned, error)
+    except Exception as e:
+        log.error(f"   Couldn't record {module}'s run: {e}")
+        try:
+            return max(int(returned or 0), count_seen_since(source_of(module), market, started))
+        except Exception:
+            return int(returned or 0)
+
+
+def _scrape(module: str, call=call_here, market: str = "sk"):
+    """A portal's step. A portal that runs without an error but returns no
+    listings — blocked behind a 200, or a page layout the parser no longer
+    matches — fails its step, so the run says so and its listings are not
+    retired as stale (housekeeping retires only the portals that returned
+    listings). Each run's count is recorded for the dashboard."""
     def run():
-        n = call(module, "run", max_pages=10)
-        return n, f"{n} listings"
+        from database.portal_runs import now_iso
+        started = now_iso()
+        try:
+            n = call(module, "run", max_pages=10)
+        except Exception as e:
+            _record_portal(market, module, started, 0, f"{type(e).__name__}: {e}")
+            raise
+        seen = _record_portal(market, module, started, n, "")
+        if not seen:
+            raise RuntimeError("returned no listings — blocked, or its page layout changed; "
+                               "its listings are kept, not retired as stale")
+        return seen, f"{n} listings" + (f" ({seen} seen)" if seen != n else "")
     return run
 
 
@@ -210,7 +256,7 @@ def _run_steps(steps: list, call=call_here, progress=None,
 
     scraped = set()
     for i, (name, module) in enumerate(SCRAPERS["sk"], start=2):
-        if step(i, name, _scrape(module, call)) is not None:
+        if step(i, name, _scrape(module, call, "sk")) is not None:
             scraped.add(module)
 
     # Listings the scrapers saved without a price, a size or a district: a
@@ -258,8 +304,15 @@ def _market_steps(market: str, scraped: set) -> list[tuple[str, object]]:
         dev = backfill_dev_project_flags()
         if not scraped:
             return None, f"flagged {dev} dev projects | stale check skipped (no portal read)"
-        stale = deactivate_stale_listings(days=21, market=market)
-        return None, f"Deactivated {stale} stale | flagged {dev} dev projects"
+        # Per portal, and only the portals that returned listings this run: a
+        # blocked or broken portal shows none of its listings, and "not seen
+        # for 21 days" says nothing about them.
+        stale = deactivate_stale_listings(days=21, market=market,
+                                          sources=[source_of(m) for m in scraped])
+        kept = [name for name, m in SCRAPERS.get(market, ()) if m not in scraped]
+        return None, (f"Deactivated {stale} stale | flagged {dev} dev projects"
+                      + (f" | stale check skipped for {', '.join(kept)} (no listings this run)"
+                         if kept else ""))
 
     def lv():
         from modules.debt_bot import run_debt_filter
@@ -326,7 +379,7 @@ def _run_market_steps(steps: list, market: str, call=call_here,
 
     scraped = set()
     for i, (name, module) in enumerate(SCRAPERS[market], start=2):
-        if step(i, name, _scrape(module, call)) is not None:
+        if step(i, name, _scrape(module, call, market)) is not None:
             scraped.add(module)
     n = 2 + len(SCRAPERS[market])
 
