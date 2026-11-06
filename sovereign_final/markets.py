@@ -22,7 +22,8 @@ before. A listing row carries its market in `listings.market`.
 
 Money is stored in the listing's own currency (`listings.currency`): EUR for
 Slovak listings, CZK for Czech ones. to_eur() converts with the one dated
-rate in config (CZK_PER_EUR) for ranking and the combined view.
+rate in config (CZK_PER_EUR) for ranking and the combined view — the ČNB
+daily fixing, kept current by modules/fx_rate.
 """
 
 from __future__ import annotations
@@ -31,6 +32,11 @@ import os
 from dataclasses import dataclass, field
 
 import config
+from modules import fx_rate
+
+# The newest ČNB rate the scheduler or dashboard saved (modules/fx_rate), before
+# the profiles below convert their € estimates to Kč with it.
+fx_rate.sync(force=True)
 
 MARKET_CODES = ("sk", "cz")
 DEFAULT_MARKET = "sk"
@@ -438,12 +444,14 @@ def to_eur(amount, currency: str = "EUR"):
     if cur == "EUR":
         return float(amount)
     if cur == "CZK":
+        fx_rate.sync()                     # a newer rate another process fetched
         return float(amount) / config.CZK_PER_EUR
     raise ValueError(f"no exchange rate for {currency}")
 
 
 def fx_note() -> str:
     """One line on the rate the combined view converts with."""
+    fx_rate.sync()
     return (f"1 € = {config.CZK_PER_EUR:.3f} Kč ({config.FX_RATE_SOURCE}, "
             f"{config.FX_RATE_DATE})")
 

@@ -37,6 +37,18 @@ def _no_real_database(monkeypatch, tmp_path):
     monkeypatch.setattr(database, "SQLITE_PATH", str(tmp_path / "sovereign.db"))
 
 
+@pytest.fixture(autouse=True)
+def _no_live_fx_rate(monkeypatch, tmp_path):
+    """No test fetches the ČNB rate or reads or writes the real
+    data/fx_rate.json; one about modules/fx_rate stubs _fetch itself."""
+    from modules import fx_rate
+
+    def _offline(timeout=15):
+        raise fx_rate.FxError("no network in tests")
+    monkeypatch.setattr(fx_rate, "_fetch", _offline)
+    monkeypatch.setattr(fx_rate, "CACHE_PATH", str(tmp_path / "fx_rate.json"))
+
+
 @pytest.fixture
 def full_db(monkeypatch):
     import database as db
