@@ -53,7 +53,14 @@ def test_requirements_are_pinned():
 
 
 def test_no_deprecated_use_container_width():
-    assert "use_container_width" not in _read("app.py")
+    # The dashboard: app.py and its modules (dashboard/, one per tab).
+    pages = ["app.py"] + sorted(
+        os.path.relpath(os.path.join(d, f), ROOT)
+        for d, _, files in os.walk(os.path.join(ROOT, "dashboard"))
+        for f in files if f.endswith(".py"))
+    assert len(pages) > 10
+    for page in pages:
+        assert "use_container_width" not in _read(page), page
 
 
 def test_restart_only_stops_its_own_streamlit():

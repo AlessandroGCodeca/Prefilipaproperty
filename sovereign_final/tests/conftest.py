@@ -106,9 +106,9 @@ def pytest_configure(config):
 
 @pytest.fixture(autouse=True)
 def _fresh_listings_each_run(request, monkeypatch):
-    """The dashboard caches its listing load for LISTINGS_TTL_S seconds (app.py),
-    so a write from outside the page shows on it after that limit, not at
-    once. A dashboard test writes to the database and reruns at once: each
+    """The dashboard caches its listing load for LISTINGS_TTL_S seconds
+    (dashboard/listing_cache.py), so a write from outside the page shows on
+    it after that limit, not at once. A dashboard test writes to the database and reruns at once: each
     AppTest run starts as if the limit had passed. A test of the cache itself
     is marked keeps_listing_cache."""
     if "keeps_listing_cache" in request.keywords:

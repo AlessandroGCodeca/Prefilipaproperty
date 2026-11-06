@@ -443,7 +443,8 @@ def geo(monkeypatch):
 
 @pytest.fixture
 def ticking(monkeypatch):
-    """database's clock moves on a second at every reading."""
+    """database's clock (in each topic module that stamps a listing) moves on
+    a second at every reading."""
     t = [datetime(2026, 10, 19, 4, 0, tzinfo=timezone.utc)]
 
     class Tick(datetime):
@@ -451,7 +452,8 @@ def ticking(monkeypatch):
         def now(cls, tz=None):
             t[0] += timedelta(seconds=1)
             return t[0] if tz is None else t[0].astimezone(tz)
-    monkeypatch.setattr(db, "datetime", Tick)
+    for topic in (db.listings, db.scores, db.title_deeds):
+        monkeypatch.setattr(topic, "datetime", Tick)
 
 
 def _unlocated(lid, address=NO_PLACE, **over):

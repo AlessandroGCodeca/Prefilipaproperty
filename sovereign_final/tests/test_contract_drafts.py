@@ -68,7 +68,7 @@ def test_newest_first_and_only_that_listing(temp_db, monkeypatch):
                 def isoformat(self):
                     return next(stamps)
             return _T()
-    monkeypatch.setattr(database, "datetime", _Clock)
+    monkeypatch.setattr(database.deals, "datetime", _Clock)
 
     first = save_contract_draft("listing-1", "Personal", 1, "A", "", "", "v1")
     save_contract_draft("listing-2", "Personal", 1, "B", "", "", "other")

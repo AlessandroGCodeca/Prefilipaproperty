@@ -1,4 +1,4 @@
-"""The dashboard's listing load is cached (app.py, M5 in docs/PROJECT_REVIEW.md).
+"""The dashboard's listing load is cached (dashboard/listing_cache.py, M5 in docs/PROJECT_REVIEW.md).
 
 It took 0.39 s for 5,000 listings and ran on every click. A write from outside
 the page (the scheduler's) shows after LISTINGS_TTL_S; a pipeline step run
@@ -72,7 +72,7 @@ def test_the_cache_has_a_short_time_limit():
     import os
 
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "app.py"), encoding="utf-8").read()
+                            "dashboard", "listing_cache.py"), encoding="utf-8").read()
     ttl = next(n.value.value for n in ast.walk(ast.parse(src))
                if isinstance(n, ast.Assign)
                and getattr(n.targets[0], "id", "") == "LISTINGS_TTL_S")

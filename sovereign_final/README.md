@@ -186,11 +186,37 @@ gives each source and what changed.
 
 ```
 sovereign_final/
-├── app.py                    ← Streamlit dashboard (11 tabs)
+├── app.py                    ← Streamlit dashboard (11 tabs): the page, top to
+│                               bottom; each part is drawn by dashboard/
+├── dashboard/
+│   ├── sidebar.py            ← Pipeline status, step buttons, filters
+│   ├── actions.py            ← What each pipeline button runs (as a job)
+│   ├── view.py               ← One run's page state: the market picked, the
+│   │                           filtered listings, sorted by class
+│   ├── overview.py           ← Banners, stats tiles, price cuts over the tabs
+│   ├── listing_cache.py      ← The cached listing load, and when it is cleared
+│   ├── cards.py              ← The listing card and its memo button
+│   ├── fmt.py                ← Money, badges, labels (Czech on a Czech card)
+│   ├── diagnostics.py        ← 🔗 TEST SITES / TEST CZ SITES
+│   ├── style.py, login.py, demo.py
+│   └── tabs/                 ← One module per tab, each with render(view):
+│                               triage, snag_list, map_view, what_if,
+│                               deal_pipeline, satellite, rejected, lv_todo,
+│                               rent_comps, tax_rates, close
 ├── scheduler.py              ← Daily 06:00 CET automation, retries a failed run
 ├── config.py                 ← All 2026 Slovak tax rates
 ├── markets.py                ← Market registry: the SK and CZ profiles
-├── database.py               ← SQLite storage
+├── database/                 ← SQLite storage, one module per topic; `import
+│   │                           database` re-exports every name
+│   ├── __init__.py           ← get_conn (tests swap it here)
+│   ├── schema.py             ← Schema, init_db and its column migrations
+│   ├── listings.py           ← Sale listings: upserts, active/rejected, copies
+│   ├── prices.py             ← Price history, cuts, days on market
+│   ├── enrichment.py         ← Description and address parsing queues
+│   ├── scores.py             ← Cashflow and location scores, requeue rules
+│   ├── title_deeds.py        ← LV checks, deed text, parcels, LV to-do
+│   ├── deals.py              ← Deal stages, vibe notes, contract drafts
+│   └── pipeline.py           ← The pipeline lock
 ├── enrich_pending.py         ← Re-read listings missing a price, size or district
 │                               (🔎 FILL MISSING DETAILS)
 ├── repair_prices.py          ← Re-read listings whose price looks borrowed
