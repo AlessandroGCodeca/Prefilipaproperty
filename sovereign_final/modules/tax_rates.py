@@ -28,9 +28,10 @@ engine charges (engine/property_tax_sk) and acts on it:
 Then it drops the scores whose property tax changed, and the dashboard's job
 re-scores them.
 
-A town rated by cadastral area or pásmo (Bratislava, Košice, Žilina,
-Dunajská Streda) is only verified: a change there needs its areas mapped by
-hand, so it goes to review and nothing is stored.
+A town rated by cadastral area, pásmo or zone (Bratislava, Košice, Žilina,
+Dunajská Streda, Liptovský Mikuláš, Zvolen, Čadca) is only verified: a change
+there needs its areas mapped by hand, so it goes to review and nothing is
+stored.
 """
 
 from __future__ import annotations

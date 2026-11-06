@@ -13,12 +13,18 @@ It only reads. modules/tax_rates decides what a reading means for the table
 in engine/property_tax_sk: a confirmation, a new rate to apply, or something
 to hold for review.
 
+A town whose own site refuses the request but publishes its ordinances on
+CUET (cuet.slovensko.sk, the state's central official notice board — Zvolen
+does) is read from there instead: the town's documents about local taxes,
+newest first, and their attached files.
+
 What it can't do, and says so instead of guessing:
   - read a scanned PDF (an image without a text layer);
   - get past a site that answers automated requests with a CAPTCHA, a refused
     connection or "Access Forbidden" — from a home connection most of these
     open normally, and a document saved in the browser can be uploaded on the
-    dashboard (read_upload);
+    dashboard (read_upload). It does not try: a bot check is the town's
+    answer, and CUET is the only other source it reads;
   - map a rate to cadastral areas: for a town rated by area (ZONED) it
     reports the set of flat rates the document lists, nothing more.
 """
@@ -49,13 +55,14 @@ class Town:
     start: tuple[str, ...]          # the pages the search starts from
     zoned: bool = False             # rates by cadastral area or pásmo
     areas: tuple[str, ...] = ()     # area names heading the rows of a zoned table
+    cuet: str = ""                  # its name as publisher on CUET, read when its site refuses
 
 
 # Where each town's search starts: its tax page, its list of ordinances or a
 # search of its site for "miestnych daniach" — whichever links to the
 # property-tax ordinance in force. A web page is read and its property-tax
 # links followed, two levels deep (and an ordinance page's own files one
-# more). Every town below the first group was read correctly from here in
+# more). Every town above the second group was read correctly from here in
 # November 2026 unless its comment says otherwise. The second group answers
 # automated requests from a data centre with a CAPTCHA or a reset connection;
 # from a home connection most of them open, so the search starts at the home
@@ -98,11 +105,18 @@ TOWNS: dict[str, Town] = {t.name: t for t in (
                      "https://www.stupava.sk/sk/samosprava/vseobecne-zavazne-nariadenia/")),
     # Only 2005–2010 ordinances found from here.
     Town("Komárno", ("https://komarno.sk/?s=miestnych+daniach",)),
-    Town("Čadca", ("https://www.mestocadca.sk/samosprava-mesta/vseobecne-zavazne-nariadenia.html",)),
-    Town("Liptovský Mikuláš", ("https://www.mikulas.sk/",)),
+    # VZN 9/2023 with its two amendments: flats 0.40 in the town's streets,
+    # 0.25 in its outlying settlements (jednotlivé časti 2 and 3).
+    Town("Čadca", ("https://www.mestocadca.sk/samosprava-mesta/vseobecne-zavazne-nariadenia.html",),
+         zoned=True),
+    # VZN 3/2025: a row per group of cadastral areas, named by its last area.
+    Town("Liptovský Mikuláš", ("https://www.mikulas.sk/samosprava/zastupitelstvo/"
+                               "vseobecne-zavazne-nariadenia/",),
+         zoned=True, areas=("svaty stefan", "raztoky", "liptovsky mikulas")),
     # A CAPTCHA (/verify) from a data centre:
     Town("Prešov", ("https://www.presov.sk/",)),
-    Town("Zvolen", ("https://www.zvolen.sk/",)),
+    # … but VZN 230 and its amendments are on CUET. Rates by zone (streets).
+    Town("Zvolen", ("https://www.zvolen.sk/",), zoned=True, cuet="Mesto Zvolen"),
     Town("Považská Bystrica", ("https://www.povazska-bystrica.sk/",)),
     Town("Levice", ("https://www.levice.sk/",)),
     Town("Lučenec", ("https://www.lucenec.sk/",)),
@@ -162,15 +176,21 @@ _RATE_THEN_FLAT = re.compile(
     rf"{_NUM}\s*{_CUR}{_PER}(?P<gap>[^\d€;]{{0,70}}?)(?<![a-z])byt(?:y|u)?(?![a-z])")
 # "a) byty 0,60 €", "a) byty 1,270 1,207 1,143", "i byty 1,20 1,20 1,25 1,35",
 # "byt 0,68 €/m² 0,61 €/m²", "a) byty 0,675" (under an "eur/m2" header),
-# "a) byty vo výške 1,00 €/m²", "… podlahovej plochy bytu 1,000 €"
+# "a) byty vo výške 1,00 €/m²", "… podlahovej plochy bytu 1,000 €",
+# "Byty a nebytové priestory 0,4 0,25 0,25" (Čadca: one class, a column per
+# part of the town), "… plochy bytu: I. zóna II. zóna III. zóna 0,636 €
+# 0,588 € 0,447 €" (Zvolen)
 _FLAT_THEN_RATES = re.compile(
-    r"(?<![a-z])byt(?:y|u)?\s*(?:[:–-]|vo\s+vyske|v\s+sume|sumou|je)?\s*"
+    r"(?<![a-z])byt(?:y|u)?(?:\s+a\s+nebytov\w*\s+priestor\w*)?\s*"
+    r"(?:[:–-]|vo\s+vyske|v\s+sume|sumou|je)?\s*"
+    r"(?:(?:[ivx]{1,3}\s*\.?\s*(?:zona|pasmo)\s*){2,6})?"
     rf"(?P<run>(?:\d{{1,2}}(?:[,.]\d{{1,4}})?\s*(?:{_CUR})?{_PER}\s*){{1,6}})")
 # "sadzbu dane z bytov za byty … vo výške 0,60 €", "za byt je 0,710 €",
-# "… sa zvyšuje … za byt na 1,000 €/m"
+# "… sa zvyšuje … za byt na 1,000 €/m" — the words whole: the "na" ending
+# "III. zóna 0,447 €" is not "na 0,447 €".
 _FLAT_SENTENCE = re.compile(
     rf"(?<![a-z])(?:za|pre)\s+byt(?:y|u)?(?![a-z])(?P<gap>[^\d€;]{{0,160}}?)"
-    rf"(?:vo\s+vyske|je|sumou|v\s+sume|na|:)\s*{_NUM}\s*{_CUR}")
+    rf"(?:(?<![a-z])(?:vo\s+vyske|je|sumou|v\s+sume|na)|:)\s*{_NUM}\s*{_CUR}")
 # A table of past years' rates ("byt a nebytový priestor 2023 2022-2021 2020
 # … byt 1,000 0,500 0,500 0,330"): history, not zones.
 _YEAR_HEADER = re.compile(r"(?:20\d\d(?:\s*[-–]\s*20\d\d)?\s+){3,}")
@@ -196,8 +216,11 @@ _DATE = (r"(?:(\d{1,2})\s*\.\s*(\d{1,2})\s*\.\s*(20\d\d)"
          r"|(\d{1,2})\s*\.\s*(" + "|".join(_MONTHS) + r")\s+(20\d\d))")
 # "nadobúda účinnosť 1. januára 2026", "účinnosť nadobudlo dňa 23. júna 2020",
 # "s účinnosťou od 1.1.2025"
+# A scan may read "ť" as "t‘" (Liptovský Mikuláš: "nadobúda účinnost‘ 01.01.2026");
+# Zvolen heads each ordinance "Schválené: … Vyhlásené: … Účinnosť: 01.01.2025".
 _EFFECTIVE = re.compile(
-    r"ucinnost\w*\s+(?:(?:nadobuda|nadobudlo|nadobudne|nadobudnutim|dnom|dna|od|odo|dnes)\s+)*"
+    r"ucinnost\w*['‘’`]?:?\s+"
+    r"(?:(?:nadobuda|nadobudlo|nadobudne|nadobudnutim|dnom|dna|od|odo|dnes)\s+)*"
     + _DATE)
 # "sadzby … na rok 2026", "v roku 2026", "zdaňovacie obdobie 2026"
 _YEAR_PHRASE = re.compile(
@@ -500,12 +523,16 @@ def fetch(url: str, session=None, timeout: float = 45, retry: bool = True) -> Do
 _STRONG = re.compile(   # in words or in a URL ("o-miestnych-daniach")
     r"nehnutelnost|miestn\w*[\s_-]+dan|dan\w*[\s_-]+z[\s_-]+bytov|sadzb\w*[\s_-]+dan|sadzby|"
     r"dane?[\s_-]+a[\s_-]+poplatky")
-# … and is not a form, a draft or something else.
+# … and is not a form, a draft or something else …
 _SKIP = re.compile(
     r"navrh|priznani|tlaciv|poucen|potvrden|ziadost|registracn|oznamen|sharer|tweet|mailto:|"
     r"facebook|twitter|instagram|youtube|linkedin|zakonypreludi|slov-lex|\.jpg|\.png|\.zip|"
-    r"psa(?![a-z])|ubytovan|parkovan|verejneho priestranstva|rozvoj|zrusen|neplatn|archiv|"
+    r"zrusen|neplatn|archiv|"
     r"ulav|znizeni|oslobodeni|elektronick|e-?sluzb|platit|zaplat|prevod|majet|kontrol")
+# … or another tax or fee — unless it names the property tax too: Čadca's
+# ordinance is "o dani z nehnuteľností, dani za psa, dani za ubytovanie, …".
+_OTHER_TAX = re.compile(r"psa(?![a-z])|ubytovan|parkovan|verejneho priestranstva|rozvoj")
+_PROPERTY_TAX = re.compile(r"nehnutelnost|miestn\w*[\s_-]+dan|dan\w*[\s_-]+z[\s_-]+bytov")
 # From a home page, also its list of ordinances or documents — a menu item
 # there ("VZN", "Dokumenty", "Zverejňovanie" on village sites).
 _ORDINANCES = re.compile(r"vseobecne[\s_-]+zavazne[\s_-]+nariadeni|(?<![a-z])vzn(?![a-z])|"
@@ -582,7 +609,7 @@ def _links(doc: Doc, site: str, about_tax: bool = False,
         own = fold(label + " " + href)
         tag, ctx_text = _context(a)
         ctx = fold(ctx_text)
-        if _SKIP.search(own):
+        if _SKIP.search(own) or (_OTHER_TAX.search(own) and not _PROPERTY_TAX.search(own)):
             continue
         # A table row or list item is the link's own entry: its status
         # ("Zrušené, neplatné") applies to it.
@@ -606,6 +633,65 @@ def _links(doc: Doc, site: str, about_tax: bool = False,
         out.append((rank, href, label if strong_own or not ctx_text else ctx_text[:160]))
     out.sort(key=lambda t: -t[0])
     return out[:MAX_LINKS_PER_PAGE]
+
+
+# ── CUET, the central official notice board ───────────────────────────────────
+CUET = "https://cuet.slovensko.sk"
+CUET_YEARS = 3          # how far back its documents are searched
+CUET_DOCUMENTS = 6      # document pages opened, the newest first
+
+
+def cuet_search_url(publisher: str, since: date) -> str:
+    """CUET's search for `publisher`'s documents about local taxes published
+    since `since`. By the annotation, not the title: CUET cuts titles at 50
+    characters ("Novelizácia č. 2 VZN Mesta Zvolen č.230 o miestnyy")."""
+    from urllib.parse import urlencode
+    return f"{CUET}/sk?" + urlencode({
+        "PublisherName": publisher, "DocumentAbstract": "miestnych daniach",
+        "DocumentPublishedFrom": since.strftime("%d.%m.%Y")})
+
+
+def cuet_documents(doc: Doc) -> list[tuple[str, str, date | None]]:
+    """(url, title and annotation, published) of each document in a CUET
+    search result about the property tax, drafts left out, newest first."""
+    from bs4 import BeautifulSoup
+    out = []
+    for item in BeautifulSoup(doc.html, "lxml").select("div.resultItem"):
+        a = item.find("a", href=re.compile(r"/dokument/"))
+        if a is None:
+            continue
+        fields = {}
+        for box in item.find_all("div", class_=re.compile(r"^item")):
+            name = box.find("div", class_="metadataDocumentName")
+            if name:
+                key = name.get_text(" ", strip=True).rstrip(":")
+                fields[key] = box.get_text(" ", strip=True)[len(name.get_text(" ", strip=True)):].strip()
+        label = " — ".join(v for v in (fields.get("Názov dokumentu"),
+                                        fields.get("Anotácia dokumentu")) if v)
+        own = fold(label)
+        if not _PROPERTY_TAX.search(own) or re.search(r"(?<![a-z])navrh", own):
+            continue
+        m = re.match(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", fields.get("Zverejnené od", ""))
+        published = None
+        if m:
+            try:
+                published = date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+            except ValueError:
+                pass
+        out.append((urljoin(doc.url, a["href"]), label, published))
+    out.sort(key=lambda t: t[2] or date.min, reverse=True)
+    return out
+
+
+def cuet_files(doc: Doc) -> list[str]:
+    """The attached files of a CUET document page."""
+    from bs4 import BeautifulSoup
+    seen: list[str] = []
+    for a in BeautifulSoup(doc.html, "lxml").find_all("a", href=re.compile(r"/priloha/zobraz/")):
+        href = urljoin(doc.url, a["href"])
+        if href not in seen:
+            seen.append(href)
+    return seen
 
 
 # ── A town ────────────────────────────────────────────────────────────────────
@@ -655,6 +741,41 @@ def pick(readings: list[Reading], year: int, today: int | None = None
     return current, upcoming, conflict
 
 
+def _from_cuet(town: Town, year: int, session, fetcher, res: TownResult, budget: int,
+               delay: float) -> list[tuple[str, str]]:
+    """(file url, label) of each file attached to `town`'s documents about
+    local taxes on CUET, the newest document first. The search and the
+    document pages count against `budget`, like any page read."""
+    def get(url: str) -> Doc | None:
+        if res.fetched >= budget:
+            return None
+        time.sleep(delay)
+        res.fetched += 1
+        try:
+            doc = fetcher(url, session)
+        except Exception as e:
+            res.problems.append(f"CUET: {url}: {e}")
+            res.visited.append((url, f"CUET failed: {e}"))
+            return None
+        return doc
+
+    search = cuet_search_url(town.cuet, date(year - CUET_YEARS, 1, 1))
+    found = get(search)
+    if found is None:
+        return []
+    docs = cuet_documents(found)
+    res.visited.append((search, f"CUET: {len(docs)} documents about local taxes"))
+    out: list[tuple[str, str]] = []
+    for url, label, _ in docs[:CUET_DOCUMENTS]:
+        page = get(url)
+        if page is None:
+            continue
+        files = cuet_files(page)
+        res.visited.append((url, f"CUET: {len(files)} file(s) — {label[:80]}"))
+        out += [(f, label) for f in files]
+    return out
+
+
 def check_town(town: Town, year: int, session=None, delay: float = 0.4,
                fetcher=None, budget: int = MAX_FETCHES, stop_when_found: bool = False
                ) -> TownResult:
@@ -662,7 +783,9 @@ def check_town(town: Town, year: int, session=None, delay: float = 0.4,
     most `budget` pages and documents, the most promising link first (the
     property-tax ordinance, then a list of ordinances, then a generic page
     of documents). `stop_when_found`: stop at the first ordinance that
-    dates a rate for `year` or later (a village's site, read once a month)."""
+    dates a rate for `year` or later (a village's site, read once a month).
+    When the town's own site refuses and the town publishes on CUET
+    (Town.cuet), its documents about local taxes there are read instead."""
     import heapq
     fetcher = fetcher or fetch
     res = TownResult(town.name)
@@ -672,6 +795,7 @@ def check_town(town: Town, year: int, session=None, delay: float = 0.4,
     order = len(queue)
     seen: set[str] = set()
     newer_mentions: list[tuple[int, str]] = []
+    cuet_read = False
     while queue and res.fetched < budget:
         _, _, url, depth, label = heapq.heappop(queue)
         if url in seen:
@@ -687,6 +811,12 @@ def check_town(town: Town, year: int, session=None, delay: float = 0.4,
                 res.blocked = str(b)
             res.problems.append(f"{label or url}: {b}")
             res.visited.append((url, f"refused: {b}"))
+            if depth == 0 and town.cuet and not cuet_read:
+                cuet_read = True
+                for href, lab in _from_cuet(town, year, session, fetcher, res, budget, delay):
+                    order += 1
+                    # The newest first; files only, so nothing is followed from them.
+                    heapq.heappush(queue, (-10**8 + order, order, href, MAX_DEPTH + 1, lab))
             continue
         except Exception as e:                    # a broken link, a bad file
             log.warning(f"Tax rate {town.name}: {url} failed: {e}")

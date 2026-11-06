@@ -10,17 +10,18 @@ o miestnych daniach, § 14–16):
 The act's own rate, 0.033 €/m² (§ 16 ods. 1), is only the default: each
 municipality sets its rate by VZN (§ 16 ods. 2), and the act limits it only
 relative to the municipality's other flat rates (its highest at most 10× its
-lowest). The towns below charge 0.32–1.35 €/m², 10–40 times the default.
+lowest). The towns below charge 0.25–1.35 €/m², 8–40 times the default.
 
 Bratislava's rate depends on the cadastral area's pásmo (A–D). A city part is
 taxed at the highest pásmo among its areas: Ružinov at Nivy's 1.35 (its
 Ružinov and Trnávka areas pay 1.25), and a bare "Bratislava II" at its
-dearest city part's. Košice and Žilina also rate by cadastral area: a listing
-that names one of their areas pays its rate, any other part of the city the
-city's highest. A place not in the table is taxed at the highest rate in it,
-1.35 €/m². That is not a legal ceiling (a municipality may set more), so such
-a listing's tax is UNVERIFIED. A 60 m² flat pays about €19–81 a year in the
-towns below, so the approximation hardly moves a cash flow.
+dearest city part's. Košice, Žilina, Liptovský Mikuláš, Zvolen and Čadca also
+rate by area: a listing that names one of their areas pays its rate, any
+other part of the town the town's highest. A place not in the table is taxed
+at the highest rate in it, 1.35 €/m². That is not a legal ceiling (a
+municipality may set more), so such a listing's tax is UNVERIFIED. A 60 m²
+flat pays about €15–81 a year in the towns below, so the approximation hardly
+moves a cash flow.
 
 The table can be brought up to date from the towns' own sites with one click
 on the dashboard (modules/tax_rates, scraper/property_tax_rates). What that
@@ -104,6 +105,10 @@ CITY_RATE_PER_M2 = {
     "ružomberok":      (0.40, "Ružomberok"),
     "spišská nová ves": (0.398, "Spišská Nová Ves"),
     "humenné":         (0.32, "Humenné"),
+    # Rated by area or zone (CITY_AREA_RATE_PER_M2); the highest here.
+    "zvolen":          (0.636, "Zvolen — zone I, the highest (no zone III part named)"),
+    "liptovský mikuláš": (0.50, "Liptovský Mikuláš — its main cadastral area, the highest"),
+    "čadca":           (0.40, "Čadca — the town's streets (part 1), the highest"),
 }
 CITY_RATE_PER_M2.update({
     "kosice": CITY_RATE_PER_M2["košice"], "zilina": CITY_RATE_PER_M2["žilina"],
@@ -115,6 +120,8 @@ CITY_RATE_PER_M2.update({
     "ruzomberok": CITY_RATE_PER_M2["ružomberok"],
     "spisska nova ves": CITY_RATE_PER_M2["spišská nová ves"],
     "humenne": CITY_RATE_PER_M2["humenné"],
+    "liptovsky mikulas": CITY_RATE_PER_M2["liptovský mikuláš"],
+    "cadca": CITY_RATE_PER_M2["čadca"],
 })
 _CITIES_BY_LENGTH = sorted(CITY_RATE_PER_M2, key=len, reverse=True)
 
@@ -141,7 +148,28 @@ CITY_AREA_RATE_PER_M2 = {
     },
     # The city's 2026 table: Dunajská Streda and Malé Blahovo 0.68, Mliečany 0.61.
     "dunajska streda": {"mliecany": 0.61},
+    # VZN 3/2025 § 9: the Liptovský Mikuláš area 0.50, these six 0.45, these four 0.30.
+    "liptovsky mikulas": {
+        **dict.fromkeys(("bodice", "demanova", "liptovska ondrasova", "okolicne", "paludzka",
+                         "raztoky"), 0.45),
+        **dict.fromkeys(("benice", "ilanovo", "plostin", "svaty stefan"), 0.30),
+    },
+    # VZN 230 § 1 ods. 3 and § 5 as amended by Novelizácia č. 1 (from 2025):
+    # zone I (the centre's streets) 0.636, zone II (most other streets, listed
+    # one by one — ZONE_RATES_BY_STREET) 0.588, zone III (these city parts and
+    # the outskirts) 0.447.
+    "zvolen": dict.fromkeys(("zolna", "lukove", "kralova", "sekierska dolina", "bakova jama"),
+                            0.447),
+    # VZN 9/2023 § 1 and § 5: part 1, the town's streets, 0.40; parts 2 and 3,
+    # the outlying settlements, 0.25. Horelica and U Hluška have streets in
+    # part 1 and settlements in part 2, so their names alone tell nothing.
+    "cadca": dict.fromkeys(("drahosanka", "cadecka", "podzavoz", "milosova", "vojty", "rieka",
+                            "u sihelnika"), 0.25),
 }
+# Rates an ordinance sets for zones drawn street by street, which a listing
+# rarely names: charged to no listing (one in such a zone pays the town's
+# highest rate), kept so the update can confirm the ordinance's whole table.
+ZONE_RATES_BY_STREET = {"zvolen": (0.588,)}
 # City parts whose name contains an area's without being it: Košice's
 # Sídlisko Ťahanovce is not the Ťahanovce cadastral area.
 _NOT_AN_AREA = ("sidlisko tahanovce",)
@@ -152,8 +180,13 @@ def _fold(text: str) -> str:
                    if unicodedata.category(c) != "Mn").lower()
 
 
+# What a town's rated areas are, where they are not cadastral areas.
+_AREA_KIND = {"zvolen": "zone III", "cadca": "an outlying settlement"}
+
+
 def _area_rate(city: str, key: str) -> tuple[float, str] | None:
-    """The rate of the cadastral area of `city` that `key` names, if any."""
+    """The rate of the cadastral area (or zone part) of `city` that `key`
+    names, if any."""
     areas = CITY_AREA_RATE_PER_M2.get(_fold(city))
     if not areas:
         return None
@@ -162,7 +195,10 @@ def _area_rate(city: str, key: str) -> tuple[float, str] | None:
         folded = folded.replace(name, " ")
     for area in sorted(areas, key=len, reverse=True):
         if rp._has_place(area, folded):
-            return areas[area], f"{rp._title(area)} cadastral area, {rp._title(_fold(city))}"
+            kind = _AREA_KIND.get(_fold(city))
+            where = f"{rp._title(area)}, {rp._title(_fold(city))}"
+            return areas[area], (f"{where} — {kind}" if kind
+                                 else f"{rp._title(area)} cadastral area, {rp._title(_fold(city))}")
     return None
 
 # The tax year every rate above was checked for (SOURCE).
@@ -170,7 +206,8 @@ TABLE_YEAR = 2026
 
 # Rated by cadastral area or pásmo: a stored rate never replaces these, since
 # it would have to be mapped to the areas by hand.
-ZONED = {"bratislava", "kosice", "zilina", "zilinska lehota", "dunajska streda"}
+ZONED = {"bratislava", "kosice", "zilina", "zilinska lehota", "dunajska streda",
+         "liptovsky mikulas", "zvolen", "cadca"}
 
 
 def table_rates(town: str) -> list[float]:
@@ -179,7 +216,7 @@ def table_rates(town: str) -> list[float]:
     key = _fold(town)
     if key == "bratislava":
         return sorted(set(BA_PART_RATE_PER_M2.values()))
-    rates = set(CITY_AREA_RATE_PER_M2.get(key, {}).values())
+    rates = set(CITY_AREA_RATE_PER_M2.get(key, {}).values()) | set(ZONE_RATES_BY_STREET.get(key, ()))
     if key in CITY_RATE_PER_M2:
         rates.add(CITY_RATE_PER_M2[key][0])
     if key == "zilina":
@@ -343,14 +380,29 @@ SOURCE = {
         "195/2024, 0.60; Ružomberok VZN 10/2025 (from 1.1.2026) 0.40; Spišská "
         "Nová Ves the city's tax page (VZN 2/2024, no change for 2026) 0.398; "
         "Humenné VZN 203/2024 (from 2025; VZN 206/2025 changes only the land "
-        "tax) 0.320. Not added — their sites block automated requests or give "
-        "only a draft: Martin, Zvolen, Liptovský Mikuláš, Považská Bystrica, "
-        "Nové Zámky, Levice, Lučenec, Topoľčany, Čadca, Rimavská Sobota, "
-        "Šamorín, Komárno. "
+        "tax) 0.320. Liptovský Mikuláš VZN 3/2025 (adopted 20.11.2025, from "
+        "1.1.2026) § 9 — the Liptovský Mikuláš area 0.50; Bodice, Demänová, "
+        "Liptovská Ondrašová, Okoličné, Palúdzka, Ráztoky 0.45; Benice, Iľanovo, "
+        "Ploštín, Svätý Štefan 0.30 (mikulas.sk). Čadca VZN 9/2023 (from 2024) "
+        "§ 5 — part 1 (the town's streets) 0.40, parts 2 and 3 (the outlying "
+        "settlements) 0.25; its Dodatok 1 (from 2025) and Dodatok 2 (from 2026) "
+        "leave flats alone (mestocadca.sk). Zvolen VZN 230 (from 2024) § 5 as "
+        "amended by Novelizácia č. 1 (13.12.2024, from 2025) — zones I/II/III "
+        "0.636/0.588/0.447; Novelizácia č. 2 (6.11.2025, from 2026) and č. 3 "
+        "(28.5.2026, from 2027) leave § 5 alone — read from CUET "
+        "(cuet.slovensko.sk), as zvolen.sk answers automated requests with a "
+        "CAPTCHA. Left to 🏛️ UPDATE TAX RATES, which reads it cleanly: Šamorín "
+        "(VZN 7/2024 § 5, 0.85 from 2025; VZN 5/2025, from 2026, leaves flats "
+        "alone). Not added — their sites block automated requests and they "
+        "publish no ordinance on CUET, or only old ones are found: Martin, "
+        "Považská Bystrica, Nové Zámky, Levice, Lučenec, Topoľčany, Rimavská "
+        "Sobota, Komárno. "
         "UNVERIFIED: Prešov's ordinance text; which cadastral areas make up a "
-        "Košice city part named without one (taxed at category I); any place not "
-        "in the table (taxed at 1.35)."),
-    "checked": "2026-11-03 (official sites)",
+        "Košice city part named without one (taxed at category I); Zvolen's "
+        "zone II, drawn street by street (a listing is taxed at zone I's rate "
+        "unless it names a zone III part); any place not in the table (taxed at "
+        "1.35)."),
+    "checked": "2026-11-06 (official sites; Zvolen on CUET)",
 }
 
 
