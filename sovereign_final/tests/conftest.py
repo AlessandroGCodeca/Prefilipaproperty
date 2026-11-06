@@ -76,3 +76,32 @@ def make_listing(lid: str, **over) -> dict:
     }
     row.update(over)
     return row
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "keeps_listing_cache: the dashboard's listing cache is not "
+                   "cleared before each AppTest run")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_listings_each_run(request, monkeypatch):
+    """The dashboard caches its listing load for LISTINGS_TTL_S seconds (app.py),
+    so a write from outside the page shows on it after that limit, not at
+    once. A dashboard test writes to the database and reruns at once: each
+    AppTest run starts as if the limit had passed. A test of the cache itself
+    is marked keeps_listing_cache."""
+    if "keeps_listing_cache" in request.keywords:
+        return
+    try:
+        import streamlit as st
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        return
+    real = AppTest._run
+
+    def _run(self, *args, **kwargs):
+        st.cache_data.clear()
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(AppTest, "_run", _run)

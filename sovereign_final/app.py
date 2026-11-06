@@ -885,7 +885,46 @@ from database import (
     days_on_market, DEAL_STAGES,
 )
 
-raw_data = get_all_active()
+# The listing load is cached: it grew with the database (0.39 s for 5,000
+# listings) and ran on every click. A cache hit costs a few hundredths of a
+# second. Whatever the dashboard changes clears the cache, here (a pipeline
+# step finishing) and next to the in-page writes. The time limit covers
+# writes from elsewhere: the scheduler, which runs in its own process.
+LISTINGS_TTL_S = 60
+
+
+@st.cache_data(ttl=LISTINGS_TTL_S, show_spinner=False)
+def _load_active(rejected: bool, db_path: str) -> list[dict]:
+    # db_path is part of the key only, so a different database (one per
+    # test) never gets another database's rows.
+    return get_all_active(rejected=rejected)
+
+
+def load_active(rejected: bool = False) -> list[dict]:
+    import database
+    return _load_active(rejected, database.SQLITE_PATH)
+
+
+def clear_listing_cache() -> None:
+    """After the dashboard changes listings: the next load reads the database."""
+    _load_active.clear()
+
+
+@st.cache_resource
+def _cleared_for() -> dict:
+    # Process-wide, as the cache and the jobs are: the last finished job the
+    # listing cache was cleared for.
+    return {"job": None}
+
+
+_done = jobs.current()
+if _done is not None and not _done.running and _cleared_for()["job"] != _done.id:
+    # A pipeline step has finished since the last clear: every tab reloads,
+    # whether or not it watched the step run.
+    _cleared_for()["job"] = _done.id
+    clear_listing_cache()
+
+raw_data = load_active()
 
 using_demo = show_demo or not raw_data
 if using_demo:
@@ -896,7 +935,7 @@ if using_demo:
 else:
     data = raw_data
 # LV-rejected listings never reach the lists; the Rejected tile counts them.
-rejected_rows = [] if using_demo else get_all_active(rejected=True)
+rejected_rows = [] if using_demo else load_active(rejected=True)
 # The market picked at the top filters everything below.
 data = [_tag_market(l) for l in data if in_view(l)]
 rejected_rows = [_tag_market(l) for l in rejected_rows if in_view(l)]
@@ -1727,6 +1766,7 @@ def render_card(l):
                                  cadastral_area=ku_in if changed else "")
                 from database import mark_duplicates
                 mark_duplicates()   # the flat's other copies carry its LV result
+                clear_listing_cache()
                 if r["status"] == "REJECT":
                     st.error(f"❌ REJECTED: {r['detail']}")
                 elif r["status"] == "PASS":
@@ -2424,6 +2464,7 @@ with t_rej:
                     # A copy that is no longer rejected rejoins its group and
                     # lifts "a copy failed LV" from the others (or the reverse).
                     mark_duplicates()
+                    clear_listing_cache()
                     if res["status"] == "REJECT":
                         msg = ("error", f"Still rejected: {res.get('detail')}")
                     elif res["status"] == "PASS":
@@ -2524,6 +2565,7 @@ with t_lv:
             # Storing the numbers is quick and offline; checking them is not.
             from modules.debt_bot import save_flat_lvs
             res = save_flat_lvs(changed)
+            clear_listing_cache()
             st.session_state["lv_todo_msg"] = (
                 "success", f"✅ Saved {res['saved']} LV number(s) — the next "
                            f"🔒 LV DEBT FILTER run checks them.")

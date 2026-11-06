@@ -293,6 +293,10 @@ source.
   and grows linearly. A full rerun at that size took 1.1–1.9 s.
 - **Fix:** cache the load with `st.cache_data` and a short time limit, and
   clear it when a pipeline step finishes.
+- **Done:** `app.py` caches the load for 60 s (`LISTINGS_TTL_S`). A cache
+  hit takes 0.02 s at 5,000 listings, against 0.36 s for the query. The cache
+  is cleared when a sidebar step finishes and after the page's own LV
+  re-checks and saves. A scheduler run shows within the time limit.
 
 **M6 · Some errors are swallowed without a trace** · Impact: hidden failures · Effort M
 
