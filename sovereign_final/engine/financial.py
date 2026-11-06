@@ -69,7 +69,8 @@ def _need(value, what: str, market, where: str = "markets.py"):
 # the room-adjusted benchmark, the rent fallbacks). A stored score from an
 # older model is redone on the next scoring run
 # (database.requeue_scores_from_older_model).
-SCORING_MODEL_VERSION = 6   # 6: Czech costs and rents checked against sources (docs/M1_VERIFICATION.md)
+SCORING_MODEL_VERSION = 7   # 7: Czech rents fall back to MF's rent map (engine/rent_map_cz)
+                            # 6: Czech costs and rents checked against sources (docs/M1_VERIFICATION.md)
 
 
 @dataclass
@@ -522,25 +523,29 @@ def match_rent_key(district: str, market: str = "sk") -> str:
     return "default"
 
 
-def base_rent_rate(district: str, rates=None, market: str = "sk") -> tuple[float, str, str]:
+def base_rent_rate(district: str, rates=None, market: str = "sk",
+                   rooms=None) -> tuple[float, str, str]:
     """(€/m² for a 2-izb baseline flat, matched key, source) before the
     industrial / rooms / feature multipliers.
 
     `rates` is an optional {key: €/m²} of live comps (engine/rent_comps); a
     key it carries wins over the hard-coded RENT_PER_M2 baseline. source is
     "live" or "baseline" so the dashboard can say which one drove the rent.
-    (Czechia: Kč/m² and its own keys.)
+    (Czechia: Kč/m² and its own keys; source "mf" for a place Deloitte
+    doesn't name whose figure is the MF rent map's reference flat, in the
+    size category of `rooms` — engine/rent_map_cz.)
     """
     k = match_rent_key(district, **_mkw(market))
     if rates and rates.get(k):
         return float(rates[k]), k, "live"
     if _sk(market):
         return baseline_rent(k), k, "baseline"
-    # A Czech place with no rent figure (engine/rent_cz) has no rent: an
-    # error the scorer reports, never a guess.
-    return _need(baseline_rent(k, market=market),
-                 f"rent figure for {district or 'a blank district'!r}", market,
-                 "engine/rent_cz.py"), k, "baseline"
+    # A Czech place with no rent figure (engine/rent_cz, engine/rent_map_cz)
+    # has no rent: an error the scorer reports, never a guess.
+    from engine import rent_cz
+    rate, source = rent_cz.baseline_rate(district, rooms)
+    return _need(rate, f"rent figure for {district or 'a blank district'!r}", market,
+                 "engine/rent_cz.py"), k, source
 
 
 def _rent_premiums(market: str) -> tuple:
@@ -556,7 +561,7 @@ def get_rent_estimate(district: str, size_m2: float, rooms=None,
                       parking=None, furnished=None, balcony=None,
                       rates=None, market: str = "sk") -> float:
     key = (district or "").lower().strip()
-    rate, _, source = base_rent_rate(district, rates, **_mkw(market))
+    rate, _, source = base_rent_rate(district, rates, rooms=rooms, **_mkw(market))
     zones, industrial, parking_premium, balcony_premium = _rent_premiums(market)
 
     # A live comp already contains whatever the local employer adds to demand;
@@ -566,13 +571,23 @@ def get_rent_estimate(district: str, size_m2: float, rooms=None,
     # Slovakia's table is a 2-izb flat's, so the rooms multiplier applies; a
     # Czech figure is an average over every size (engine/rent_cz): none.
     rate *= _rooms_multiplier(rooms) if _sk(market) else 1.0
+    # MF's reference flat has no balcony and no furniture: what its own model
+    # adds for them (Kč/m², the size category's) replaces those % premiums.
+    priced: set[str] = set()
+    if source == "mf":
+        from engine import rent_cz, rent_map_cz
+        mf = rent_cz.mf_rent(district, rooms)
+        if mf:
+            extra, priced = rent_map_cz.surcharge(mf, furnished=furnished, balcony=balcony)
+            rate += extra
     # Description-derived premiums (only when the description was parsed; a
     # falsy parking/balcony flag and unfurnished/unknown furnishing leave rate
     # untouched).
     if parking:
         rate *= parking_premium
-    rate *= _furnished_multiplier(furnished, market)
-    if balcony:
+    if "furnished" not in priced:
+        rate *= _furnished_multiplier(furnished, market)
+    if balcony and "balcony" not in priced:
         rate *= balcony_premium
     return round(rate * size_m2, 2)
 
@@ -802,6 +817,13 @@ def analyse(
         elif fallback == "kraj":
             parts.append(f"⚠️ Rent uses the {rent_key.title()} median of its towns — "
                          f"no rent figure for this town itself.")
+        if mkt == "cz" and not (rent_rates and rent_rates.get(rent_key)):
+            from engine import rent_cz
+            mf = rent_cz.mf_rent(district, rooms)
+            if mf:
+                parts.append(f"📋 Rent from the {mf.note()} — an unfurnished flat over "
+                             f"5 years old with no balcony, garage or lift, below "
+                             f"Deloitte's all-listings average; no Deloitte figure here.")
 
     if is_industrial_zone(district, **_mkw(mkt)):
         parts.append(f"⚙️ Industrial zone premium applied ({district}).")

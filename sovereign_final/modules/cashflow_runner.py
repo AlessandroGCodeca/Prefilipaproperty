@@ -96,7 +96,8 @@ def run_scoring(progress_callback=None, market: str | None = None) -> int:
             )
             db_data = result_to_db_dict(result)
             db_data.update(deal_extras(result))
-            db_data["rent_source"] = base_rent_rate(district, rates, **_mkw(m))[2]
+            db_data["rent_source"] = base_rent_rate(district, rates, rooms=row.get("rooms"),
+                                                     **_mkw(m))[2]
             upsert_cashflow(db_data)
             scored += 1
             e = emojis.get(result.classification, "")

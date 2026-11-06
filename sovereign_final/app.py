@@ -1401,6 +1401,8 @@ def render_card(l):
         with c2:
             if cz:
                 rent_help = (("Živé srovnání z pronájmů" if l.get("rent_source") == "live"
+                              else "Cenová mapa nájemného MF (engine.rent_map_cz)"
+                              if l.get("rent_source") == "mf"
                               else "Výchozí Kč/m² (engine.rent_cz)")
                              + (f" pro '{l['rent_key']}'" if l.get("rent_key") else ""))
             else:
@@ -2092,7 +2094,8 @@ def _whatif_tab():
         est_rent = get_rent_estimate(wi_district, wi_size, wi_rooms or None,
                                      (pick or {}).get("has_parking"), (pick or {}).get("furnished"),
                                      (pick or {}).get("has_balcony"), rates=live_rates, **mk)
-        rate_used, rent_key, rent_src = base_rent_rate(wi_district, live_rates, **mk)
+        rate_used, rent_key, rent_src = base_rent_rate(wi_district, live_rates,
+                                                        rooms=wi_rooms or None, **mk)
     except (LookupError, TypeError):
         # No rent figure for this market and place: the user types one —
         # nothing was estimated, so no estimate or fallback is captioned.
@@ -2127,8 +2130,9 @@ def _whatif_tab():
     with w3:
         st.markdown("**RENT & HOLD**")
         if rent_src:
+            src_name = {"live": "live comps", "mf": "MF rent map"}.get(rent_src, "baseline table")
             st.caption(f"Estimate {amt(cur, est_rent, '/mo')} · {rate_used:.2f} {sym}/m² for "
-                       f"'{rent_key}' ({'live comps' if rent_src == 'live' else 'baseline table'})")
+                       f"'{rent_key}' ({src_name})")
         _fb = _rent_fallback({"rent_key": rent_key, "market": wm})
         if _fb:
             st.caption("⚠ " + ("National default rent — this town is in no rent table."
@@ -2570,10 +2574,15 @@ def _comps_cz():
                                     for c in ("Live median Kč/m²", "Baseline Kč/m²", "In use Kč/m²")})
         st.caption(f"A key needs {RENT_COMP_MIN_SAMPLE}+ rentals; its live median is cut "
                    f"{(1 - RENT_COMP_ASKING_HAIRCUT):.0%} (asking → achieved). A place with no "
-                   f"Deloitte figure takes the live rate alone.")
+                   f"Deloitte or MF rent-map figure takes the live rate alone.")
     st.caption("Baseline Kč/m²: " + " · ".join(f"{k.title()} {v:.0f}"
                                                 for k, v in RENT_PER_M2_CZ.items())
                + f" — {RENT_SOURCE['source']}")
+    from engine import rent_map_cz
+    st.caption(("Elsewhere: " if rent_map_cz.UNITS else "Elsewhere (not loaded): ")
+               + rent_map_cz.SOURCE["source"]
+               + (f". A figure needs MF data coverage {rent_map_cz.MIN_COVERAGE}/5 or more "
+                  f"in the listing's size category." if rent_map_cz.UNITS else "."))
 
 
 with t_comps:
