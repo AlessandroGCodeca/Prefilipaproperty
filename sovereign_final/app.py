@@ -87,22 +87,25 @@ overview.render(v, sb)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TABS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-(t0, t1, t_map, t_whatif, t_pipe, t2, t_rej, t_lv, t_comps, t_tax, t3) = st.tabs([
-    "TRIAGE TABLE",
-    "ACTIVE SNAG LIST",
-    "MAP",
-    "WHAT-IF / TAX",
-    "DEAL PIPELINE",
-    "SATELLITE VIEWER",
-    "REJECTED",
-    "LV TO-DO",
-    "RENT COMPS",
-    "TAX RATES",
-    "ONE-CLICK CLOSE",
-])
-# Drawn in the order the tabs were always drawn in.
-for tab, page in ((t0, triage), (t1, snag_list), (t_map, map_view), (t_whatif, what_if),
-                  (t_pipe, deal_pipeline), (t_rej, rejected), (t_lv, lv_todo),
-                  (t_comps, rent_comps), (t_tax, tax_rates), (t2, satellite), (t3, close)):
-    with tab:
+# Three groups, each with its own tabs: eleven in one row overflowed at
+# 1440 px and hid the last behind an arrow.
+TAB_GROUPS = (
+    ("🎯 DEALS",    (("TRIAGE TABLE", triage), ("ACTIVE SNAG LIST", snag_list),
+                     ("MAP", map_view), ("SATELLITE VIEWER", satellite))),
+    ("📊 ANALYSIS", (("WHAT-IF / TAX", what_if), ("RENT COMPS", rent_comps),
+                     ("TAX RATES", tax_rates))),
+    ("🗂 WORKFLOW", (("DEAL PIPELINE", deal_pipeline), ("LV TO-DO", lv_todo),
+                     ("REJECTED", rejected), ("ONE-CLICK CLOSE", close))),
+)
+# Drawn in the order the tabs were always drawn in, whatever group holds them.
+DRAW_ORDER = (triage, snag_list, map_view, what_if, deal_pipeline, rejected, lv_todo,
+              rent_comps, tax_rates, satellite, close)
+
+_page_tab = {}
+for group, (_label, pages) in zip(st.tabs([g for g, _ in TAB_GROUPS]), TAB_GROUPS):
+    with group:
+        for tab, (_name, page) in zip(st.tabs([n for n, _ in pages]), pages):
+            _page_tab[page] = tab
+for page in DRAW_ORDER:
+    with _page_tab[page]:
         page.render(v)

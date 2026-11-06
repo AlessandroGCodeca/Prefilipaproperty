@@ -431,6 +431,9 @@ def test_a_click_reads_the_listing_towns_and_the_villages_due(villages, db, monk
     tr.refresh_municipalities()
     db.upsert_listing(make_listing("v1", district="Ivanka pri Dunaji"))
     monkeypatch.setattr(scr, "TOWNS", {"Pezinok": scr.TOWNS["Pezinok"]})
+    # One site at a time, so `read` is the order the towns are taken in: with
+    # 16 at once, a later town's thread could record itself first.
+    monkeypatch.setattr(tr, "WORKERS", 1)
     read = []
 
     def check(t, year, **kw):

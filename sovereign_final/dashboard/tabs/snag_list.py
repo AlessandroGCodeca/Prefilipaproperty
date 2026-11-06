@@ -22,8 +22,8 @@ def render(v) -> None:
     yellows = v.yellows
     if not greens and not yellows and not whites and not pending:
         st.info(hidden_note() if n_hidden else
-                "No listings in DB yet — click ▶ RUN EVERYTHING (or NEHNUT, BAZOS, "
-                "TOPREAL) in the sidebar to scrape.")
+                "No listings in DB yet — click ▶ RUN EVERYTHING (or a portal under "
+                "📅 DAILY RUN) in the sidebar to scrape.")
     else:
         if not greens and not yellows and not whites and pending:
             st.info(hidden_note("scored listings") if n_scored_loaded else unscored_note())

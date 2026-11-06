@@ -399,7 +399,8 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
     pdf.h2("Caveats")
     if cz:
         medians = ("the market value is judged against the regional median above (its "
-                   "source as given)" if median_m2 else
+                   "source as given; ČSÚ's figure is an average purchase price, which an "
+                   "asking price usually exceeds)" if median_m2 else
                    "there is no Czech regional price median for this place in this app, so "
                    "the class is WHITE")
         pdf.para("Rent, market value and risk flags are estimates from public data; "

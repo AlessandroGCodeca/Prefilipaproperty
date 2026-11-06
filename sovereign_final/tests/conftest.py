@@ -28,6 +28,16 @@ def _no_stored_tax_rates(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_cached_district_prices():
+    """engine.price_comps_cz keeps the district factors it read for a few
+    minutes; each test reads its own database's."""
+    from engine import price_comps_cz
+    price_comps_cz.reload()
+    yield
+    price_comps_cz.reload()
+
+
+@pytest.fixture(autouse=True)
 def _no_real_database(monkeypatch, tmp_path):
     """No test opens the real data/sovereign.db. A test that reaches
     database.get_conn() without a database of its own (engine.property_tax_sk

@@ -98,10 +98,44 @@ def test_empty_database_renders_the_demo_view(db):
     assert ">None<" not in markdown_of(at)
 
 
+PAGE_TABS = ["TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER", "WHAT-IF / TAX",
+             "RENT COMPS", "TAX RATES", "DEAL PIPELINE", "LV TO-DO", "REJECTED",
+             "ONE-CLICK CLOSE"]
+GROUP_TABS = ["🎯 DEALS", "📊 ANALYSIS", "🗂 WORKFLOW"]
+
+
+def tab_labels(at):
+    return [t.label for t in at.tabs]
+
+
 def test_populated_database_renders_every_tab(populated_db):
     at = run_app()
     assert not at.exception, [e.value for e in at.exception]
-    assert len(at.tabs) == 11
+    # Eleven tabs in three groups (one row of eleven overflowed at 1440 px).
+    assert sorted(tab_labels(at)) == sorted(PAGE_TABS + GROUP_TABS)
+
+
+def test_the_tabs_are_grouped(populated_db):
+    at = run_app()
+    labels = tab_labels(at)
+    # Each group's own tabs follow it.
+    assert labels == ["🎯 DEALS", "TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER",
+                      "📊 ANALYSIS", "WHAT-IF / TAX", "RENT COMPS", "TAX RATES",
+                      "🗂 WORKFLOW", "DEAL PIPELINE", "LV TO-DO", "REJECTED", "ONE-CLICK CLOSE"]
+
+
+def test_the_sidebar_buttons_are_grouped_and_named_in_full(populated_db):
+    at = run_app()
+    groups = {e.label: [b.label for b in e.button] for e in at.sidebar.expander}
+    assert list(groups) == ["📅 DAILY RUN — step by step", "🔧 REPAIR DATA", "🩺 DIAGNOSTICS"]
+    daily = groups["📅 DAILY RUN — step by step"]
+    assert daily[:3] == ["🇸🇰 Nehnutelnosti.sk", "🇸🇰 Bazos.sk", "🇸🇰 Topreality.sk"]
+    assert "🇨🇿 Bazos.cz" in daily and "🇨🇿 Bezrealitky.cz" in daily
+    assert "🔎 FILL MISSING DETAILS" in daily and "💰 CASHFLOW SCORE" in daily
+    assert "♻️ RESCORE ALL" in groups["🔧 REPAIR DATA"]
+    assert "🔗 TEST SITES" in groups["🩺 DIAGNOSTICS"]
+    # ▶ RUN EVERYTHING stays above the groups.
+    assert at.sidebar.button[0].label == "▶ RUN EVERYTHING"
 
 
 def test_stats_bar_counts_the_listings_on_the_page(populated_db):
@@ -485,7 +519,7 @@ def test_parse_desc_says_why_nothing_was_parsed(populated_db, monkeypatch):
     import modules.llm_enrichment as llm
     monkeypatch.setattr(llm, "ANTHROPIC_API_KEY", "")
     at = run_app()
-    _button(at, "📝 PARSE DESC").click().run()
+    _button(at, "📝 PARSE DESCRIPTIONS").click().run()
     _finished(at)
     assert any("set ANTHROPIC_API_KEY" in i.value for i in at.info)
 
@@ -497,7 +531,7 @@ def test_a_scrapers_count_is_shown_after_the_rerun(populated_db, monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess(
         cmd, 0, '{"ok": true, "n": 7}\n', ""))
     at = run_app()
-    _button(at, "BAZOS").click().run()
+    _button(at, "🇸🇰 Bazos.sk").click().run()
     _finished(at)
     assert any("scraped 7 listings" in s.value for s in at.success)
 
@@ -516,10 +550,10 @@ def test_a_scraper_that_runs_out_of_time_is_reported_not_a_crash(populated_db, m
         raise subprocess.TimeoutExpired(cmd, k.get("timeout"))
     monkeypatch.setattr(subprocess, "run", too_slow)
     at = run_app()
-    _button(at, "NEHNUT").click().run()
+    _button(at, "🇸🇰 Nehnutelnosti.sk").click().run()
     _finished(at)
     # 30 minutes: the step runs in the background now, so it can take longer.
-    assert any("30-minute limit" in w.value and "NEHNUT again" in w.value for w in at.warning)
+    assert any("30-minute limit" in w.value and "🇸🇰 Nehnutelnosti.sk again" in w.value for w in at.warning)
     assert scored                                 # the pages it finished are scored
 
 
@@ -742,12 +776,12 @@ def test_password_gate(db, monkeypatch):
     at.text_input(key="login_pw").input("s3cret")
     at.button[0].click().run()
     assert not at.exception, [e.value for e in at.exception]
-    assert len(at.tabs) == 11   # with LV TO-DO (audit A8) and TAX RATES
+    assert sorted(tab_labels(at)) == sorted(PAGE_TABS + GROUP_TABS)
 
 
 def test_no_password_set_means_no_gate(db):
     at = run_app()
-    assert len(at.tabs) == 11   # with LV TO-DO (audit A8) and TAX RATES
+    assert sorted(tab_labels(at)) == sorted(PAGE_TABS + GROUP_TABS)
 
 
 def test_sidebar_shows_the_last_scheduled_run(db):
@@ -784,7 +818,7 @@ def test_a_button_runs_its_step_in_the_background(db, monkeypatch):
     # The click returned at once; the step is still going and the pipeline
     # buttons wait for it.
     assert jobs.running()
-    assert next(b for b in at.button if b.label == "BAZOS").disabled
+    assert next(b for b in at.button if b.label == "🇸🇰 Bazos.sk").disabled
     assert at.sidebar.get("progress")
     release.set()
     jobs.wait(30)
@@ -792,7 +826,7 @@ def test_a_button_runs_its_step_in_the_background(db, monkeypatch):
     # The result stays on screen (a rerun used to wipe it), and the buttons
     # are back.
     assert any("Deactivated 3 stale listings" in s.value for s in at.success)
-    assert not next(b for b in at.button if b.label == "BAZOS").disabled
+    assert not next(b for b in at.button if b.label == "🇸🇰 Bazos.sk").disabled
     at.run()
     assert any("Deactivated 3 stale listings" in s.value for s in at.success)
 

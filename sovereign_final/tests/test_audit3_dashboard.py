@@ -480,9 +480,10 @@ def test_a_slovak_place_without_a_median_is_no_longer_graded_on_cap_rate_alone()
 
 
 def test_a_czech_card_without_a_benchmark_shows_no_grade_a(db):
-    add(db, "czNoMed", district="Praha 2", title="Byt 2+kk test", price_eur=4_500_000.0,
+    # A place that resolves to no okres: no benchmark at all.
+    add(db, "czNoMed", district="Horní Dolní", title="Byt 2+kk test", price_eur=4_500_000.0,
         source="sreality", url="https://example.cz/czNoMed", market="cz")
-    r = score(db, "czNoMed", 4_500_000.0, "Praha 2", market="cz", rent=22_000)
+    r = score(db, "czNoMed", 4_500_000.0, "Horní Dolní", market="cz", rent=22_000)
     assert r.market_discount is None
     at = run(open_cards=("czNoMed",))
     assert "GRADE A" not in md(at)
