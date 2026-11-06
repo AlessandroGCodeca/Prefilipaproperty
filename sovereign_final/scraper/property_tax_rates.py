@@ -452,8 +452,12 @@ def _get(url: str, session=None, timeout: float = 45):
     if SCRAPER_API_KEY:
         return get(url, session=session, timeout=int(timeout))
     s = session or requests.Session()
-    s.headers.update({**BROWSER_HEADERS, "Accept-Encoding": "gzip, deflate"})
-    return s.get(url, timeout=timeout)
+    try:
+        s.headers.update({**BROWSER_HEADERS, "Accept-Encoding": "gzip, deflate"})
+        return s.get(url, timeout=timeout)       # the body is read before the close
+    finally:
+        if session is None:
+            s.close()
 
 
 def fetch(url: str, session=None, timeout: float = 45, retry: bool = True) -> Doc:
@@ -766,10 +770,14 @@ def municipalities(session=None) -> list[Municipality]:
     """Every Slovak municipality with its district and official website."""
     import requests
     s = session or requests.Session()
-    r = s.get(WIKIDATA, params={"query": _MUNICIPALITIES_QUERY},
-              headers={"Accept": "text/csv",
-                       "User-Agent": "SovereignPropertyTax/1.0 (municipal tax rates)"},
-              timeout=180)
+    try:
+        r = s.get(WIKIDATA, params={"query": _MUNICIPALITIES_QUERY},
+                  headers={"Accept": "text/csv",
+                           "User-Agent": "SovereignPropertyTax/1.0 (municipal tax rates)"},
+                  timeout=180)
+    finally:
+        if session is None:
+            s.close()
     r.raise_for_status()
     import csv as _csv
     items: dict[str, dict] = {}
