@@ -334,6 +334,14 @@ def _stale_step(progress):
 
 def dispatch(sb) -> None:
     """Start the step of the sidebar button clicked on this run, as a job."""
+    import scheduler
+    from dashboard.sidebar import portal_label
+    # Each Slovak portal's button label, by its source ("bazos" → "🇸🇰 Bazos.sk").
+    _SK = {"nehnutelnosti": portal_label("sk", "Nehnutelnosti.sk"),
+           "bazos": portal_label("sk", "Bazos.sk"),
+           "topreality": portal_label("sk", "Topreality.sk")}
+    _SK.update({scheduler.source_of(m): portal_label("sk", n)
+                for n, m in scheduler.SCRAPERS.get("sk", ())})
     _cz_clicks = sb.cz_clicks
     do_addr = sb.do_addr
     do_all = sb.do_all
@@ -354,14 +362,16 @@ def dispatch(sb) -> None:
     do_topreal = sb.do_topreal
     for _clicked, _label, _step in (
         (do_all,     RUN_ALL,                  _all_step),
-        (do_nehnut,  "NEHNUT",                 _scrape_step("nehnutelnosti", "Nehnutelnosti", "NEHNUT")),
-        (do_bazos,   "BAZOS",                  _scrape_step("bazos", "Bazos", "BAZOS")),
-        (do_topreal, "TOPREAL",                _scrape_step("topreality", "Topreality", "TOPREAL")),
+        (do_nehnut,  _SK["nehnutelnosti"],     _scrape_step("nehnutelnosti", "Nehnutelnosti",
+                                                            _SK["nehnutelnosti"])),
+        (do_bazos,   _SK["bazos"],             _scrape_step("bazos", "Bazos", _SK["bazos"])),
+        (do_topreal, _SK["topreality"],        _scrape_step("topreality", "Topreality",
+                                                            _SK["topreality"])),
         (do_fill,    "FILL MISSING DETAILS",   _fill_step),
         (do_lv,      "LV DEBT FILTER",         _lv_step),
         (do_cf,      "CASHFLOW SCORE",         _cf_step),
-        (do_desc,    "PARSE DESC",             _desc_step),
-        (do_addr,    "NORM ADDR",              _addr_step),
+        (do_desc,    "PARSE DESCRIPTIONS",     _desc_step),
+        (do_addr,    "NORMALIZE ADDRESSES",    _addr_step),
         (do_rescore, "RESCORE ALL",            _rescore_step),
         (do_loc,     "LOCATION IQ",            _loc_step),
         (do_reparse, "RE-PARSE",               _reparse_step),

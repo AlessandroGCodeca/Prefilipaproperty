@@ -1,7 +1,8 @@
 """
 dashboard/sidebar.py — the sidebar: each market's last pipeline run, the job
-a button started, one button per pipeline step, the filters, and the scoring
-settings in force.
+a button started, ▶ RUN EVERYTHING and one button per pipeline step — grouped
+under DAILY RUN (the steps the 06:00 run makes, in its order), REPAIR DATA
+and DIAGNOSTICS — the filters, and the scoring settings in force.
 """
 
 from types import SimpleNamespace
@@ -23,6 +24,15 @@ def _fx_refresh_if_due() -> bool:
         return fx_rate.refresh_if_due(timeout=5)
     except Exception:
         return False
+
+
+_FLAG = {"sk": "🇸🇰", "cz": "🇨🇿"}
+
+
+def portal_label(market: str, name: str) -> str:
+    """A portal's sidebar button: its full name with its country's flag
+    ("🇸🇰 Bazos.sk", "🇨🇿 Bazos.cz")."""
+    return f"{_FLAG.get(market, market.upper())} {name}"
 
 
 def render() -> SimpleNamespace:
@@ -89,75 +99,89 @@ def render() -> SimpleNamespace:
         _job_panel()
         _busy = jobs.running()
         do_all   = st.button("▶ RUN EVERYTHING", type="primary", width="stretch", disabled=_busy,
-                             help="Every step below, in order: the three portals, missing "
-                                  "details, rent comps, LV check, scoring, location, risk, "
-                                  "portal copies — what the 06:00 scheduler runs. Takes a "
-                                  "while (up to an hour); the page stays usable.")
-        c1, c2, c3 = st.columns(3)
-        with c1: do_nehnut = st.button("NEHNUT",  width="stretch", disabled=_busy)
-        with c2: do_bazos  = st.button("BAZOS",   width="stretch", disabled=_busy)
-        with c3: do_topreal= st.button("TOPREAL", width="stretch", disabled=_busy)
-        # Czech portals (scheduler.SCRAPERS["cz"]), one button each.
-        _CZ_BUTTONS = {"scraper.bezrealitky": "BEZREAL", "scraper.idnes": "IDNES",
-                       "scraper.bazos_cz": "BAZOS CZ", "scraper.sreality": "SREALITY"}
-        _cz_clicks = []
-        _cz_portals = _scheduler.SCRAPERS.get("cz") or ()
-        if _cz_portals:
-            st.markdown('<div class="muted">CZ portals</div>', unsafe_allow_html=True)
-            for _col, (_name, _module) in zip(st.columns(len(_cz_portals)), _cz_portals):
-                _label = _CZ_BUTTONS.get(_module) or _name.split(".")[0].upper()[:8]
-                with _col:
-                    _cz_clicks.append((st.button(_label, key=f"cz_{_module}", width="stretch",
-                                                 disabled=_busy), _label, _name, _module))
-        do_fill  = st.button("🔎 FILL MISSING DETAILS", width="stretch", disabled=_busy,
-                             help="Re-read nehnutelnosti listings saved without a price, "
-                                  "size or district (one with no price or size can't be "
-                                  "scored), retire the ones taken down, then score what "
-                                  "it filled in. Bazos / Topreality listings aren't re-read.")
-        do_lv    = st.button("🔒 LV DEBT FILTER", width="stretch", disabled=_busy)
-        do_cf    = st.button("💰 CASHFLOW SCORE", width="stretch", disabled=_busy)
-        do_desc  = st.button("📝 PARSE DESC", width="stretch", disabled=_busy,
-                             help="Run Claude on un-parsed listing descriptions to "
-                                  "extract parking / furnished / condition. Needs "
-                                  "ANTHROPIC_API_KEY. Re-score afterwards to apply the "
-                                  "parking & furnished rent premiums.")
-        do_addr  = st.button("🗺️ NORM ADDR", width="stretch", disabled=_busy,
-                             help="Run Claude on listings with a blank district to "
-                                  "resolve city/district from the raw address, so rent "
-                                  "stops defaulting to €6.50/m². Needs ANTHROPIC_API_KEY. "
-                                  "Re-score afterwards to apply.")
-        do_rescore = st.button("♻️ RESCORE ALL",  width="stretch", disabled=_busy,
-                               help="Clear all cashflow scores and re-run scoring from "
-                                    "scratch. Use after updating rent/tax assumptions.")
-        do_reparse = st.button("📝 RE-PARSE (new fields)", width="stretch", disabled=_busy,
-                               help="Re-run description parsing on listings parsed before "
-                                    "floor / elevator / cellar / terrace were kept. Needs "
-                                    "ANTHROPIC_API_KEY.")
-        do_loc   = st.button("📍 LOCATION IQ",    width="stretch", disabled=_busy,
-                             help="Geocode + transit/amenities + real noise/flood/"
-                                  "construction flags. Google when GOOGLE_PLACES_API_KEY "
-                                  "is set, OpenStreetMap otherwise.")
-        do_risk  = st.button("🌊 RISK BACKFILL", width="stretch", disabled=_busy,
-                             help="Give listings located before the real risk data "
-                                  "existed their noise / flood / construction answers.")
-        do_rent  = st.button("🏘️ RENT COMPS", width="stretch", disabled=_busy,
-                             help="Scrape Slovak (prenájom) and Czech (pronájem) rentals, "
-                                  "rebuild the live rents per district / town and re-score "
-                                  "the listings whose rate moved — and the Czech ones that "
-                                  "waited for a rent figure.")
-        do_tax   = st.button("🏛️ UPDATE TAX RATES", width="stretch", disabled=_busy,
-                             help="Read each Slovak town's flat property-tax rate (daň z bytov) "
-                                  "from its own site, apply the new ones, hold anything doubtful "
-                                  "for review in the TAX RATES tab, and re-score the listings "
-                                  "whose tax moved.")
-        do_dupes = st.button("📡 MERGE PORTAL COPIES", width="stretch", disabled=_busy,
-                             help="Group the same flat listed on several portals.")
-        do_stale = st.button("🧹 CLEAN STALE (21d)", width="stretch", disabled=_busy)
-        do_test  = st.button("🔗 TEST SITES",      width="stretch")
-        do_test_cz = (st.button("🔗 TEST CZ SITES", width="stretch",
-                                help="robots.txt and HTTP status of each Czech portal — "
-                                     "the ones read and the ones left out.")
-                      if _cz_portals or _scheduler.BLOCKED.get("cz") else False)
+                             help="Every step under DAILY RUN, in order: each market's portals, "
+                                  "missing details, rent comps, LV check, scoring, location, "
+                                  "risk, portal copies — what the 06:00 scheduler runs. Takes "
+                                  "a while (up to an hour); the page stays usable.")
+
+        # The steps the daily run makes, one button each, in its order.
+        with st.expander("📅 DAILY RUN — step by step", expanded=False):
+            st.markdown('<div class="muted">Portals</div>', unsafe_allow_html=True)
+            # One full-width button per portal, named in full with its country:
+            # three abbreviations in a row were cut off ("NEH…"), and the Slovak
+            # and Czech Bazoš looked the same.
+            _sk_clicks = {_module: st.button(portal_label("sk", _name), key=f"sk_{_module}",
+                                             width="stretch", disabled=_busy)
+                          for _name, _module in _scheduler.SCRAPERS["sk"]}
+            do_nehnut  = _sk_clicks.get("scraper.nehnutelnosti", False)
+            do_bazos   = _sk_clicks.get("scraper.bazos", False)
+            do_topreal = _sk_clicks.get("scraper.topreality", False)
+            # Czech portals (scheduler.SCRAPERS["cz"]), one button each.
+            _cz_clicks = []
+            _cz_portals = _scheduler.SCRAPERS.get("cz") or ()
+            for _name, _module in _cz_portals:
+                _label = portal_label("cz", _name)
+                _cz_clicks.append((st.button(_label, key=f"cz_{_module}", width="stretch",
+                                             disabled=_busy), _label, _name, _module))
+            st.markdown('<div class="muted">Then</div>', unsafe_allow_html=True)
+            do_fill  = st.button("🔎 FILL MISSING DETAILS", width="stretch", disabled=_busy,
+                                 help="Re-read nehnutelnosti listings saved without a price, "
+                                      "size or district (one with no price or size can't be "
+                                      "scored), retire the ones taken down, then score what "
+                                      "it filled in. Bazos / Topreality listings aren't re-read.")
+            do_rent  = st.button("🏘️ RENT COMPS", width="stretch", disabled=_busy,
+                                 help="Scrape Slovak (prenájom) and Czech (pronájem) rentals, "
+                                      "rebuild the live rents per district / town and re-score "
+                                      "the listings whose rate moved — and the Czech ones that "
+                                      "waited for a rent figure.")
+            do_lv    = st.button("🔒 LV DEBT FILTER", width="stretch", disabled=_busy)
+            do_addr  = st.button("🗺️ NORMALIZE ADDRESSES", width="stretch", disabled=_busy,
+                                 help="Run Claude on listings with a blank district to "
+                                      "resolve city/district from the raw address, so rent "
+                                      "stops defaulting to €6.50/m². Needs ANTHROPIC_API_KEY. "
+                                      "Re-score afterwards to apply.")
+            do_desc  = st.button("📝 PARSE DESCRIPTIONS", width="stretch", disabled=_busy,
+                                 help="Run Claude on un-parsed listing descriptions to "
+                                      "extract parking / furnished / condition. Needs "
+                                      "ANTHROPIC_API_KEY. Re-score afterwards to apply the "
+                                      "parking & furnished rent premiums.")
+            do_cf    = st.button("💰 CASHFLOW SCORE", width="stretch", disabled=_busy)
+            do_loc   = st.button("📍 LOCATION IQ",    width="stretch", disabled=_busy,
+                                 help="Geocode + transit/amenities + real noise/flood/"
+                                      "construction flags. Google when GOOGLE_PLACES_API_KEY "
+                                      "is set, OpenStreetMap otherwise.")
+            do_risk  = st.button("🌊 RISK BACKFILL", width="stretch", disabled=_busy,
+                                 help="Give listings located before the real risk data "
+                                      "existed their noise / flood / construction answers.")
+            do_dupes = st.button("📡 MERGE PORTAL COPIES", width="stretch", disabled=_busy,
+                                 help="Group the same flat listed on several portals.")
+
+        # Redoing work the daily run already did, after a rule or a table changed.
+        with st.expander("🔧 REPAIR DATA", expanded=False):
+            do_rescore = st.button("♻️ RESCORE ALL",  width="stretch", disabled=_busy,
+                                   help="Clear all cashflow scores and re-run scoring from "
+                                        "scratch. Use after updating rent/tax assumptions.")
+            do_reparse = st.button("📝 RE-PARSE (new fields)", width="stretch", disabled=_busy,
+                                   help="Re-run description parsing on listings parsed before "
+                                        "floor / elevator / cellar / terrace were kept. Needs "
+                                        "ANTHROPIC_API_KEY.")
+            do_tax   = st.button("🏛️ UPDATE TAX RATES", width="stretch", disabled=_busy,
+                                 help="Read each Slovak town's flat property-tax rate (daň z "
+                                      "bytov) from its own site, apply the new ones, hold "
+                                      "anything doubtful for review in the TAX RATES tab, and "
+                                      "re-score the listings whose tax moved. Once a year is "
+                                      "enough (most ordinances take effect on 1 January).")
+            do_stale = st.button("🧹 CLEAN STALE (21d)", width="stretch", disabled=_busy,
+                                 help="Retire listings not seen for 21 days — but not those "
+                                      "of a portal that has returned nothing on its last runs.")
+
+        with st.expander("🩺 DIAGNOSTICS", expanded=False):
+            do_test  = st.button("🔗 TEST SITES",      width="stretch",
+                                 help="robots.txt and HTTP status of each Slovak portal.")
+            do_test_cz = (st.button("🔗 TEST CZ SITES", width="stretch",
+                                    help="robots.txt and HTTP status of each Czech portal — "
+                                         "the ones read and the ones left out.")
+                          if _cz_portals or _scheduler.BLOCKED.get("cz") else False)
 
         st.markdown("---")
         st.markdown("#### FILTERS")

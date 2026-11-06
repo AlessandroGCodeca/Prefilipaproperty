@@ -36,7 +36,8 @@ def render(v) -> None:
             st.info(hidden_note("scored listings"))
         else:
             st.info("No scored listings yet — click ▶ RUN EVERYTHING in the sidebar "
-                    "(or NEHNUT / BAZOS / TOPREAL, then 💰 CASHFLOW SCORE) to populate this view.")
+                    "(or a portal under 📅 DAILY RUN, then 💰 CASHFLOW SCORE) to populate "
+                    "this view.")
     else:
         from engine.financial import compute_deal_score
         emoji_map = {"GREEN": "🟢", "YELLOW": "🟡", "WHITE": "⚪", "PENDING": "⏳"}

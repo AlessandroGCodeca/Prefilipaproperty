@@ -187,7 +187,7 @@ gives each source and what changed.
 
 ```
 sovereign_final/
-├── app.py                    ← Streamlit dashboard (11 tabs): the page, top to
+├── app.py                    ← Streamlit dashboard (11 tabs in 3 groups): the page, top to
 │                               bottom; each part is drawn by dashboard/
 ├── dashboard/
 │   ├── sidebar.py            ← Pipeline status, step buttons, filters
@@ -287,6 +287,12 @@ sovereign_final/
 
 ## Dashboard Tabs
 
+The eleven tabs sit in three groups (one row of eleven overflowed at 1440 px):
+
+- **🎯 DEALS** — TRIAGE TABLE, ACTIVE SNAG LIST, MAP, SATELLITE VIEWER
+- **📊 ANALYSIS** — WHAT-IF / TAX, RENT COMPS, TAX RATES
+- **🗂 WORKFLOW** — DEAL PIPELINE, LV TO-DO, REJECTED, ONE-CLICK CLOSE
+
 | Tab | What it does |
 |-----|-------------|
 | TRIAGE TABLE | Flat, sortable view of every scored listing — grade, price, **max offer** (🟡/🟢), ask vs max offer, below-market %, rent, surplus, **+2 pp stress**, gross yield, cap rate, **IRR**, **days tracked** (since the first scrape — not the portal's posting date), **price change**, **portals**, deal stage, vibe, LV status, **⛔ cash-flow negative** |
@@ -316,16 +322,29 @@ A price below the sanity floor gets no grade ("—"): it is a data error, not a 
 
 ## Pipeline (Sidebar Buttons)
 
+**▶ RUN EVERYTHING** sits at the top of the sidebar; the step buttons are in
+three groups under it, each folded until you open it:
+
+- **📅 DAILY RUN — step by step**: the steps of the daily run, in its order —
+  each portal by its full name and flag (🇸🇰 Nehnutelnosti.sk, 🇸🇰 Bazos.sk,
+  🇸🇰 Topreality.sk, 🇨🇿 Bezrealitky.cz, 🇨🇿 Reality.iDNES.cz, 🇨🇿 Bazos.cz),
+  then 🔎 FILL MISSING DETAILS, 🏘️ RENT COMPS, 🔒 LV DEBT FILTER, 🗺️ NORMALIZE
+  ADDRESSES, 📝 PARSE DESCRIPTIONS, 💰 CASHFLOW SCORE, 📍 LOCATION IQ,
+  🌊 RISK BACKFILL, 📡 MERGE PORTAL COPIES
+- **🔧 REPAIR DATA**: ♻️ RESCORE ALL, 📝 RE-PARSE (new fields), 🏛️ UPDATE TAX
+  RATES, 🧹 CLEAN STALE (21d)
+- **🩺 DIAGNOSTICS**: 🔗 TEST SITES, 🔗 TEST CZ SITES
+
 ```
-NEHNUT → BAZOS → TOPREAL → FILL MISSING DETAILS → RENT COMPS → housekeeping
-       → LV DEBT FILTER → NORM ADDR → PARSE DESC → CASHFLOW SCORE
-       → LOCATION IQ → RISK BACKFILL → MERGE PORTAL COPIES
+portals → FILL MISSING DETAILS → RENT COMPS → housekeeping
+        → LV DEBT FILTER → NORMALIZE ADDRESSES → PARSE DESCRIPTIONS → CASHFLOW SCORE
+        → LOCATION IQ → RISK BACKFILL → MERGE PORTAL COPIES
 ```
 
-**▶ RUN EVERYTHING** at the top of the sidebar runs that whole chain — the
-same run the scheduler makes at 06:00, recorded the same way — for when no
-scheduler runs (the Mac start above) or you want fresh data now. It takes a
-while (each portal can take up to 30 minutes); the page stays usable.
+**▶ RUN EVERYTHING** runs that whole chain for each market — the same run the
+scheduler makes at 06:00, recorded the same way — for when no scheduler runs
+(the Mac start above) or you want fresh data now. It takes a while (each
+portal can take up to 30 minutes); the page stays usable.
 
 **🔎 FILL MISSING DETAILS** re-reads nehnutelnosti listings saved without a
 price, a size or a district (`enrich_pending.py`), retires the ones taken
