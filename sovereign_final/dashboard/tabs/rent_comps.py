@@ -30,9 +30,30 @@ def _comps_cz():
                    f"{(1 - RENT_COMP_ASKING_HAIRCUT):.0%} (asking → achieved). A place with no "
                    f"Deloitte figure takes the live rate alone.")
     _waiting_cz(ct)
+    _district_prices_cz()
     st.caption("Baseline Kč/m²: " + " · ".join(f"{key_label(k)} {v:.0f}"
                                                 for k, v in RENT_PER_M2_CZ.items())
                + f" — {RENT_SOURCE['source']}")
+
+
+def _district_prices_cz() -> None:
+    """Prague's and Brno's districts against their city, from the sale
+    listings (engine/price_comps_cz): what scales ČSÚ's city figure."""
+    from engine import price_comps_cz as pc
+    rows = pc.factors_table()
+    if not rows:
+        return
+    st.markdown('<div class="muted">🏙️ PRAGUE / BRNO DISTRICT PRICE LEVELS — EACH DISTRICT\'S '
+                'MEDIAN ASKING Kč/m² AGAINST ITS WHOLE CITY\'S, SCALING ČSÚ\'S CITY FIGURE'
+                '</div>', unsafe_allow_html=True)
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+                 column_config={c: st.column_config.NumberColumn(format="%.0f")
+                                for c in ("Median ask Kč/m²", "City median ask Kč/m²")}
+                 | {"Factor": st.column_config.NumberColumn(format="%.2f")})
+    st.caption(f"A factor needs {pc.MIN_DISTRICT_SAMPLE}+ listings in the district and "
+               f"{pc.MIN_CITY_SAMPLE}+ in the city, and stays within "
+               f"{pc.FACTOR_BOUNDS[0]}–{pc.FACTOR_BOUNDS[1]}; a district without one is judged "
+               f"against its whole city's figure. Rebuilt on every scoring run.")
 
 
 def waiting_rows(waiting: dict[str, int], comps: list[dict]) -> list[dict]:

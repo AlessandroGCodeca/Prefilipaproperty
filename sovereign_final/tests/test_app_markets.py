@@ -219,3 +219,18 @@ def test_a_quiet_portal_is_flagged_in_its_market(two_markets):
     assert any("Bazos.cz returned no listings" in w.value for w in at.warning)
     at = _pick(at, "🇸🇰 Slovakia")
     assert not any("returned no listings" in w.value for w in at.warning)
+
+
+def test_the_czech_comps_tab_shows_the_district_price_levels(two_markets):
+    from engine import price_comps_cz
+    now = datetime.now(timezone.utc).isoformat()
+    for i, (district, per_m2, n) in enumerate([("Praha 14", 100_000, 10), ("Praha", 130_000, 30)]):
+        for j in range(n):
+            two_markets.upsert_listing(make_listing(
+                f"pl{i}-{j}", district=district, price_eur=per_m2 * 50.0, size_m2=50.0,
+                source="bezrealitky", url=f"https://example.cz/pl{i}-{j}", market="cz",
+                last_seen_at=now, scraped_at=now))
+    price_comps_cz.rebuild()
+    at = _pick(run(), "🇨🇿 Czechia")
+    assert not at.exception, [e.value for e in at.exception]
+    assert "PRAGUE / BRNO DISTRICT PRICE LEVELS" in _md(at)

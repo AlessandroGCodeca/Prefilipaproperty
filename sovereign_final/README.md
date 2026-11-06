@@ -146,7 +146,7 @@ before; Czechia is added next to it.
 | Listings | **Sreality.cz — left out**: its robots.txt gives every crawler but the named search engines `Disallow: /` | parser kept (`scraper/sreality.py`); 🔗 TEST CZ SITES re-checks |
 | Rentals (comps) | Bazoš `/pronajmu/byt/`, Bezrealitky rental pages | `scraper/rentals_cz.py` → `engine/rent_comps_cz.py` |
 | Rent baseline | Deloitte Rent Index Q2 2026 — asking rents of flats that let, as on the portals (the measure MF's official rent map uses), not contract rents: Praha 462 and Praha 1–10 (442–493), Brno 390, Hradec Králové 318, Pardubice 314, Plzeň 301, Olomouc 296, Liberec 289, Zlín 287, České Budějovice 283, Jihlava 257, Ostrava 254, Karlovy Vary 246, Ústí nad Labem 221 Kč/m² | other towns: live comps only, or not scored |
-| Sale-price medians | none could be read whole — **the table is empty**, so every Czech listing is WHITE; `data/cz_regional_prices.csv` fills it (format in `engine/regional_prices_cz.py`) | gap |
+| Sale-price benchmark | ČSÚ open dataset **CEN0402** (Průměrné kupní ceny nemovitostí – data ČÚZK): the average purchase price per m² of flats in 2025 for all 14 kraje and 76 okresy, from the cadastre's record of each transfer with a stated price — e.g. Praha 131 520, Brno-město 99 713, Plzeň-město 73 399, Sokolov 33 203 Kč/m². Prague's and Brno's districts take their city's figure × how their listings' asking prices compare with the whole city's (`engine/price_comps_cz.py`, 8+ listings in the district, 30+ in the city); until then the city's figure, which the card says | `engine/cz_regional_prices.csv`, rebuilt by `dev/build_cz_regional_prices.py`; `data/cz_regional_prices.csv` overrides rows |
 | Title deed (LV) | the flat's **výpis z LV, pasted on its card** (or, once rejected, in the REJECTED tab), screened with Czech vocabulary — PASS / REJECTED / UNVERIFIED as in Slovakia. PASS needs part C in the text and the výpis to run on to part E (so a page cut off inside C or D can't pass), the flat's unit in part B, every entry of parts C–D to be one the screen knows, the LV number and k.ú. to match the card's, and a výpis no older than `CZ_LV_MAX_VYPIS_AGE_DAYS` (30 days, read from its "stav evidovaný k datu" line); the building's own LV (the number the card shows for the plot, with no units) is never taken as the flat's; a cooperative flat (its ad, or a družstvo owning it in part A) is never PASS | ČÚZK's free services give no LV contents to a program; nahlížení is CAPTCHA-guarded |
 | Cadastre lookups | ČÚZK API KN (free key: `CZ_CUZK_API_KEY`) + RÚIAN address points: the building under the pin, its LV and pending proceedings | never PASS on its own |
 | Flood | ÚÚR national map, VÚV T. G. M. Q100 flood areas (indicative) | `modules/risk_data_cz.py` |
@@ -155,10 +155,11 @@ before; Czechia is added next to it.
 | Tax, mortgage, costs | ZDP 2026, ČNB limits (LTV 80 % / 70 % for investment mortgages from 1 Apr 2026), Swiss Life Hypoindex rate, SVJ fond oprav, daň z nemovitých věcí (zákon 338/1992 Sb.; the coefficients of Prague, the 26 statutory cities and the 105 other towns over 10,000 people from their 2026 ordinances in sbirkapp.gov.cz; every municipality's size coefficient from its population, ČSÚ 1.1.2025; Prague quarters and postal districts, Ostrava quarters and city quarters' cadastral areas from ČÚZK RÚIAN — `dev/build_cz_property_tax_data.py` rebuilds `engine/property_tax_cz_data.json`), katastr fee | `markets.py`, `engine/property_tax_cz.py`, each with its source and date |
 | Contract | a Czech **kupní smlouva NÁVRH** for a Czech advokát or notář to review — not legal advice | `modules/contract_draft_cz.py` |
 
-No Czech host could be reached from the container this was built in. Every
-endpoint, page shape and figure above came from published documentation, open-source
-collectors and web search, and each scraper checks robots.txt live before it
-reads anything.
+No Czech host could be reached from the container most of this was built in.
+Every endpoint, page shape and figure above came from published documentation,
+open-source collectors and web search — except the sale-price benchmark, read
+from ČSÚ's open-data download on 2026-11-06 — and each scraper checks
+robots.txt live before it reads anything.
 
 ### UNVERIFIED — figures and endpoints that could not be confirmed
 
@@ -169,7 +170,7 @@ s.r.o. costs, the balcony and furnished premiums and exit costs — were checked
 against a source on 2026-11-05; [docs/M1_VERIFICATION.md](docs/M1_VERIFICATION.md)
 gives each source and what changed.
 
-1. Czech sale-price medians: none (table empty); the rooms multiplier for them is 1.0.
+1. Czech sale-price benchmark: ČSÚ's figure is a mean of contract prices for 2025, judged against a listing's 2026 asking price — both differences make a Czech listing look dearer than it is, so fewer come out GREEN, never more. The rooms multiplier for it is 1.0 (ČSÚ gives no split by size). A Prague or Brno district without enough listings is judged against its whole city's figure.
 2. Property tax in a Czech municipality outside the hand-checked tables (Prague, the statutory cities and the 105 other towns over 10,000, read from their 2026 ordinances: `engine/property_tax_cz.SOURCE`): its size coefficient follows its population, and its local coefficient is 1.0 (the law's when a municipality sets none, or `CZ_PROPERTY_TAX_LOCAL_COEF`) until 🏛️ UPDATE TAX RATES has read its ordinances (see "Czech property tax" below) — and after it where an ordinance couldn't be read (an old .doc file or a scan, listed on the TAX RATES tab) or was misread. A place that names no municipality is taxed at 3.5.
 3. Personal tax: whether an SVJ fond oprav payment is deductible when paid (modelled) or only when spent; the 40 mil. Kč cap on an exempt sale (not modelled).
 4. SVJ fond oprav 20 Kč/m² (`CZ_SVJ_FOND_OPRAV_PER_M2`): inside every published range (15–50), but no national statistic exists — the building's own předpis záloh is the real figure.
@@ -252,7 +253,9 @@ sovereign_final/
 │   │                           rate shock, hold-period IRR
 │   ├── regional_prices.py    ← Sale-price medians, floor + ceiling filters
 │   ├── rent_comps.py         ← Live €/m² rents from scraped rentals
-│   ├── regional_prices_cz.py ← Czech kraj / okres / Prague / Brno lookup (medians empty)
+│   ├── regional_prices_cz.py ← Czech kraj / okres / Prague / Brno lookup (ČSÚ CEN0402)
+│   ├── cz_regional_prices.csv ← its shipped figures (dev/build_cz_regional_prices.py)
+│   ├── price_comps_cz.py     ← Prague / Brno district levels from the listings
 │   ├── rent_cz.py            ← Czech rent baseline (Deloitte Rent Index Q2 2026)
 │   ├── rent_comps_cz.py      ← Live Kč/m² rents from Czech rentals
 │   ├── property_tax_sk.py    ← Daň z bytov on a Slovak flat (€/m² by town)

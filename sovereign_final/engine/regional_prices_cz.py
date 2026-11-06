@@ -10,10 +10,24 @@ most specific first, as the Slovak one does:
   3. an okres (one of the 76, recognised by its name or its town)
   4. a kraj (one of the 14)
 
-THE MEDIAN TABLES ARE EMPTY. No source could be read whole while this was
-built (no .cz host was reachable), and a median is never invented: a Czech
-listing without a benchmark is WHITE — never a guessed GREEN. Medians are
-loaded from data/cz_regional_prices.csv when that file exists:
+The kraj and okres figures ship in engine/cz_regional_prices.csv, built by
+dev/build_cz_regional_prices.py from ČSÚ's open dataset CEN0402 ("Průměrné
+kupní ceny nemovitostí – zdroj dat ČÚZK"): the average purchase price per m²
+of flats in 2025, from the cadastre's record of every transfer with a stated
+price (ČSÚ drops improbable extremes and takes the mean of the rest). It is
+a contract price; a listing's asking price is usually above the price it
+sells for, so judging an ask against it errs on the cautious side: a flat
+must be priced well under what flats there sold for to come out GREEN.
+ČSÚ's latest year is 2025 and prices have risen since — the cautious side
+again.
+
+ČSÚ has no figure for Prague's or Brno's own districts. A Prague or Brno
+district takes its city's figure scaled by how its listings' asking prices
+compare with the whole city's (engine/price_comps_cz), once there are
+enough of them; until then the city's figure, which the note says.
+
+A user's own data/cz_regional_prices.csv, when it exists, is read after the
+shipped one; its rows replace the shipped rows they name:
 
     level,name,median_czk_m2,period,source
     kraj,Jihomoravský kraj,117223,2026-09,<where the figure comes from>
@@ -22,10 +36,9 @@ loaded from data/cz_regional_prices.csv when that file exists:
     brno,Brno-střed,…,…,…
 
 `level` is kraj / okres / praha / brno; `name` as in the tables below. Take
-every row from one source and period (ČSÚ's "Ceny nemovitostí" tables by
-okres, or one broker's asking-price index), so a listing is never judged
-against two different measures. The README lists the figures found so far
-and where the full tables are.
+every row from one source and period, so a listing is never judged against
+two different measures. A figure is never invented: a district that
+resolves to no okres has no benchmark and is WHITE — never a guessed GREEN.
 """
 
 from __future__ import annotations
@@ -105,9 +118,9 @@ KRAJ_MEDIAN: dict[str, float] = {}
 MEDIAN_SOURCE: dict[tuple[str, str], str] = {}
 
 SOURCE = {
-    "source": ("UNVERIFIED — no complete Czech price table could be read; the medians "
-               "are empty unless data/cz_regional_prices.csv supplies them"),
-    "checked": "2026-10-16",
+    "source": ("none loaded — engine/cz_regional_prices.csv (ČSÚ CEN0402) or "
+               "data/cz_regional_prices.csv supplies the figures"),
+    "checked": None,
 }
 _DEFAULT_SOURCE = dict(SOURCE)          # before any CSV is read (the tests' baseline)
 
@@ -219,9 +232,17 @@ def median_source(district: str) -> tuple[float | None, str]:
     p = praha_district(district)
     if p and p in PRAHA_DISTRICT_MEDIAN:
         return PRAHA_DISTRICT_MEDIAN[p], p
+    if p:
+        scaled = _scaled_district(p, p, "Hlavní město Praha", "Prague")
+        if scaled:
+            return scaled
     b = brno_district(district)
     if b and b in BRNO_DISTRICT_MEDIAN:
         return BRNO_DISTRICT_MEDIAN[b], f"{b}, Brno"
+    if b:
+        scaled = _scaled_district(b, f"{b}, Brno", "Brno-město", "Brno")
+        if scaled:
+            return scaled
     okres = okres_for_district(district)
     if okres and okres in OKRES_MEDIAN:
         return OKRES_MEDIAN[okres], f"okres {okres}"
@@ -229,6 +250,28 @@ def median_source(district: str) -> tuple[float | None, str]:
         name = KRAJ_NAMES[OKRES_KRAJ[okres]]
         return KRAJ_MEDIAN[name], f"{name} (no median for the okres itself)"
     return None, ""
+
+
+SCALED_MARK = " × "        # in a scaled district's "where": "Praha 14: Prague × 0.84 (…)"
+
+
+def _scaled_district(district: str, label: str, okres: str,
+                     city: str) -> tuple[float, str] | None:
+    """A Prague or Brno district's benchmark: its city's figure × how its
+    listings' asking prices compare with the whole city's
+    (engine.price_comps_cz.district_factor), or None until there are
+    enough listings."""
+    base = OKRES_MEDIAN.get(okres)
+    if not base:
+        return None
+    from engine.price_comps_cz import district_factor
+    found = district_factor(district)
+    if not found:
+        return None
+    factor, n = found
+    return (round(base * factor, 2),
+            f"{label}: {city}{SCALED_MARK}{factor:.2f} (the asking prices of {n} "
+            f"listings there against all of {city})")
 
 
 def rooms_multiplier(rooms: int) -> float:
@@ -239,8 +282,16 @@ def benchmark_note(district: str, rooms=None) -> str:
     median, where = median_source(district)
     if median is None:
         return "No regional median for this district."
-    period = MEDIAN_SOURCE.get(("where", where), "")
-    note = f"median of {where}: {median:,.0f} Kč/m²".replace(",", " ")
+    key = where
+    if SCALED_MARK in where:                # scaled from its city's okres figure
+        key = "okres " + ("Brno-město" if brno_district(district) else "Hlavní město Praha")
+    period = MEDIAN_SOURCE.get(("where", key), "")
+    what = "average purchase price" if "CEN0402" in period else "median"
+    note = f"{what} of {where}: {median:,.0f} Kč/m²".replace(",", " ")
+    if where == "okres Hlavní město Praha" and praha_district(district):
+        note += " (Prague as a whole: this district's own level isn't known yet)"
+    elif where == "okres Brno-město" and brno_district(district):
+        note += " (Brno as a whole: this district's own level isn't known yet)"
     return note + (f" ({period})" if period else "")
 
 
@@ -282,8 +333,16 @@ def load_medians(path: str) -> int:
                             (row.get("source") or "").strip()) if x)
             taken += 1
     if taken:
-        SOURCE.update(source=f"{path} ({taken} medians)", checked=None)
+        loaded = [] if SOURCE.get("checked") is None and SOURCE["source"].startswith("none") \
+            else [SOURCE["source"]]
+        shown = ("engine/cz_regional_prices.csv (ČSÚ CEN0402, average purchase price of "
+                 "flats, data ČÚZK)" if os.path.abspath(path) == SHIPPED_CSV else path)
+        SOURCE.update(source=" + ".join(loaded + [f"{shown}: {taken} rows"]), checked=None)
     return taken
+
+
+# The table that ships with the app (dev/build_cz_regional_prices.py).
+SHIPPED_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cz_regional_prices.csv")
 
 
 def _default_csv() -> str:
@@ -291,8 +350,17 @@ def _default_csv() -> str:
     return os.path.join(DATA_DIR, "cz_regional_prices.csv")
 
 
-if os.path.exists(_default_csv()):
-    try:
-        load_medians(_default_csv())
-    except (OSError, csv.Error) as e:
-        log.warning(f"cz_regional_prices.csv not read: {e}")
+def load_all() -> int:
+    """The shipped ČSÚ table, then a user's own CSV over it. Returns the
+    rows taken."""
+    taken = 0
+    for path in (SHIPPED_CSV, _default_csv()):
+        if os.path.exists(path):
+            try:
+                taken += load_medians(path)
+            except (OSError, csv.Error) as e:
+                log.warning(f"{path} not read: {e}")
+    return taken
+
+
+load_all()

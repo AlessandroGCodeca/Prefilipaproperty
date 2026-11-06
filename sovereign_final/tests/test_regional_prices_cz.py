@@ -65,7 +65,7 @@ class TestNoSourceNoMedian:
         assert rp.regional_median_price("Praha 2", market="cz") is None
         assert fin.class_at_price(1_000_000, 60, "Praha 2", market="cz") == "WHITE"
         assert fin.max_offer_price(60, "Praha 2", "GREEN", market="cz") is None
-        assert "UNVERIFIED" in cz.SOURCE["source"]
+        assert cz.SOURCE["source"].startswith("none loaded")
 
     def test_backstops_apply_without_a_median(self):
         floor, ceiling = (markets.CZ.blank_district_floor_m2,

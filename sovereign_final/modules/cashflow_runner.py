@@ -27,11 +27,29 @@ def _mkw(market: str) -> dict:
     return {} if market == "sk" else {"market": market}
 
 
+def _rebuild_czech_district_prices() -> None:
+    """Prague's and Brno's districts against their city, from the Czech
+    listings (engine/price_comps_cz) — before scoring, so a district whose
+    level moved is judged against its new benchmark this run. A failure is
+    logged: the districts then keep the factors they had."""
+    from engine import price_comps_cz
+    try:
+        out = price_comps_cz.rebuild()
+    except Exception as e:
+        log.warning(f"  ⚠️ Czech district price levels not rebuilt: {type(e).__name__}: {e}")
+        return
+    if out["with_factor"] or out["rescored"]:
+        log.info(f"🏙️  Czech district price levels: {out['with_factor']} of "
+                 f"{out['districts']} districts measured, {out['rescored']} scores to redo.")
+
+
 def run_scoring(progress_callback=None, market: str | None = None) -> int:
     """Score every unscored listing — of `market` only, or of every market
     (None) — and return how many were scored. The stale scores it drops first
     are of the same market only: a run scoped to one market re-scores only
     that market, so another market's scores must be left as they are."""
+    if market in (None, "cz"):
+        _rebuild_czech_district_prices()
     requeued = requeue_scores_without_benchmark(market=market)
     if requeued:
         log.info(f"♻️  {requeued} listings now have a regional median — re-scoring them.")
