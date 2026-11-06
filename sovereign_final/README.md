@@ -294,7 +294,7 @@ sovereign_final/
 | SATELLITE VIEWER | Listing photo vs Google satellite + Street View + vibe score, and every note saved for the listing |
 | REJECTED | Every LV rejection with its reason, detail and LV risk read; re-verify from here |
 | LV TO-DO | Every GREEN / YELLOW deal whose title deed isn't verified, with what the plot check found; type the flats' own LV numbers in bulk, then save (checked on the next LV run) or save & verify now (in the background, like the pipeline buttons) |
-| RENT COMPS | Live €/m² per district from prenájom listings vs the baseline table |
+| RENT COMPS | Live €/m² per district from prenájom listings vs the baseline table; in the Czech view, live Kč/m² per town vs the Deloitte Rent Index, and the Czech towns whose listings wait unscored for a rent figure |
 | TAX RATES | Slovakia: each town's flat property-tax rate — what the engine charges, what the town's own site says, and the source; a doubtful reading waits here to be accepted or turned down, and a town whose site blocks automated requests takes an uploaded ordinance. Czechia: every municipality's size and local coefficients with the ordinances they come from, and a lookup by place. One click re-reads both countries |
 | ONE-CLICK CLOSE | Pre-filled Slovak notary contract draft with download; the deal's numbers are a separate download, not part of the draft |
 
@@ -409,6 +409,17 @@ rent as a bare, unfurnished 2-izb flat's €/m², takes the median per
 baseline by sample size. Needs 5+ rentals per district. The rental-page
 parsing mirrors the sale scrapers' selectors; check the 🏘️ RENT COMPS output
 after the first run.
+
+Czechia: `scraper/rentals_cz.py` reads pronájem listings from Bazoš and
+Bezrealitky, and `engine/rent_comps_cz.py` builds Kč/m² per town the same
+way. `engine/rent_cz.py` has the Deloitte Rent Index figures for Prague,
+Praha 1–10 and the 13 regional capitals; a town outside it (Kladno, Opava,
+Písek…) gets no borrowed rent, so its listings wait unscored until 5+ of its
+rentals give it a live one. The Czech pipeline reads the rentals before it
+scores; so do 🏘️ RENT COMPS (both countries) and a Czech portal's button
+when no Czech rental was read in the last 20 hours. A line above the tabs
+says how many Czech listings wait and in which towns; the RENT COMPS tab
+lists them all, with the rentals each town has so far.
 
 ## Location risk data
 

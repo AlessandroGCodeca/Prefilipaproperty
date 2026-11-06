@@ -6,6 +6,7 @@ rules, a Slovak one exactly as before.
 """
 
 import logging
+from collections import Counter
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -14,7 +15,9 @@ from database import (
     requeue_scores_with_stale_class, requeue_scores_from_older_model,
     requeue_scores_with_stale_property_tax,
 )
-from engine.financial import analyse, result_to_db_dict, deal_extras, base_rent_rate
+from engine.financial import (
+    analyse, result_to_db_dict, deal_extras, base_rent_rate, match_rent_key,
+)
 import markets
 
 log = logging.getLogger(__name__)
@@ -120,6 +123,26 @@ def run_scoring(progress_callback=None, market: str | None = None) -> int:
                  + (f" (and {len(set(why)) - 1} other reason(s))" if len(set(why)) > 1 else ""))
     log.info(f"✅ Cash-flow scoring done. {scored} scored.")
     return scored
+
+
+def waiting_for_rent(market: str = "cz") -> dict[str, int]:
+    """The listings of `market` the scorer passes over for want of a rent:
+    unscored, and their town has neither a published figure (engine/rent_cz)
+    nor a live rate from rental comps. {rent key: listings}, most first —
+    what the dashboard shows as waiting. Slovakia always has a rent (its
+    table falls back to the kraj's or the national figure): {}."""
+    if markets.normalize(market) == "sk":
+        return {}
+    from engine.rent_comps import load_live_rates
+    rates = load_live_rates(market=market)
+    waiting: Counter = Counter()
+    for row in get_unscored_cashflow(market=market):
+        district = row.get("district") or ""
+        try:
+            base_rent_rate(district, rates, market=market)
+        except LookupError:
+            waiting[match_rent_key(district, market=market)] += 1
+    return dict(waiting.most_common())
 
 
 if __name__ == "__main__":

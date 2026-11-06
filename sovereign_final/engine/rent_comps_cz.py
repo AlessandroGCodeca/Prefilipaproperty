@@ -193,6 +193,32 @@ def load_live_rates() -> dict[str, float]:
         conn.close()
 
 
+def last_rental_read() -> datetime | None:
+    """When a Czech rental was last read (the newest last_seen_at), or None
+    when none ever was — how the dashboard knows whether the Czech comps
+    need reading before it scores."""
+    from database import get_conn, _has_table, _ensure_market_columns
+    conn = get_conn()
+    try:
+        if not _has_table(conn, "rental_listings"):
+            return None
+        _ensure_market_columns(conn)
+        row = conn.execute("SELECT MAX(last_seen_at) FROM rental_listings WHERE market = ?",
+                           (MARKET,)).fetchone()
+    except sqlite3.Error as e:
+        log.warning("Czech rentals' last read not known: %s: %s", type(e).__name__, e)
+        return None
+    finally:
+        conn.close()
+    try:
+        when = datetime.fromisoformat(row[0]) if row and row[0] else None
+    except ValueError:
+        return None
+    if when is not None and when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when
+
+
 def rebuild_rent_comps(max_age_days: int = RENT_COMP_MAX_AGE_DAYS) -> dict:
     """Re-aggregate the Czech comps from current Czech rentals and send the
     Czech listings whose rate moved back for scoring. Returns {"keys",

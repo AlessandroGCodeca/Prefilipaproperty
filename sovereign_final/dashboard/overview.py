@@ -10,6 +10,23 @@ import markets
 from dashboard.fmt import _tag_market, esc, mkw, money
 
 
+WAITING_TOWNS_SHOWN = 6
+
+
+def waiting_note(waiting: dict[str, int]) -> str:
+    """One line on the Czech listings waiting for a rent figure: how many,
+    and in which towns (the most waiting first)."""
+    from engine.rent_cz import key_label
+    n = sum(waiting.values())
+    towns = list(waiting.items())
+    shown = " · ".join(f"{esc(key_label(k))} {c}" for k, c in towns[:WAITING_TOWNS_SHOWN])
+    more = len(towns) - WAITING_TOWNS_SHOWN
+    return (f"⏳ 🇨🇿 {n} Czech listing{'s' if n != 1 else ''} wait{'' if n != 1 else 's'} "
+            f"unscored for a rent figure — {shown}"
+            + (f" · {more} more town{'s' if more != 1 else ''}" if more > 0 else "")
+            + " · the RENT COMPS tab lists them all")
+
+
 def render(v, sb) -> None:
     """The banners, tiles and price-cut list over the tabs."""
     _OTHER_RUNS = sb.other_runs
@@ -72,6 +89,14 @@ def render(v, sb) -> None:
                                  for m, n in _per_market.items())
                     + f" · tables compare in EUR at {esc(markets.fx_note())}; each card "
                       f"keeps its own currency</div>", unsafe_allow_html=True)
+    # Czech listings the scorer passes over: their town has no rent figure yet
+    # (engine/rent_cz) and too few rental comps for a live one.
+    if not using_demo and view_market in (None, "cz"):
+        from dashboard.listing_cache import waiting_for_rent
+        _waiting = waiting_for_rent("cz")
+        if _waiting:
+            st.markdown(f'<div class="muted" style="margin:-10px 0 14px">'
+                        f'{waiting_note(_waiting)}</div>', unsafe_allow_html=True)
     if n_hidden:
         st.markdown(f'<div class="muted" style="margin:-10px 0 14px">Showing {len(data)} of '
                     f'{n_loaded} listings · {n_hidden} hidden by the sidebar filters</div>',
