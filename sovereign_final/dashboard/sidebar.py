@@ -13,6 +13,18 @@ import markets
 from dashboard.fmt import _SHOW, esc
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fx_refresh_if_due() -> bool:
+    # The ČNB EUR/CZK rate (modules/fx_rate) when the saved one is over 6 h
+    # old — at most once an hour across reruns, with a short timeout so a
+    # slow bank site can't hold the page.
+    from modules import fx_rate
+    try:
+        return fx_rate.refresh_if_due(timeout=5)
+    except Exception:
+        return False
+
+
 def render() -> SimpleNamespace:
     """Draw the sidebar: the pipeline status and buttons, the filters and
     the scoring settings. Returns what the rest of the page reads from it:
@@ -250,6 +262,10 @@ def render() -> SimpleNamespace:
                 st.warning(f"No {_p.name} tax table for {_trm['requested']} yet — scoring uses "
                            f"the {_trm['year']} rules. Add {_trm['requested']} to "
                            f"{_m.upper()}_TAX_YEAR_RULES in markets.py.")
+        # The EUR/CZK rate the combined ranking converts with (modules/fx_rate):
+        # fetched from the ČNB when the saved one is over 6 h old, at most hourly.
+        # It is shown, and its age warned about, where Czech listings are.
+        _fx_refresh_if_due()
 
         st.markdown("---")
         st.markdown('<div class="muted">Private use. Verify all data.<br>Notárska úschova always.</div>', unsafe_allow_html=True)

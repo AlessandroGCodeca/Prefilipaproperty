@@ -1,0 +1,30 @@
+# Tool configuration only: the project is not a package (it runs from this
+# directory via START.bat / Start Sovereign.command / Docker).
+
+[tool.ruff]
+# The launchers accept Python 3.11–3.14; CI tests 3.11, 3.12 and 3.14.
+target-version = "py311"
+
+[tool.ruff.lint]
+# E9   syntax errors
+# F    pyflakes: undefined and unused names, f-strings without placeholders,
+#      redefinitions
+# B    flake8-bugbear: likely bugs (late-bound loop variables in closures,
+#      mutable or call defaults, unused loop variables, ...)
+# PLW  pylint warnings
+# Style is not checked.
+select = ["E9", "F", "B", "PLW"]
+ignore = [
+    # Deliberate: module-level caches and test hooks set through `global`.
+    "PLW0603",
+    # A lambda wrapper is often deliberate: it late-binds a name a test
+    # monkeypatches, or keeps a call signature.
+    "PLW0108",
+    # Normalising the loop variable in place (`line = line.strip()`) is the
+    # house idiom.
+    "PLW2901",
+    # zip(strict=) would raise on data the code already treats as ragged.
+    "B905",
+    # subprocess.run callers read returncode themselves.
+    "PLW1510",
+]

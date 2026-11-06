@@ -48,8 +48,21 @@ style.inject()
 require_password()
 
 # ── Init ──────────────────────────────────────────────────────────────────────
+import database  # noqa: E402
 from database import init_db, backfill_dev_project_flags  # noqa: E402
-init_db()
+
+
+@st.cache_resource
+def _init_db_once(db_path: str) -> bool:
+    # Streamlit reruns this whole script on every click. init_db() re-applies
+    # the schema, runs the column checks and backfills, and commits, which takes
+    # the write lock: while the scheduler commits a big batch, a click could
+    # wait up to the 30 s lock timeout. Once per process per database is enough.
+    init_db()
+    return True
+
+
+_init_db_once(database.SQLITE_PATH)
 
 
 @st.cache_resource

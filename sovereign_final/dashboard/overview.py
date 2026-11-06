@@ -61,6 +61,11 @@ def render(v, sb) -> None:
 """, unsafe_allow_html=True)
     # With both markets on the page, how the tiles split between them.
     _per_market = {m: sum(1 for l in data if l.get("_market") == m) for m in markets.MARKET_CODES}
+    if _per_market.get("cz"):
+        from modules import fx_rate as _fx
+        _fx_warn = _fx.stale_warning()
+        if _fx_warn:
+            st.warning(f"⚠ {_fx_warn}")
     if view_market is None and sum(1 for n in _per_market.values() if n) > 1:
         st.markdown('<div class="muted" style="margin:-10px 0 14px">'
                     + " · ".join(f'{"🇸🇰" if m == "sk" else "🇨🇿"} {m.upper()} {n}'

@@ -450,7 +450,8 @@ def list_ordinances(session, progress=None) -> list[Listed]:
         first, last = _list_page(session, q, 1)
         rows = list(first)
         with ThreadPoolExecutor(max_workers=6) as ex:
-            for page_rows, _ in ex.map(lambda n: _list_page(session, q, n), range(2, last + 1)):
+            # ex.map is drained inside this iteration, so the lambda sees this q.
+            for page_rows, _ in ex.map(lambda n: _list_page(session, q, n), range(2, last + 1)):  # noqa: B023
                 rows += page_rows
         for r in rows:
             found.setdefault(r.id, r)

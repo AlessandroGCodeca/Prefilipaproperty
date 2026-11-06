@@ -62,6 +62,9 @@ class Sources:
         self.session = session or requests.Session()
         self.session.headers.setdefault("User-Agent", "Mozilla/5.0 (compatible; property-tax-check)")
 
+    def close(self):
+        self.session.close()
+
     def populations(self, years):
         return cz.populations(self.session, tuple(years))
 
@@ -84,8 +87,17 @@ def update(progress=None, year: int | None = None, sources: Sources | None = Non
     """Bring every Czech municipality's coefficients up to date. Returns
     {"municipalities", "with_ordinances", "ordinances", "read_now",
      "unreadable", "changed": [(name, before, after)], "requeued"}."""
+    if sources is not None:
+        return _update(progress, year, sources)
+    src = Sources()
+    try:
+        return _update(progress, year, src)
+    finally:
+        src.close()                                 # the run's own session
+
+
+def _update(progress, year: int | None, src: Sources) -> dict:
     year = year or _year()
-    src = sources or Sources()
     # The engine's hand-checked tables are for TABLE_YEAR: reading that year
     # too shows whether a later year's reading differs from it.
     from engine.property_tax_cz import TABLE_YEAR

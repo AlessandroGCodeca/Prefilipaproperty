@@ -307,7 +307,7 @@ _TITLE_OR_NOTE_RE = re.compile(r"titul\w*\s+nadobud\w*|(?<!\w)poznamk\w*|ine\s+u
 
 def _in_title_of_acquisition(low: str, at: int) -> bool:
     last = None
-    for last in _TITLE_OR_NOTE_RE.finditer(low, 0, at):
+    for last in _TITLE_OR_NOTE_RE.finditer(low, 0, at):  # noqa: B007 (keeps the last match)
         pass
     return bool(last and last.group().startswith("titul"))
 
@@ -462,7 +462,7 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
                 o = _SK_ORDINAL_BEFORE_RE.search(low, max(0, last_lien_at - 30), last_lien_at)
                 next_no = str(int(o.group(1)) + 1) if o else None
 
-                def _opens(m, rx):
+                def _opens(m, rx, own=own, next_no=next_no):
                     n = v.entry_no_re.search(low, m.start(), m.end())
                     if n and re.sub(r"\W", "", n.group()) not in own:
                         return True

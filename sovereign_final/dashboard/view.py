@@ -14,6 +14,7 @@ import scheduler as _scheduler
 
 from dashboard.demo import DEMO
 from dashboard.fmt import _tag_market, mkw
+from dashboard.listing_cache import clear_after_finished_job, load_active
 
 
 @dataclass
@@ -104,10 +105,13 @@ def build(sb, view_market) -> View:
 
     # ── Data ──────────────────────────────────────────────────────────────────────
     from database import (
-        get_all_active, get_price_history, get_deal_stages, latest_vibes, days_on_market,
+        get_price_history, get_deal_stages, latest_vibes, days_on_market,
     )
 
-    raw_data = get_all_active()
+    # The listing load is cached (dashboard/listing_cache.py); a pipeline step
+    # finished since the last clear makes it read the database again.
+    clear_after_finished_job()
+    raw_data = load_active()
 
     using_demo = show_demo or not raw_data
     if using_demo:
@@ -118,7 +122,7 @@ def build(sb, view_market) -> View:
     else:
         data = raw_data
     # LV-rejected listings never reach the lists; the Rejected tile counts them.
-    rejected_rows = [] if using_demo else get_all_active(rejected=True)
+    rejected_rows = [] if using_demo else load_active(rejected=True)
     # The market picked at the top filters everything below.
     data = [_tag_market(l) for l in data if in_view(l)]
     rejected_rows = [_tag_market(l) for l in rejected_rows if in_view(l)]

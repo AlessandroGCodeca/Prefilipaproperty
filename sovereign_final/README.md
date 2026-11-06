@@ -102,7 +102,8 @@ python3 -m pytest tests/
 
 Everything should pass (about 1,500 tests; the dashboard tests in
 `tests/test_app_smoke.py` need `streamlit` installed and are skipped without
-it). CI also runs `ruff check . --select=E9,F` and runs the suite on Windows.
+it). CI also runs `ruff check .` (the rule set is in `pyproject.toml`) and
+runs the suite on Python 3.11, 3.12 and 3.14, and on Windows.
 
 Dependencies are pinned to exact versions in `requirements.txt`, so a Docker
 rebuild installs what the tests last passed with. Dependabot opens a PR each
@@ -120,9 +121,13 @@ before; Czechia is added next to it.
   a market badge.
 - **Currency**: a listing keeps its own currency (EUR or CZK) on its card and
   in its own market's view. The combined view and the *Max Price €* filter
-  convert CZK at one rate, `CZK_PER_EUR`, labelled with its date
-  (`FX_RATE_DATE`). Czech cards use Czech labels and Czech number formatting
-  (`4 500 000 Kč`).
+  convert CZK at one rate: the Czech National Bank's daily fixing, fetched
+  before each scheduled run and at most hourly by the dashboard
+  (`modules/fx_rate.py`, saved to `data/fx_rate.json`) and shown with its date
+  in the sidebar. The sidebar warns when the rate is more than a week old.
+  `CZK_PER_EUR` / `FX_RATE_DATE` in `config.py` are the fallback until the
+  first fetch; setting `CZK_PER_EUR` in `.env` pins the rate by hand. Czech
+  cards use Czech labels and Czech number formatting (`4 500 000 Kč`).
 - **Pipelines**: each market has its own steps, status line, success record
   and retries. Both run one after the other under the one pipeline lock, and
   a failure in one never stops the other (`scheduler.run_all_markets`).
@@ -134,7 +139,7 @@ before; Czechia is added next to it.
 | Listings | Bezrealitky.cz (website sitemap + listing pages; never api.bezrealitky.cz, which robots.txt closes), Reality.iDNES.cz, Bazoš (reality.bazos.cz) | read when robots.txt allows; each fails soft |
 | Listings | **Sreality.cz — left out**: its robots.txt gives every crawler but the named search engines `Disallow: /` | parser kept (`scraper/sreality.py`); 🔗 TEST CZ SITES re-checks |
 | Rentals (comps) | Bazoš `/pronajmu/byt/`, Bezrealitky rental pages | `scraper/rentals_cz.py` → `engine/rent_comps_cz.py` |
-| Rent baseline | Deloitte Rent Index Q2 2026: Praha 462, Praha 7 493, Brno 390, Hradec Králové 318, Pardubice 314, Jihlava 257, Ostrava 254, Ústí nad Labem 221 Kč/m² | other towns: live comps only, or not scored |
+| Rent baseline | Deloitte Rent Index Q2 2026 — asking rents of flats that let, as on the portals (the measure MF's official rent map uses), not contract rents: Praha 462 and Praha 1–10 (442–493), Brno 390, Hradec Králové 318, Pardubice 314, Plzeň 301, Olomouc 296, Liberec 289, Zlín 287, České Budějovice 283, Jihlava 257, Ostrava 254, Karlovy Vary 246, Ústí nad Labem 221 Kč/m² | other towns: live comps only, or not scored |
 | Sale-price medians | none could be read whole — **the table is empty**, so every Czech listing is WHITE; `data/cz_regional_prices.csv` fills it (format in `engine/regional_prices_cz.py`) | gap |
 | Title deed (LV) | the flat's **výpis z LV, pasted on its card** (or, once rejected, in the REJECTED tab), screened with Czech vocabulary — PASS / REJECTED / UNVERIFIED as in Slovakia. PASS needs part C in the text and the výpis to run on to part E (so a page cut off inside C or D can't pass), the flat's unit in part B, every entry of parts C–D to be one the screen knows, the LV number and k.ú. to match the card's, and a výpis no older than `CZ_LV_MAX_VYPIS_AGE_DAYS` (30 days, read from its "stav evidovaný k datu" line); the building's own LV (the number the card shows for the plot, with no units) is never taken as the flat's; a cooperative flat (its ad, or a družstvo owning it in part A) is never PASS | ČÚZK's free services give no LV contents to a program; nahlížení is CAPTCHA-guarded |
 | Cadastre lookups | ČÚZK API KN (free key: `CZ_CUZK_API_KEY`) + RÚIAN address points: the building under the pin, its LV and pending proceedings | never PASS on its own |
@@ -152,22 +157,24 @@ reads anything.
 ### UNVERIFIED — figures and endpoints that could not be confirmed
 
 Each is marked `UNVERIFIED` in its own source / checked field. The env settings
-named here override them.
+named here override them. The cash-flow figures once on this list — the rent
+index's measure, the ČNB stress add-on, the SVJ správa fee, purchase costs,
+s.r.o. costs, the balcony and furnished premiums and exit costs — were checked
+against a source on 2026-11-05; [docs/M1_VERIFICATION.md](docs/M1_VERIFICATION.md)
+gives each source and what changed.
 
 1. Czech sale-price medians: none (table empty); the rooms multiplier for them is 1.0.
-2. Deloitte Rent Index: whether its figures are asking or achieved rents.
-3. Property tax in a Czech municipality outside the hand-checked tables (Prague, the statutory cities and the 105 other towns over 10,000, read from their 2026 ordinances: `engine/property_tax_cz.SOURCE`): its size coefficient follows its population, and its local coefficient is 1.0 (the law's when a municipality sets none, or `CZ_PROPERTY_TAX_LOCAL_COEF`) until 🏛️ UPDATE TAX RATES has read its ordinances (see "Czech property tax" below) — and after it where an ordinance couldn't be read (an old .doc file or a scan, listed on the TAX RATES tab) or was misread. A place that names no municipality is taxed at 3.5.
-4. Personal tax: whether an SVJ fond oprav payment is deductible when paid (modelled) or only when spent; the 40 mil. Kč cap on an exempt sale (not modelled).
-5. Lending: a ČNB stress add-on (the engine's +2 pp is used).
-6. SVJ správa fee per flat (0, `CZ_SVJ_SPRAVA_PER_UNIT`); fond oprav 20 Kč/m² (`CZ_SVJ_FOND_OPRAV_PER_M2`).
-7. Legal fees on a purchase: 1 % of the price, carried over from Slovakia (`CZ_ACQUISITION_COST_RATE`).
-8. s.r.o. setup and running costs: Slovak estimates converted (`CZ_SRO_SETUP_COST`, `CZ_SRO_ANNUAL_RUNNING_COST`).
-9. Parking, furnished and balcony rent premiums, and the hold assumptions (price and rent growth, cost inflation, exit costs): carried over from Slovakia.
-10. ČÚZK API KN paths and fields (from its OpenAPI document as copied in January 2025) and the RÚIAN address layer (layer 1, field `kod`).
-11. The ÚÚR flood layer (82) and the noise map's REST path and value encoding.
-12. The výpis z LV layout the Czech screen reads (part headings, "Oprávnění pro", the "o" entry bullet, the V-/Z-/POLVZ/PV register numbers, the "Kat.území" line); without a part C heading it reads the whole text and never calls the title clean.
-13. Portal page shapes: Sreality's v1 API, Bezrealitky's sitemap and `__NEXT_DATA__` advert, iDNES's country-wide search and parameter list, Bazoš CZ's cards (taken as the Slovak site's).
-14. Each portal's robots.txt, as captured by an open-source collector on 2026-09-15 — the scrapers read it live, keeping a copy a day at most (a missing one an hour).
+2. Property tax in a Czech municipality outside the hand-checked tables (Prague, the statutory cities and the 105 other towns over 10,000, read from their 2026 ordinances: `engine/property_tax_cz.SOURCE`): its size coefficient follows its population, and its local coefficient is 1.0 (the law's when a municipality sets none, or `CZ_PROPERTY_TAX_LOCAL_COEF`) until 🏛️ UPDATE TAX RATES has read its ordinances (see "Czech property tax" below) — and after it where an ordinance couldn't be read (an old .doc file or a scan, listed on the TAX RATES tab) or was misread. A place that names no municipality is taxed at 3.5.
+3. Personal tax: whether an SVJ fond oprav payment is deductible when paid (modelled) or only when spent; the 40 mil. Kč cap on an exempt sale (not modelled).
+4. SVJ fond oprav 20 Kč/m² (`CZ_SVJ_FOND_OPRAV_PER_M2`): inside every published range (15–50), but no national statistic exists — the building's own předpis záloh is the real figure.
+5. s.r.o. loan terms: +1 pp on the rate and 70 % LTV, carried over from Slovakia (`CZ_SRO_RATE_PREMIUM_PP`, `CZ_SRO_LTV_RATIO`).
+6. The parking rent premium (+5 %): MF's rent map prices a garage at +13–25 % of its reference rent and an outdoor space at nothing measurable, and the description flag doesn't tell them apart. The semi-furnished premium (+5 %): MF has no such class.
+7. Hold-period growth rates (price and rent growth, cost inflation): the Slovak profile's — forecasts, which no source can confirm (`CZ_APPRECIATION_RATE`, `CZ_RENT_GROWTH_RATE`, `CZ_COST_INFLATION_RATE`).
+8. ČÚZK API KN paths and fields (from its OpenAPI document as copied in January 2025) and the RÚIAN address layer (layer 1, field `kod`).
+9. The ÚÚR flood layer (82) and the noise map's REST path and value encoding.
+10. The výpis z LV layout the Czech screen reads (part headings, "Oprávnění pro", the "o" entry bullet, the V-/Z-/POLVZ/PV register numbers, the "Kat.území" line); without a part C heading it reads the whole text and never calls the title clean.
+11. Portal page shapes: Sreality's v1 API, Bezrealitky's sitemap and `__NEXT_DATA__` advert, iDNES's country-wide search and parameter list, Bazoš CZ's cards (taken as the Slovak site's).
+12. Each portal's robots.txt, as captured by an open-source collector on 2026-09-15 — the scrapers read it live, keeping a copy a day at most (a missing one an hour).
 
 ## Files
 
@@ -181,6 +188,7 @@ sovereign_final/
 │   ├── view.py               ← One run's page state: the market picked, the
 │   │                           filtered listings, sorted by class
 │   ├── overview.py           ← Banners, stats tiles, price cuts over the tabs
+│   ├── listing_cache.py      ← The cached listing load, and when it is cleared
 │   ├── cards.py              ← The listing card and its memo button
 │   ├── fmt.py                ← Money, badges, labels (Czech on a Czech card)
 │   ├── diagnostics.py        ← 🔗 TEST SITES / TEST CZ SITES

@@ -8,6 +8,7 @@ import streamlit as st
 import markets
 from database import DEAL_STAGES
 
+from dashboard.listing_cache import clear_listing_cache
 from dashboard.fmt import (
     _floor_label, _labels, _lv_link, _lv_state_t, _of100, _pct_or_dash,
     _quick_cadastre, _rent_fallback, _risk_label, amt, badge, esc, fp, market_badge,
@@ -433,6 +434,7 @@ def render_card(l, v):
                                  cadastral_area=ku_in if changed else "")
                 from database import mark_duplicates
                 mark_duplicates()   # the flat's other copies carry its LV result
+                clear_listing_cache()
                 if r["status"] == "REJECT":
                     st.error(f"❌ REJECTED: {r['detail']}")
                 elif r["status"] == "PASS":

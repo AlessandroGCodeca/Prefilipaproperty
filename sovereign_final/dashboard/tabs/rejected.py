@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.fmt import _digest, _lv_state, _quick_cadastre, _tag_market, esc
+from dashboard.listing_cache import clear_listing_cache
 
 
 def render(v) -> None:
@@ -96,6 +97,7 @@ def render(v) -> None:
                     # A copy that is no longer rejected rejoins its group and
                     # lifts "a copy failed LV" from the others (or the reverse).
                     mark_duplicates()
+                    clear_listing_cache()
                     if res["status"] == "REJECT":
                         msg = ("error", f"Still rejected: {res.get('detail')}")
                     elif res["status"] == "PASS":

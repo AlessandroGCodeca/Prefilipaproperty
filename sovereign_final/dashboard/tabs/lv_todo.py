@@ -9,6 +9,7 @@ import streamlit as st
 from modules import jobs
 
 from dashboard.fmt import _digest, _tag_market
+from dashboard.listing_cache import clear_listing_cache
 
 
 def _cell(v) -> str:
@@ -98,6 +99,7 @@ def render(v) -> None:
             # Storing the numbers is quick and offline; checking them is not.
             from modules.debt_bot import save_flat_lvs
             res = save_flat_lvs(changed)
+            clear_listing_cache()
             st.session_state["lv_todo_msg"] = (
                 "success", f"✅ Saved {res['saved']} LV number(s) — the next "
                            f"🔒 LV DEBT FILTER run checks them.")
