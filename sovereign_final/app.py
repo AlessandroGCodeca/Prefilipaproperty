@@ -180,8 +180,18 @@ _require_password()
 
 # ── Init ──────────────────────────────────────────────────────────────────────
 import markets
+import database
 from database import init_db, get_all_active, backfill_dev_project_flags
-init_db()
+
+@st.cache_resource
+def _init_db_once(db_path: str) -> bool:
+    # Streamlit reruns this whole script on every click. init_db() re-applies
+    # the schema, runs the column checks and backfills, and commits, which takes
+    # the write lock: while the scheduler commits a big batch, a click could
+    # wait up to the 30 s lock timeout. Once per process per database is enough.
+    init_db()
+    return True
+_init_db_once(database.SQLITE_PATH)
 
 @st.cache_resource
 def _startup_backfill():
