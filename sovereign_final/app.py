@@ -200,6 +200,18 @@ def _startup_backfill():
     return backfill_dev_project_flags()
 _startup_backfill()
 
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fx_refresh_if_due() -> bool:
+    # The ČNB EUR/CZK rate (modules/fx_rate) when the saved one is over 6 h
+    # old — at most once an hour across reruns, with a short timeout so a
+    # slow bank site can't hold the page.
+    from modules import fx_rate
+    try:
+        return fx_rate.refresh_if_due(timeout=5)
+    except Exception:
+        return False
+
 # ── Demo data (when DB is empty) ──────────────────────────────────────────────
 DEMO = [
     {"id":"d1","url":"https://nehnutelnosti.sk/demo1",
@@ -490,6 +502,10 @@ with st.sidebar:
             st.warning(f"No {_p.name} tax table for {_trm['requested']} yet — scoring uses "
                        f"the {_trm['year']} rules. Add {_trm['requested']} to "
                        f"{_m.upper()}_TAX_YEAR_RULES in markets.py.")
+    # The EUR/CZK rate the combined ranking converts with (modules/fx_rate):
+    # fetched from the ČNB when the saved one is over 6 h old, at most hourly.
+    # It is shown, and its age warned about, where Czech listings are.
+    _fx_refresh_if_due()
 
     st.markdown("---")
     st.markdown('<div class="muted">Private use. Verify all data.<br>Notárska úschova always.</div>', unsafe_allow_html=True)
@@ -1111,6 +1127,11 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 # With both markets on the page, how the tiles split between them.
 _per_market = {m: sum(1 for l in data if l.get("_market") == m) for m in markets.MARKET_CODES}
+if _per_market.get("cz"):
+    from modules import fx_rate as _fx
+    _fx_warn = _fx.stale_warning()
+    if _fx_warn:
+        st.warning(f"⚠ {_fx_warn}")
 if view_market is None and sum(1 for n in _per_market.values() if n) > 1:
     st.markdown('<div class="muted" style="margin:-10px 0 14px">'
                 + " · ".join(f'{"🇸🇰" if m == "sk" else "🇨🇿"} {m.upper()} {n}'

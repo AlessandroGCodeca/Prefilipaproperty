@@ -482,19 +482,20 @@ def update(progress=None, year: int | None = None, only: list[str] | None = None
     all_towns = towns()
     custom = _custom()
     villages = [n for n in all_towns if n not in scr.TOWNS and n not in custom]
+    village = set(villages)                         # membership tests below: ~2,800 names
     if only is not None:
         names = [n for n in only if n in all_towns]
         due: list[str] = []
     else:
         listed = _with_listings(villages)
-        names = [n for n in all_towns if n not in villages] + sorted(listed)
+        names = [n for n in all_towns if n not in village] + sorted(listed)
         checked = _last_checked()
         cutoff = (datetime.now(timezone.utc).timestamp() - RECHECK_DAYS * 86400)
         due = [n for n in villages if n not in listed and (
             full or n not in checked
             or datetime.fromisoformat(checked[n]).timestamp() < cutoff)]
         due.sort(key=lambda n: checked.get(n, ""))       # never read first, then the oldest
-    village = set(villages)
+    due_set = set(due)
     total = len(names) + len(due)
     outcomes: list[Outcome] = []
 
@@ -503,10 +504,11 @@ def update(progress=None, year: int | None = None, only: list[str] | None = None
             quick = name in village
             read = fetcher or (functools.partial(scr.fetch, timeout=20, retry=False)
                                if quick else None)
-            res = scr.check_town(all_towns[name], year, session=requests.Session(),
-                                 fetcher=read, delay=0.1 if quick else 0.4,
-                                 budget=12 if quick else scr.MAX_FETCHES,
-                                 stop_when_found=quick)
+            with requests.Session() as session:   # closed once the town is read
+                res = scr.check_town(all_towns[name], year, session=session,
+                                     fetcher=read, delay=0.1 if quick else 0.4,
+                                     budget=12 if quick else scr.MAX_FETCHES,
+                                     stop_when_found=quick)
             return assess(all_towns[name], res, year)
         except Exception as e:                     # one town's failure isn't the run's
             log.exception(f"Tax rates: {name} failed")
@@ -520,7 +522,7 @@ def update(progress=None, year: int | None = None, only: list[str] | None = None
         while pending or running:
             while pending and len(running) < WORKERS:
                 n = pending[0]
-                if n in due and not full and _time.monotonic() >= stop_villages_at:
+                if n in due_set and not full and _time.monotonic() >= stop_villages_at:
                     pending.clear()                 # the rest wait for the next click
                     break
                 pending.popleft()

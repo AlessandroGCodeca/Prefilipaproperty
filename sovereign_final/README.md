@@ -121,9 +121,13 @@ before; Czechia is added next to it.
   a market badge.
 - **Currency**: a listing keeps its own currency (EUR or CZK) on its card and
   in its own market's view. The combined view and the *Max Price €* filter
-  convert CZK at one rate, `CZK_PER_EUR`, labelled with its date
-  (`FX_RATE_DATE`). Czech cards use Czech labels and Czech number formatting
-  (`4 500 000 Kč`).
+  convert CZK at one rate: the Czech National Bank's daily fixing, fetched
+  before each scheduled run and at most hourly by the dashboard
+  (`modules/fx_rate.py`, saved to `data/fx_rate.json`) and shown with its date
+  in the sidebar. The sidebar warns when the rate is more than a week old.
+  `CZK_PER_EUR` / `FX_RATE_DATE` in `config.py` are the fallback until the
+  first fetch; setting `CZK_PER_EUR` in `.env` pins the rate by hand. Czech
+  cards use Czech labels and Czech number formatting (`4 500 000 Kč`).
 - **Pipelines**: each market has its own steps, status line, success record
   and retries. Both run one after the other under the one pipeline lock, and
   a failure in one never stops the other (`scheduler.run_all_markets`).

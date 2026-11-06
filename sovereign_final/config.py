@@ -509,9 +509,13 @@ SALE_PRICE_MIN_EUR = int(_env_float("SALE_PRICE_MIN_EUR", 15000))
 # is Slovak-specific is gathered, with Czechia's counterpart, in markets.py.
 # Czech listings keep their CZK prices. For ranking and the "All markets"
 # view they are converted to EUR with this one rate — the ČNB fixing for the
-# date below. Update both together (or set them in .env).
-CZK_PER_EUR    = _env_float("CZK_PER_EUR", 24.355)
-FX_RATE_DATE   = os.getenv("FX_RATE_DATE", "2026-10-14")
+# date below. These are only the fallback: modules/fx_rate fetches the ČNB
+# rate before each scheduled run (and hourly from the dashboard), saves it to
+# data/fx_rate.json and uses it, and the dashboard warns when the rate in use
+# is more than a week old. Setting CZK_PER_EUR in .env pins the rate by hand
+# (nothing is fetched); set FX_RATE_DATE with it.
+CZK_PER_EUR    = _env_float("CZK_PER_EUR", 24.290)
+FX_RATE_DATE   = os.getenv("FX_RATE_DATE", "2026-11-05")
 FX_RATE_SOURCE = os.getenv("FX_RATE_SOURCE", "ČNB kurzy devizového trhu")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
