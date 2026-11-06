@@ -14,11 +14,17 @@ NOW = "2099-01-01T00:00:00+00:00"
 
 # ── Rents ─────────────────────────────────────────────────────────────────────
 @pytest.mark.parametrize("district,key,rate", [
-    ("Praha 2 - Vinohrady", "praha", 462), ("Praha 7 - Holešovice", "praha 7", 493),
+    ("Praha 2 - Vinohrady", "praha 2", 482), ("Praha 7 - Holešovice", "praha 7", 493),
+    ("Praha 1", "praha 1", 490), ("Praha 10 - Vršovice", "praha 10", 442),
+    ("Praha 11 - Chodov", "praha", 462), ("Praha", "praha", 462),
     ("Brno-střed", "brno", 390), ("Ostrava-Poruba", "ostrava", 254),
     ("Hradec Králové", "hradec králové", 318), ("Ústí nad Labem - Střekov", "ústí nad labem", 221),
+    ("Plzeň 3", "plzeň", 301), ("Olomouc", "olomouc", 296), ("Liberec", "liberec", 289),
+    ("Zlín", "zlín", 287), ("České Budějovice", "české budějovice", 283),
+    ("Karlovy Vary", "karlovy vary", 246),
     ("Říčany, Praha-východ", "říčany", None), ("Brno-venkov", "brno-venkov", None),
-    ("Plzeň 3", "plzeň", None), ("Kladno - Kročehlavy", "kladno", None), ("", "default", None),
+    ("Plzeň-jih", "plzeň-jih", None), ("Kladno - Kročehlavy", "kladno", None),
+    ("", "default", None),
 ])
 def test_rent_keys(district, key, rate):
     assert rent_cz.match_rent_key(district) == key
@@ -26,14 +32,15 @@ def test_rent_keys(district, key, rate):
 
 
 def test_a_czech_rent_has_no_rooms_multiplier_and_no_borrowed_figure():
-    assert fin.get_rent_estimate("Praha 2", 40, rooms=1, market="cz") == 462 * 40
+    assert fin.get_rent_estimate("Praha 2", 40, rooms=1, market="cz") == 482 * 40
     assert fin.get_rent_estimate("Praha 2", 40, rooms=1) != fin.get_rent_estimate(
         "Praha 2", 40, rooms=2)                                   # Slovakia: still applies
     with pytest.raises(LookupError, match="engine/rent_cz.py"):
-        fin.get_rent_estimate("Plzeň 3", 55, market="cz")
+        fin.get_rent_estimate("Kladno - Kročehlavy", 55, market="cz")
     # Live comps give a town without a published figure its rate.
-    assert fin.get_rent_estimate("Plzeň 3", 55, rates={"plzeň": 280.0}, market="cz") == 280 * 55
-    assert fin.rent_fallback_kind("plzeň", market="cz") is None
+    assert fin.get_rent_estimate("Kladno - Kročehlavy", 55, rates={"kladno": 280.0},
+                                 market="cz") == 280 * 55
+    assert fin.rent_fallback_kind("kladno", market="cz") is None
 
 
 # ── Rent comps: Czech rows stay Czech, Slovak stay Slovak ─────────────────────
@@ -48,31 +55,31 @@ def _rental(i, key, rent, size=50, market="cz", district=None, **kw):
 def test_czech_comps(full_db):
     import database as db
     for i in range(6):
-        db.upsert_rental(_rental(i, "plzeň", 14_000 + i * 100))      # ~280 Kč/m²
+        db.upsert_rental(_rental(i, "kladno", 14_000 + i * 100))     # ~280 Kč/m²
         db.upsert_rental(_rental(i, "praha", 25_000))                 # 500 Kč/m²
-    db.upsert_rental(_rental(9, "plzeň", 15_000, energies_included=1))  # not a comp
-    db.upsert_rental(_rental(10, "plzeň", 200_000))                   # implausible
+    db.upsert_rental(_rental(9, "kladno", 15_000, energies_included=1))  # not a comp
+    db.upsert_rental(_rental(10, "kladno", 200_000))                   # implausible
     for i in range(6):
         db.upsert_rental(_rental(i, "žilina", 650, size=55, market="sk"))
-    db.upsert_listing(make_listing("cz1", market="cz", currency="CZK", district="Plzeň 3",
+    db.upsert_listing(make_listing("cz1", market="cz", currency="CZK", district="Kladno 3",
                                    price_eur=3_000_000.0, url="https://x/l/cz1"))
     out = rent_comps_cz.rebuild_rent_comps()
-    assert out["keys"] == 2 and out["rentals"] == 12 and "plzeň" in out["changed"]
+    assert out["keys"] == 2 and out["rentals"] == 12 and "kladno" in out["changed"]
     rates = rent_comps_cz.load_live_rates()
     from config import RENT_COMP_ASKING_HAIRCUT, RENT_COMP_PRIOR_WEIGHT
-    plzen_median = sorted((14_000 + i * 100) / 50 for i in range(6))
-    med = (plzen_median[2] + plzen_median[3]) / 2
-    assert rates["plzeň"] == round(med * RENT_COMP_ASKING_HAIRCUT, 2)   # no baseline: live
+    kladno_median = sorted((14_000 + i * 100) / 50 for i in range(6))
+    med = (kladno_median[2] + kladno_median[3]) / 2
+    assert rates["kladno"] == round(med * RENT_COMP_ASKING_HAIRCUT, 2)  # no baseline: live
     k = RENT_COMP_PRIOR_WEIGHT
     assert rates["praha"] == round((6 * 500 * RENT_COMP_ASKING_HAIRCUT + k * 462) / (6 + k), 2)
     # The Slovak rebuild reads only Slovak rentals and keeps the Czech comps.
     sk = rent_comps.rebuild_rent_comps()
     assert sk["keys"] == 1 and sk["rentals"] == 6
     assert set(rent_comps.load_live_rates()) <= {"žilina"}
-    assert set(rent_comps_cz.load_live_rates()) == {"plzeň", "praha"}
+    assert set(rent_comps_cz.load_live_rates()) == {"kladno", "praha"}
     rows = rent_comps_cz.comps_table()
     assert {r["District key"]: r["Source"] for r in rows} == {
-        "plzeň": "live", "praha": "live blend"}
+        "kladno": "live", "praha": "live blend"}
 
 
 def test_slovak_comps_never_touch_czech_scores(full_db):
