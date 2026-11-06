@@ -104,6 +104,12 @@ Everything should pass (about 1,500 tests; the dashboard tests in
 `tests/test_app_smoke.py` need `streamlit` installed and are skipped without
 it). CI also runs `ruff check . --select=E9,F` and runs the suite on Windows.
 
+`tests/test_nehnutelnosti_browser.py` runs the Nehnutelnosti.sk scraper in a
+real Chromium against a fake site on 127.0.0.1, with no internet needed. It is
+skipped unless Playwright and its browser are installed
+(`playwright install chromium`). CI runs it in a job of its own, so a
+Playwright or Chromium upgrade is tested too.
+
 Dependencies are pinned to exact versions in `requirements.txt`, so a Docker
 rebuild installs what the tests last passed with. Dependabot opens a PR each
 week with upgrades, and CI tests them before they land.
