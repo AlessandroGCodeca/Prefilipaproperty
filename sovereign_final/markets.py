@@ -183,10 +183,11 @@ SK = Market(
 
 
 # ── Czechia ───────────────────────────────────────────────────────────────────
-# Every figure below was checked on 2026-10-16 through web search. The
-# container this was built in could not reach any .cz host (cnb.cz,
-# financnisprava.gov.cz, cuzk.gov.cz, czso.cz), so each was read from search
-# results quoting those sites or the press — "checked" says so. A figure that
+# Every figure below was first checked on 2026-10-16 through web search, when
+# no .cz host could be reached from the build container; "checked" says so.
+# The cash-flow figures were re-checked on 2026-11-05 against the primary
+# documents (cnb.cz, zakonyprolidi.cz, mf.gov.cz, Deloitte's report) and
+# published price lists — docs/M1_VERIFICATION.md lists each. A figure that
 # could not be confirmed, or is an assumption carried over from the Slovak
 # profile, says UNVERIFIED and can be set in .env.
 
@@ -259,8 +260,9 @@ CZ = Market(
     ltv_ratio=0.80,              # ČNB: 80 % (90 % under 36) for own housing
     ltv_ratio_investor=0.70,     # ČNB: 70 % for an investment mortgage
     investor_ltv_from="2026-04-01",
-    # The engine's +2 pp rate shock. ČNB's own stress add-on (if any) could
-    # not be confirmed: UNVERIFIED as a ČNB figure; kept as the same test.
+    # ČNB's own stress add-on: DSTI is to be computed at the contract rate
+    # "zvýšenou nejméně o 2 procentní body" (úřední sdělení of 27 Nov 2025,
+    # Věstník ČNB 17/2025, Doporučení B.3; applies from 1 Apr 2026).
     rate_shock_pp=0.02,
     lending_rules={
         "regulator": "ČNB",
@@ -273,15 +275,18 @@ CZ = Market(
         "investor_note": ("From 1 Apr 2026 ČNB recommends LTV ≤ 70 % and DTI ≤ 7 for an "
                           "investment mortgage — a 3rd+ residential property or one bought "
                           "to let. A recommendation, not a law."),
-        "stress_pp_source": "UNVERIFIED — no ČNB stress add-on confirmed; the engine's +2 pp",
+        "stress_pp_source": ("ČNB úřední sdělení of 27 Nov 2025 (Věstník ČNB 17/2025), "
+                             "Doporučení B.3: DSTI at the contract rate + at least 2 pp, "
+                             "applied from 1 Apr 2026 — read from cnb.cz 2026-11-05"),
         "rate_source": ("Swiss Life Hypoindex 09/2026 (swisslifeselect.cz press release, "
                         "9 Sep 2026): 5.51 %; banky.cz investment-mortgage comparison"),
-        "source": ("ČNB press release 'ČNB doporučuje přísnější limity pro investiční "
-                   "hypotéky. Kapitálové rezervy se nemění' (2026): LTV 70 % / DTI 7 for "
-                   "investment mortgages from 1 Apr 2026, DTI and DSTI otherwise "
-                   "deactivated, LTV 80 % / 90 % under 36 — read via web search "
-                   "(cnb.cz not reachable)"),
-        "checked": "2026-10-16 (web search)",
+        "source": ("ČNB úřední sdělení of 27 Nov 2025 (Věstník ČNB 17/2025), applied from "
+                   "1 Apr 2026: Doporučení D — LTV 70 % / DTI 7 for an investment mortgage, "
+                   "which includes any loan whose income counts the expected rent (D.2); "
+                   "DSTI 40 % and DTI 8 otherwise only as thresholds for 'very prudent' "
+                   "assessment, the binding DTI / DSTI caps deactivated; LTV 80 % / 90 % "
+                   "under 36 (ČNB press release, via web search)"),
+        "checked": "2026-11-05 (cnb.cz, Věstník 17/2025)",
     },
     tax_year_rules=CZ_TAX_YEAR_RULES,
     property_tax={"kind": "per_m2", "module": "engine.property_tax_cz",
@@ -292,42 +297,72 @@ CZ = Market(
     # owner pays these two. No national statistic exists: sources give a
     # typical 15–35 Kč/m² (realfree.cz), 15–50 (flatio.cz), an average of
     # 15–20 (rulecalc.com) and ~17 across one manager's buildings
-    # (svjpredseda.cz). 20 Kč/m² is inside all of them. The správa fee per
-    # flat could not be confirmed: UNVERIFIED, 0 unless set in .env.
+    # (svjpredseda.cz). 20 Kč/m² is inside all of them — an estimate, not a
+    # measured average: no national statistic exists (domovniasistent.cz), so
+    # a building's own předpis záloh is the only real figure.
+    # The správa (management and accounting) fee is split equally per flat
+    # (§ 1180 občanského zákoníku). Published price lists for full správa,
+    # checked 2026-11-05: 140–190 Kč (brnoreal.cz, not a VAT payer), 150
+    # (sprava85.cz) and 160 (alfabyt.cz) + DPH, 220 + DPH = 266.20
+    # (spravujeme-svj.cz), at most 230 + DPH (svjcompass.cz) — 182–278 Kč a
+    # month with VAT. 200 Kč is their middle.
     hoa={"kind": "per_m2",
          "per_m2": _env_float("CZ_SVJ_FOND_OPRAV_PER_M2", 20.0),
-         "per_unit": _env_float("CZ_SVJ_SPRAVA_PER_UNIT", 0.0),
+         "per_unit": _env_float("CZ_SVJ_SPRAVA_PER_UNIT", 200.0),
          "label": "SVJ (fond oprav + správa)",
          "source": ("fond oprav 20 Kč/m²/month: within the ranges reported by realfree.cz, "
-                    "flatio.cz, rulecalc.com, svjpredseda.cz (web search). správa per "
-                    "flat: UNVERIFIED (CZ_SVJ_SPRAVA_PER_UNIT, default 0)"),
-         "checked": "2026-10-16 (web search)"},
+                    "flatio.cz, rulecalc.com, svjpredseda.cz (no national statistic "
+                    "exists). správa 200 Kč per flat a month: the middle of five managers' "
+                    "published price lists, 182–278 Kč with VAT"),
+         "checked": "2026-11-05 (managers' price lists)"},
     # No transfer tax: daň z nabytí nemovitých věcí was abolished (zákon
-    # 386/2020 Sb.). The katastr filing fee (návrh na vklad, položka 120 of
-    # zákon 634/2004 Sb.) is 2 000 Kč (cuzk.gov.cz sazebník, via search). Legal,
-    # escrow (advokátní / notářská úschova), valuation and mortgage fees could
-    # not be confirmed: UNVERIFIED — the Slovak profile's 1 % of the price is
-    # carried over for them.
-    acquisition_cost_rate=_env_float("CZ_ACQUISITION_COST_RATE", 0.01),
-    acquisition_cost_fixed=2_000.0,
+    # 386/2020 Sb.). The rest is a fixed sum, not a share of the price:
+    #   4 000 Kč  two návrhy na vklad at 2 000 Kč (položka 120 of zákon
+    #             634/2004 Sb., read 2026-11-05) — the ownership and the
+    #             bank's lien;
+    #  10 000 Kč  an advokát's purchase contract + advokátní úschova + the
+    #             filing, the top of the 5 000–10 000 Kč packages published by
+    #             bricks.legal and martinpleskac.cz (judrnosek.cz: úschova
+    #             2 500–3 500; contracts 3 000–6 000);
+    #   5 000 Kč  the bank's valuation of a flat (hyponamiru.cz: about 5 000
+    #             in the banks' price lists; some banks charge nothing).
+    # A notářská úschova costs more and grows with the price (vyhláška 196/2001
+    # Sb., položka C: 16 456 Kč on 5 mil. Kč, per martinpleskac.cz): set
+    # CZ_ACQUISITION_COST_RATE for it.
+    acquisition_cost_rate=_env_float("CZ_ACQUISITION_COST_RATE", 0.0),
+    acquisition_cost_fixed=_env_float("CZ_ACQUISITION_COST_FIXED", 19_000.0),
     acquisition_costs={
-        "katastr_fee": 2_000, "transfer_tax": 0,
-        "legal_fees": "UNVERIFIED — 1 % of the price carried over from the SK profile",
-        "source": ("zákon 386/2020 Sb. (transfer tax abolished; bezrealitky.cz, epravo.cz); "
-                   "ČÚZK sazebník: 2 000 Kč per návrh na vklad (cuzk.gov.cz, via search)"),
-        "checked": "2026-10-16 (web search)"},
-    # The s.r.o. figures are the Slovak estimates converted at the dated rate
-    # (setup €2,500, running €1,200/yr, +1 pp on the loan, 70 % LTV): no Czech
-    # quote could be confirmed. UNVERIFIED — set them in .env from an účetní's
-    # and a bank's quote.
-    sro_setup_cost=_env_float("CZ_SRO_SETUP_COST", round(2_500 * config.CZK_PER_EUR, -3)),
-    sro_annual_running_cost=_env_float("CZ_SRO_ANNUAL_RUNNING_COST",
-                                       round(1_200 * config.CZK_PER_EUR, -3)),
+        "katastr_fee": 2_000, "katastr_filings": 2, "transfer_tax": 0,
+        "legal_fees": 10_000, "valuation": 5_000,
+        "source": ("zákon 386/2020 Sb. (transfer tax abolished); zákon 634/2004 Sb. "
+                   "položka 120 (2 000 Kč per návrh na vklad); advokát contract + úschova "
+                   "packages 5 000–10 000 Kč (bricks.legal, martinpleskac.cz, "
+                   "judrnosek.cz); bank valuation ~5 000 Kč (hyponamiru.cz)"),
+        "checked": "2026-11-05 (zakonyprolidi.cz; price lists via web search)"},
+    # s.r.o. setup: founded on the statutory model articles (vzor společenské
+    # smlouvy) with the capital paid in cash, through a notary who also files
+    # it — the notary's fee is 2 000 Kč for the deed (vyhláška 196/2001 Sb.,
+    # položka A), 500 for the register entry and 500 for the beneficial-owner
+    # entry (položka S), + 21 % DPH = 3 630 Kč, and the court fee is waived
+    # (zákon 549/1991 Sb., § 11). Renting flats without services needs no
+    # živnostenský list. Rounded up: 4 000 Kč. Tailored articles cost more
+    # (notary from 4 000 Kč + DPH, court fee 2 700 / 6 000 Kč).
+    # Running: bookkeeping, annual accounts and the corporate tax return for a
+    # company that is not a VAT payer (letting flats is exempt) — 1 500 Kč a
+    # month (eskont.cz) to 1 900 (kancelarska-krysa.cz), 18 000–22 800 a
+    # year: 20 000 Kč. The loan terms (+1 pp, 70 % LTV) are still the Slovak
+    # profile's: UNVERIFIED for Czechia — a bank's quote sets them.
+    sro_setup_cost=_env_float("CZ_SRO_SETUP_COST", 4_000.0),
+    sro_annual_running_cost=_env_float("CZ_SRO_ANNUAL_RUNNING_COST", 20_000.0),
     sro_rate_premium_pp=_env_float("CZ_SRO_RATE_PREMIUM_PP", 0.01),
     sro_ltv_ratio=_env_float("CZ_SRO_LTV_RATIO", 0.70),
-    sro_costs={"source": ("UNVERIFIED — Slovak estimates converted at "
-                          f"{config.CZK_PER_EUR} Kč/€; no Czech quote confirmed"),
-               "checked": None},
+    sro_costs={"source": ("setup: vyhláška 196/2001 Sb. položky A and S (3 630 Kč with "
+                          "DPH, model articles), court fee waived by zákon 549/1991 Sb. "
+                          "§ 11; running: accountants' price lists for a non-VAT-payer "
+                          "s.r.o., 18 000–22 800 Kč a year (eskont.cz, "
+                          "kancelarska-krysa.cz). Loan premium and LTV: UNVERIFIED — "
+                          "the Slovak profile's"),
+               "checked": "2026-11-05 (zakonyprolidi.cz; price lists)"},
     cashflow_min_surplus=_env_float("CZ_CASHFLOW_MIN_SURPLUS", 0.0),
     # Plausibility bounds, not market figures: a Kč amount on a sale listing
     # below 200 000 is a deposit, a rent or a fee; a rent outside
@@ -344,20 +379,45 @@ CZ = Market(
     # Praha 2 at 265 100 Kč/m², via search) and still catches a 10× misread.
     blank_district_floor_m2=13_900.0, blank_district_ceiling_m2=600_000.0,
     industrial_zones=(),
-    # The Slovak description premiums, carried over: UNVERIFIED for Czechia.
+    # Description premiums, checked against the Ministry of Finance's rent
+    # map (Cenová mapa nájemného, 2026-08-15 release, data to 30 Jun 2026),
+    # whose hedonic model publishes what each feature adds, in Kč/m² a month,
+    # for a flat over 5 years old: balcony 16 / 7 / 5 / 9 by size category,
+    # furnished 30 / 32 / 28 / 25, garage 45 / 48 / 37 / 34; an outdoor
+    # parking space is not significant, so it isn't published. Against MF's
+    # own reference rent for a 2+kk in the 13 regional capitals that is:
+    #   balcony   +2.0 % (Praha) to +3.7 % (Ústí n. L.)  → +3 % confirmed;
+    #   furnished +8.9 % to +16.8 %                       → +10 % inside it;
+    #   garage    +13 % to +25 %, outdoor space +0        → the description
+    #             flag doesn't tell them apart, so +5 % stays a blend:
+    #             UNVERIFIED as such. Semi-furnished: MF has no such class —
+    #             UNVERIFIED.
     industrial_rent_premium=1.0,
     parking_rent_premium=config.PARKING_RENT_PREMIUM,
     furnished_rent_premium=config.FURNISHED_RENT_PREMIUM,
     semi_furnished_premium=config.SEMI_FURNISHED_PREMIUM,
     balcony_rent_premium=config.BALCONY_RENT_PREMIUM,
-    # Hold-period assumptions, carried over from the Slovak profile: model
-    # inputs, not a Czech forecast. UNVERIFIED for Czechia.
+    # Hold-period assumptions. Growth rates are forecasts, which no source
+    # can confirm; what can be said is where they sit:
+    #   cost inflation 2.5 % — above ČNB's 2 % inflation target;
+    #   rent growth 2.5 %    — far under the record: Deloitte's index of the
+    #                          regional capitals stands at 216.6 % of 2014 in
+    #                          Q2 2026, ~6.4 % a year;
+    #   appreciation 3 %     — a cautious nominal rate.
+    # They stay the Slovak profile's (UNVERIFIED as a Czech forecast).
+    # Exit costs: the seller pays the agent, typically ~3 % of the price in
+    # Czechia (rulecalc.com, Feb 2026; ARK cites 3–6 %), + 21 % DPH from a
+    # VAT-paying agency = 3.6 %, plus the seller's share of the contract and
+    # úschova: 4 %.
     appreciation_rate=_env_float("CZ_APPRECIATION_RATE", config.APPRECIATION_RATE),
     rent_growth_rate=_env_float("CZ_RENT_GROWTH_RATE", config.RENT_GROWTH_RATE),
     cost_inflation_rate=_env_float("CZ_COST_INFLATION_RATE", config.COST_INFLATION_RATE),
-    exit_cost_rate=_env_float("CZ_EXIT_COST_RATE", config.EXIT_COST_RATE),
-    hold_assumptions={"source": "UNVERIFIED — the Slovak profile's assumptions",
-                      "checked": None},
+    exit_cost_rate=_env_float("CZ_EXIT_COST_RATE", 0.04),
+    hold_assumptions={"source": ("growth rates: UNVERIFIED — the Slovak profile's, compared "
+                                 "with ČNB's 2 % target and Deloitte's 2014–2026 rent "
+                                 "index; exit costs 4 %: ~3 % agent's commission + 21 % "
+                                 "DPH (rulecalc.com, ARK via novinky.cz) and legal fees"),
+                      "checked": "2026-11-05"},
     # Rents: engine/rent_cz (Deloitte Rent Index Q2 2026 for the places it
     # names) and live rental comps (engine/rent_comps_cz).
     rent_source={"source": "see engine/rent_cz.RENT_SOURCE",
