@@ -18,9 +18,12 @@ land) are placeholders for the notár to fill and confirm.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 import pytz
+
+log = logging.getLogger(__name__)
 
 FILL = "[Doplniť]"
 _NBSP = " "
@@ -92,7 +95,9 @@ def figures_at_price(listing: dict, price: float) -> dict | None:
         kw["market"] = mkt
     try:
         r = analyse(float(price), float(size), l.get("district") or "", **kw)
-    except Exception:
+    except Exception as e:       # the engine's own checks raise ValueError and others
+        log.warning("Draft figures not worked out for listing %s at %s: %s: %s",
+                    l.get("id"), price, type(e).__name__, e)
         return None
     return {"surplus_sro": r.surplus_sro, "annual_sro_saving": r.annual_sro_saving,
             "net_rental_yield": r.net_rental_yield}

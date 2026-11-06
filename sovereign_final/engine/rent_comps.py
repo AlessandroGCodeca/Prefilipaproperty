@@ -28,7 +28,9 @@ RENT_COMP_MIN_SAMPLE comps keep the baseline outright.
 
 from __future__ import annotations
 
+import logging
 import re
+import sqlite3
 import statistics
 from datetime import datetime, timedelta, timezone
 
@@ -39,6 +41,8 @@ from config import (
     RENT_COMP_PRIOR_WEIGHT, RENT_COMP_MAX_AGE_DAYS, RENT_MIN_EUR, RENT_MAX_EUR,
     FURNISHED_RENT_PREMIUM, SEMI_FURNISHED_PREMIUM,
 )
+
+log = logging.getLogger(__name__)
 
 # €/m² outside this is a parse error (a sale price, a per-night rate, a size
 # read off a balcony), not a market.
@@ -223,11 +227,15 @@ def load_live_rates(market: str = "sk") -> dict[str, float]:
     if market != "sk":
         from engine import rent_comps_cz
         return rent_comps_cz.load_live_rates()
-    from database import get_conn
+    from database import get_conn, _has_table
     conn = get_conn()
     try:
+        if not _has_table(conn, "rent_comps"):
+            return {}
         return rates_from_comps(_stored_comps(conn))
-    except Exception:
+    except sqlite3.Error as e:
+        log.warning("Live rent comps not read, scoring uses the baseline rents: %s: %s",
+                    type(e).__name__, e)
         return {}
     finally:
         conn.close()
@@ -284,11 +292,12 @@ def rebuild_rent_comps(max_age_days: int = RENT_COMP_MAX_AGE_DAYS) -> dict:
 
 def comps_table() -> list[dict]:
     """Rows for the dashboard: key, baseline, live median, n, rate in use."""
-    from database import get_conn
+    from database import get_conn, _has_table
     conn = get_conn()
     try:
-        stored = _stored_comps(conn)
-    except Exception:
+        stored = _stored_comps(conn) if _has_table(conn, "rent_comps") else {}
+    except sqlite3.Error as e:
+        log.warning("Live rent comps not read for the comps table: %s: %s", type(e).__name__, e)
         stored = {}
     finally:
         conn.close()

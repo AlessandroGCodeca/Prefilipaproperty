@@ -306,6 +306,13 @@ source.
 
 - **Fix:** log each at warning level with the exception type, and narrow the
   exceptions where the error type is known.
+- **Status: fixed.** Both examples, and the same pattern in
+  `property_tax_sk` (stored rates, municipality list), `rent_comps` and
+  `rent_comps_cz` (live rates, comps table) and
+  `contract_draft.figures_at_price`, now log a warning with the exception
+  type. The database reads catch only `sqlite3.Error` / `OSError`, so a
+  code bug surfaces; a missing `rent_comps` table is still a quiet empty
+  case. Tests: `tests/test_logged_fallbacks.py`.
 
 **M7 · A few very large files** · Impact: slower, riskier changes · Effort L
 
