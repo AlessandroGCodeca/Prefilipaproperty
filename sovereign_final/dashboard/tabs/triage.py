@@ -96,6 +96,10 @@ def render(v) -> None:
         # converted, i.e. with both markets on the page.
         if view_market is not None or (df["Mkt"] == "🇸🇰 SK").all():
             df = df.drop(columns="Native")
+        # A column every row leaves empty (no listing has a benchmark yet) is
+        # dropped: a number column shows each missing value as "None".
+        df = df.drop(columns=[c for c in ("Max 🟡", "Max 🟢", "To 🟡", "Below%")
+                              if df[c].isna().all()])
         st.markdown(
             f'<div class="muted">{len(df)} scored listings — sorted by composite deal '
             f'grade (yield + discount to market + location + energy + condition + '

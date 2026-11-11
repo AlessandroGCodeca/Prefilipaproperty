@@ -75,6 +75,8 @@ def render(v) -> None:
         if st.button("SAVE ANNOTATION", width="stretch", disabled=using_demo):
             from database import add_annotation
             add_annotation(sel["id"], note, vibe)
+            from dashboard.listing_cache import clear_listing_cache
+            clear_listing_cache()       # the cards' vibe is cached with the listings
             st.success(f"✅ Vibe {vibe}/10 saved.")
         if using_demo:
             st.caption("Demo listing — notes can't be saved.")

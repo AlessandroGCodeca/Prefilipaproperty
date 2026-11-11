@@ -115,8 +115,12 @@ _REFERENCE_BEFORE = re.compile(
 # A non-bank company of a banking group (leasing, insurance, car finance,
 # factoring, an investment firm) or a credit union is no bank, whatever its
 # name shares with one.
+# A bank is an akciová spoločnosť / akciová společnost by law (SK zákon
+# 483/2001 § 2, CZ zákon 21/1992 § 1): a limited company is none, whatever
+# its name says ("BANKA PLUS s.r.o.").
+_LIMITED_COMPANY = r"(?<!\w)s\.?\s?r\.?\s?o(?!\w)|(?<!\w)spol\.?\s+s\s+r\.?\s?o"
 _NON_BANK = (r"leasing|pojistovn|(?<!\w)auto(?!\w)|fa[ck]toring|invest(?!ic)|"
-             r"druzstv|(?<!\w)zalozn")
+             r"druzstv|(?<!\w)zalozn|" + _LIMITED_COMPANY)
 # "banka" / "spořitelna" in the name, any case form, or a whole name on the
 # list (markets.CZ.lv_bank_names — names without either word: ČSOB,
 # Raiffeisenbank, UniCredit, MONETA, mBank, the state housing funds, …).

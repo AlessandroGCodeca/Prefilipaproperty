@@ -114,7 +114,11 @@ _REFERENCE_BEFORE = re.compile(r"zmluv|zriaden|zanik|vymaz|zrus")
 # contain it (VÚB, ČSOB, Oberbank, mBank, …) — as whole words. A non-bank
 # company of a banking group (leasing, insurance, factoring, an investment
 # firm) or a credit union is no bank, whatever its name shares with one.
-_NON_BANK = r"leasing|poistov|fa[ck]toring|invest(?!ic)|druzstv"
+# A bank is an akciová spoločnosť / akciová společnost by law (SK zákon
+# 483/2001 § 2, CZ zákon 21/1992 § 1): a limited company is none, whatever
+# its name says ("BANKA PLUS s.r.o.").
+_LIMITED_COMPANY = r"(?<!\w)s\.?\s?r\.?\s?o(?!\w)|(?<!\w)spol\.?\s+s\s+r\.?\s?o"
+_NON_BANK = r"leasing|poistov|fa[ck]toring|invest(?!ic)|druzstv|" + _LIMITED_COMPANY
 _BANK_RE = re.compile(
     rf"^(?!.*(?:{_NON_BANK})).*?(?:"
     r"(?<!\w)bank(?:a|y|e|u|ou|ovi|ami)?(?!\w)|sporiteln|"

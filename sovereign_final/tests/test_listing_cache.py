@@ -77,3 +77,68 @@ def test_the_cache_has_a_short_time_limit():
                if isinstance(n, ast.Assign)
                and getattr(n.targets[0], "id", "") == "LISTINGS_TTL_S")
     assert 0 < ttl <= 300
+
+
+# ── The other per-listing reads are cached too, and the page's writes clear them ─
+def _green(db, lid="g1"):
+    from engine.regional_prices import regional_median_price
+    from modules.cashflow_runner import run_scoring
+    now = datetime.now(timezone.utc).isoformat()
+    db.upsert_listing(make_listing(lid, district="Žilina", size_m2=55.0, title="Flat g1",
+                                   price_eur=float(round(regional_median_price("Žilina") * 55 * 0.7)),
+                                   last_seen_at=now, scraped_at=now))
+    run_scoring()
+
+
+def _triage(at):
+    return next(d.value for d in at.dataframe if "Grade" in d.value.columns)
+
+
+def test_a_rerun_reads_stages_history_and_vibes_from_the_cache(db, monkeypatch):
+    _green(db)
+    calls = []
+    for name in ("get_price_history", "get_deal_stages", "latest_vibes", "get_price_drops"):
+        real = getattr(db, name)
+        monkeypatch.setattr(db, name, lambda *a, _n=name, _r=real, **k:
+                            calls.append(_n) or _r(*a, **k))
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    n = len(calls)
+    assert {"get_price_history", "get_deal_stages", "latest_vibes"} <= set(calls)
+    at.run()
+    at.run()
+    assert len(calls) == n
+
+
+def test_saving_a_stage_on_a_card_shows_at_once(db):
+    _green(db)
+    at = run_app(open_cards=("g1",))
+    at.selectbox(key="stg_g1").select("OFFER").run()
+    at.button(key="stgb_g1").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("[OFFER]" in e.label for e in at.expander)
+    assert _triage(at)["Stage"].tolist() == ["OFFER"]
+
+
+def test_moving_a_deal_in_the_pipeline_shows_at_once(db):
+    _green(db)
+    at = run_app()
+    at.selectbox(key="pipe_stage").select("VIEWING").run()
+    next(b for b in at.button if b.label == "MOVE DEAL").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert db.get_deal_stages()["g1"]["stage"] == "VIEWING"
+    assert _triage(at)["Stage"].tolist() == ["VIEWING"]
+
+
+def test_a_saved_vibe_shows_at_once(db):
+    _green(db)
+    at = run_app()
+    sb = next(s for s in at.selectbox if s.label == "Select listing")
+    sb.select(next(o for o in sb.options if "[g1]" in o)).run()
+    next(s for s in at.slider if s.label == "Score (1–10)").set_value(9)
+    next(b for b in at.button if b.label == "SAVE ANNOTATION").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    # The triage table is drawn before the satellite viewer saves, so the
+    # click's own run still shows the old vibe; the next one must not (a
+    # cache left uncleared would for LISTINGS_TTL_S).
+    assert _triage(at.run())["Vibe"].tolist() == [9]

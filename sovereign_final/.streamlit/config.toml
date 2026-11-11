@@ -9,3 +9,9 @@ primaryColor = "#00e676"
 backgroundColor = "#07090e"
 secondaryBackgroundColor = "#0b0d14"
 textColor = "#bcc8e0"
+
+# "minimal" hides the toolbar's Deploy button (Streamlit Community Cloud,
+# which this private dashboard must never be published to) and the developer
+# options; the menu keeps Rerun, Settings and Print.
+[client]
+toolbarMode = "minimal"

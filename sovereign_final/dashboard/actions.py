@@ -27,6 +27,38 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRAPER_TIMEOUT_S = 1800   # ten pages plus detail pages can pass 5 min cold
 
 
+def run_killing_tree(args: list, timeout: float) -> tuple[str, str]:
+    """Run `args` and return its (stdout, stderr). Past `timeout` it is
+    stopped with every process it started, and TimeoutExpired is raised.
+
+    subprocess.run(timeout=…) kills only the process it started. A scraper
+    starts Playwright's Node driver, which starts Chromium; those normally
+    exit when their pipe to the scraper closes, but one that hangs would
+    outlive it. So the child gets its own process group (POSIX) and the whole
+    group is killed, or `taskkill /T` stops the tree (Windows)."""
+    import signal
+    import subprocess
+    windows = os.name == "nt"
+    proc = subprocess.Popen(
+        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        **({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if windows
+           else {"start_new_session": True}))
+    try:
+        return proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if windows:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                           capture_output=True, check=False)
+        else:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        proc.kill()
+        proc.communicate()
+        raise
+
+
 def _run_in_subprocess(module: str, func: str, kwargs: dict) -> tuple[object, str, bool]:
     """Run module.func(**kwargs) as a fresh subprocess — bypasses Python
     module cache, and a browser that hangs can be stopped. Returns (its
@@ -45,13 +77,12 @@ except Exception as e:
     print(json.dumps({{"ok": False, "error": str(e)}}))
 """
     try:
-        proc = subprocess.run(
-            [sys.executable, "-c", wrapper],
-            capture_output=True, text=True, timeout=SCRAPER_TIMEOUT_S
-        )
+        out, err = run_killing_tree([sys.executable, "-c", wrapper], SCRAPER_TIMEOUT_S)
     except subprocess.TimeoutExpired:
-        # run() has killed the scraper; uncaught, this was a raw traceback.
+        # The scraper and what it started are stopped; uncaught, this was a
+        # raw traceback.
         return None, "", True
+    proc = subprocess.CompletedProcess([], 0, out, err)
     for line in (proc.stdout + proc.stderr).strip().splitlines():
         try:
             data = _json.loads(line)

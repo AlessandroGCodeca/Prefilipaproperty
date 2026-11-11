@@ -75,6 +75,10 @@ from a phone or another PC:
 Over the internet, put it behind a reverse proxy with HTTPS (Caddy, Cloudflare
 Tunnel, Tailscale) — the password alone travels in the clear over plain HTTP.
 
+After 5 wrong passwords within 15 minutes the login locks for 15 minutes, for
+every browser at once (a guesser just opens new sessions) — the right
+password included. Restarting the dashboard lifts the lock.
+
 API keys live in `.env`, which Docker hands to the containers when they start
 (`env_file`). `.dockerignore` keeps it out of the image, so the keys are never
 baked into an image layer.
@@ -195,7 +199,7 @@ sovereign_final/
 │   ├── view.py               ← One run's page state: the market picked, the
 │   │                           filtered listings, sorted by class
 │   ├── overview.py           ← Banners, stats tiles, price cuts over the tabs
-│   ├── listing_cache.py      ← The cached listing load, and when it is cleared
+│   ├── listing_cache.py      ← The cached reads (listings, price history, stages, vibes, price cuts), and when they are cleared
 │   ├── cards.py              ← The listing card and its memo button
 │   ├── fmt.py                ← Money, badges, labels (Czech on a Czech card)
 │   ├── diagnostics.py        ← 🔗 TEST SITES / TEST CZ SITES
@@ -228,6 +232,7 @@ sovereign_final/
 ├── restart.sh                ← Restart the dashboard outside Docker
 ├── docker-compose.yml        ← dashboard + scheduler
 ├── docker/Dockerfile         ← App image
+├── docker/entrypoint.sh     ← Hands the data folders to the app's user, then drops root
 ├── requirements.txt
 ├── .env.example              ← Copy to .env
 ├── scraper/
@@ -296,7 +301,7 @@ The eleven tabs sit in three groups (one row of eleven overflowed at 1440 px):
 | Tab | What it does |
 |-----|-------------|
 | TRIAGE TABLE | Flat, sortable view of every scored listing — grade, price, **max offer** (🟡/🟢), ask vs max offer, below-market %, rent, surplus, **+2 pp stress**, gross yield, cap rate, **IRR**, **days tracked** (since the first scrape — not the portal's posting date), **price change**, **portals**, deal stage, vibe, LV status, **⛔ cash-flow negative** |
-| ACTIVE SNAG LIST | 🟢🟡 deal cards, 25 a page per class, each built when you open it: cost breakdown (the s.r.o.'s own loan and running cost), financing stress (+2 pp, 70% LTV), location risk with sources, price history, other portals' copies, deal stage, vibe notes, **PDF memo**, LV status and flat-LV verify; a ⛔ CASH-FLOW NEGATIVE badge and a ⚠ rent-fallback warning where they apply |
+| ACTIVE SNAG LIST | 🟢🟡 deal cards, 25 a page per class, each built when you open it (⚪ WHITE listings are one table, not cards): cost breakdown (the s.r.o.'s own loan and running cost), financing stress (+2 pp, 70% LTV), location risk with sources, price history, other portals' copies, deal stage, vibe notes, **PDF memo**, LV status and flat-LV verify; a ⛔ CASH-FLOW NEGATIVE badge and a ⚠ rent-fallback warning where they apply |
 | MAP | Every listing with coordinates, coloured by class (faded = area-level geocode) |
 | WHAT-IF / TAX | The tax toggle calculator: any listing (or a custom one) re-run with your own price, rate, LTV, term, rent, hold period, growth and exit costs, and the s.r.o.'s loan premium, LTV and running cost — personal vs s.r.o. side by side, rate-shock table, IRR, max offer |
 | DEAL PIPELINE | Board of the deals you're working: WATCHING → VIEWING → OFFER → NEGOTIATING → DUE DILIGENCE → NOTARY → CLOSED / PASSED, with a timeline per deal |
@@ -307,7 +312,8 @@ The eleven tabs sit in three groups (one row of eleven overflowed at 1440 px):
 | TAX RATES | Slovakia: each town's flat property-tax rate — what the engine charges, what the town's own site says, and the source; a doubtful reading waits here to be accepted or turned down, and a town whose site blocks automated requests takes an uploaded ordinance. Czechia: every municipality's size and local coefficients with the ordinances they come from, and a lookup by place. One click re-reads both countries |
 | ONE-CLICK CLOSE | Pre-filled Slovak notary contract draft with download; the deal's numbers are a separate download, not part of the draft |
 
-A 🔻 banner above the tabs lists price cuts from the last 14 days, and says
+A 🔻 banner above the tabs lists price cuts from the last 14 days (the 50
+latest, built when you open it), and says
 whether the new price now sits inside the max YELLOW offer.
 
 Each listing also gets a **composite deal grade (A–D)** blending financial
@@ -825,6 +831,13 @@ docker compose logs -f      # Live logs
 docker compose ps           # Container status
 docker compose restart      # Restart all
 ```
+
+The containers run the app as an unprivileged user, `sovereign` (uid 1000),
+not as root. Each starts as root only long enough to hand that user the
+folders the app writes — the database volume, `logs/` and `backups/` — so a
+database written by an older image, or copied in with `docker compose cp`,
+keeps working. On a Linux host this makes uid 1000 the owner of `logs/` and
+`backups/` in this folder.
 
 The local Mistral model (`model-runner`) is gone: nothing used it. If an older
 setup pulled it, reclaim the space with

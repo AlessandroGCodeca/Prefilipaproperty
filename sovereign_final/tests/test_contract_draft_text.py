@@ -111,6 +111,18 @@ def test_ico_placeholder_follows_the_structure():
 
 
 def test_escrow_choice_sets_payment_and_condition():
-    assert "§ 56a Notárskeho poriadku" in _draft(escrow=True)
+    assert "notársku úschovu podľa Notárskeho poriadku" in _draft(escrow=True)
     no_escrow = _draft(escrow=False)
-    assert "Priamy prevod" in no_escrow and "§ 56a" not in no_escrow
+    assert "Priamy prevod" in no_escrow and "úschovu podľa" not in no_escrow
+
+
+def test_the_draft_is_slovak_and_asks_for_no_notarial_deed():
+    # Audit finding 21: "dle" is Czech; a Slovak flat purchase needs verified
+    # signatures (or an advokát's contract), not a notarial deed; and the
+    # portal's ad title is no description of the property.
+    draft = _draft(escrow=True)
+    assert " dle " not in draft and "§ 56a" not in draft
+    assert "vyžaduje notariálne vyhotovenie" not in draft
+    assert "pred notárom" not in draft
+    assert "Pravosť podpisov" in draft and "advokát" in draft
+    assert "1-izbový byt, Fončorda" not in draft

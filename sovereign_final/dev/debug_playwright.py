@@ -59,8 +59,9 @@ with sync_playwright() as pw:
                     "len": len(body),
                     "preview": body[:200],
                 })
-            except Exception:
-                pass
+            except Exception as e:
+                # A body gone before it was read (a redirect, a closed page).
+                print(f"  (no body for {response.url[:80]}: {type(e).__name__})")
 
     page.on("response", on_response)
 

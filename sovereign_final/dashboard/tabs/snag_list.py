@@ -9,6 +9,48 @@ from dashboard.cards import render_cards
 from dashboard.fmt import amt, esc
 
 
+def render_white_table(whites, v) -> None:
+    """WHITE listings as one table, not cards. They are most of the listings
+    and none is a deal, and a card each made every click slower; the triage
+    table, WHAT-IF and DEAL PIPELINE still reach every one of them."""
+    import pandas as pd
+    rows = []
+    for l in whites:
+        surplus = l.get("surplus_sro") if v.show_sro else l.get("surplus_personal")
+        disc = l.get("market_discount")
+        rows.append({
+            "Title":    (l.get("title") or l.get("district") or "—")[:60],
+            "District": l.get("district") or "—",
+            "Mkt":      "🇨🇿 CZ" if l.get("_market") == "cz" else "🇸🇰 SK",
+            "Price":    v.in_view_cur(l, l.get("price_eur") or 0),
+            "Size":     l.get("size_m2") or 0,
+            # Blank without a benchmark: 0% would read as "at market".
+            "Below%":   disc * 100 if disc is not None else None,
+            "Surplus":  v.in_view_cur(l, surplus),
+            "Stage":    (l.get("_stage") or {}).get("stage", ""),
+            "URL":      l.get("url") or "",
+        })
+    df = pd.DataFrame(rows)
+    # No WHITE listing has a benchmark: drop the column rather than fill it
+    # with "None".
+    if df["Below%"].isna().all():
+        df = df.drop(columns="Below%")
+    st.dataframe(
+        df, width="stretch", hide_index=True,
+        height=min(420, 40 + 35 * len(rows)),
+        column_config={
+            "Price":   v.money_col("Price"),
+            "Size":    st.column_config.NumberColumn(format="%d m²"),
+            "Below%":  st.column_config.NumberColumn(
+                format="%.0f%%", help="Asking price per m² below the regional median "
+                                      "(negative = above it; blank = no benchmark)"),
+            "Surplus": v.money_col("Surplus"),
+            "URL":     st.column_config.LinkColumn(display_text="open ↗"),
+        })
+    st.caption("WHITE listings have no cards. Run one through ANALYSIS → WHAT-IF / TAX for "
+               "the full breakdown, or track it from WORKFLOW → DEAL PIPELINE.")
+
+
 def render(v) -> None:
     """The ACTIVE SNAG LIST tab."""
     _cf_negative = v.cf_negative
@@ -39,7 +81,7 @@ def render(v) -> None:
             render_cards(yellows, "yellow", v)
         if whites:
             st.markdown(f'<div class="muted" style="margin:18px 0 8px">⚪ WHITE — AT MARKET OR NO BENCHMARK ({len(whites)})</div>', unsafe_allow_html=True)
-            render_cards(whites, "white", v)
+            render_white_table(whites, v)
         if pending:
             pend = st.expander(f"⏳ PENDING SCORING ({len(pending)} listings scraped, not yet classified)",
                                key="pending_list", on_change="rerun")
