@@ -15,7 +15,9 @@ def _alive(pid: int) -> bool:
     try:
         with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
             return f.read().rsplit(")", 1)[1].split()[0] != "Z"
-    except FileNotFoundError:
+    except OSError:
+        # Gone: no /proc entry (FileNotFoundError), or it went between the
+        # open and the read (ProcessLookupError, as CI hit).
         return False
 
 
