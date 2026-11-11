@@ -232,3 +232,35 @@ def test_whatif_shows_the_recommended_structures_rate_shock(db):
     assert "RATE SHOCK (personal)" in md and "EQUITY CASH FLOWS (personal)" in md
     at.slider(key="wi_hold").set_value(3).run()
     assert not at.exception, [e.value for e in at.exception]
+
+
+# ── 9 · Czech towns outside the Deloitte index take the MF rent map's figure ──
+def test_the_mf_rent_map_covers_the_towns_that_waited():
+    from engine import rent_cz
+    for town in ("kladno", "mladá boleslav", "opava", "frýdek-místek", "karviná",
+                 "havířov", "teplice", "děčín", "chomutov", "most", "příbram", "kolín"):
+        assert rent_cz.mf_rent(town), town
+        assert rent_cz.rent_fallback_kind(town) == "mf"
+
+
+def test_the_mf_rent_map_is_sane():
+    from engine import rent_cz
+    data = rent_cz._mf_map()
+    assert len(data["rents"]) > 4000 and data["published"]
+    assert "Cenová mapa nájemného" in data["source"]
+    assert all(80 <= rent <= 700 and 1 <= coverage <= 5
+               for rent, coverage in data["rents"].values())
+    # Kladno the city (data coverage 5), not the Pardubický village.
+    assert data["rents"]["kladno"][1] == 5
+    # A name many municipalities share has no figure: it can't say which.
+    assert rent_cz.mf_rent("nová ves") is None
+    # Deloitte's figure wins where it has one.
+    assert rent_cz.baseline_rent("brno") == rent_cz.RENT_PER_M2_CZ["brno"]
+    assert rent_cz.rent_fallback_kind("brno") is None
+
+
+def test_a_flat_priced_from_the_mf_map_says_so(db):
+    from engine.financial import analyse
+    r = analyse(2_500_000, 55, "Kladno - Kročehlavy", market="cz")
+    assert r.rent_key == "kladno"
+    assert "Ministry of Finance rent map" in r.recommendation

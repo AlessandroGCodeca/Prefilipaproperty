@@ -195,13 +195,13 @@ def test_the_page_says_which_czech_towns_wait_for_a_rent(two_markets):
     now = datetime.now(timezone.utc).isoformat()
     for i in range(2):
         two_markets.upsert_listing(make_listing(
-            f"kl{i}", district="Kladno - Kročehlavy", price_eur=3_000_000.0, size_m2=50.0,
-            title="Byt 2+1, Kladno", source="bezrealitky", url=f"https://example.cz/kl{i}",
+            f"nv{i}", district="Nová Ves 3", price_eur=3_000_000.0, size_m2=50.0,
+            title="Byt 2+1, Nová Ves", source="bezrealitky", url=f"https://example.cz/nv{i}",
             market="cz", last_seen_at=now, scraped_at=now))
     at = _pick(run(), "🇨🇿 Czechia")
     assert not at.exception, [e.value for e in at.exception]
     md = _md(at)
-    assert "2 Czech listings wait unscored for a rent figure — Kladno 2" in md
+    assert "2 Czech listings wait unscored for a rent figure — Nová Ves 2" in md
     assert "WAITING FOR A RENT FIGURE — 2 CZECH LISTINGS IN 1 TOWN" in md
     at = _pick(at, "🇸🇰 Slovakia")
     assert "wait unscored for a rent figure" not in _md(at)

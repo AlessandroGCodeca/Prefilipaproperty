@@ -863,6 +863,10 @@ def analyse(
         elif fallback == "kraj":
             parts.append(f"⚠️ Rent uses the {rent_key.title()} median of its towns — "
                          f"no rent figure for this town itself.")
+        elif fallback == "mf":
+            parts.append("⚠️ Rent from the Ministry of Finance rent map (a plain 2+kk "
+                         "reference flat): no Deloitte figure for this town. It runs "
+                         "15–25 % under Deloitte's where both exist — a conservative rent.")
 
     if is_industrial_zone(district, **_mkw(mkt)):
         parts.append(f"⚙️ Industrial zone premium applied ({district}).")

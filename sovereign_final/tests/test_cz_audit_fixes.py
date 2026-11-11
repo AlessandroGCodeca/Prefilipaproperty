@@ -156,7 +156,12 @@ def test_place_names(text, place):
 ])
 def test_suburban_okresy_are_not_their_city(district, key):
     assert rent_cz.match_rent_key(district) == key
-    assert rent_cz.baseline_rent(key) == rent_cz.RENT_PER_M2_CZ.get(key)
+    # The place's own figure (Deloitte's, else the MF rent map's), never
+    # the city's: Říčany is not Prague.
+    assert rent_cz.baseline_rent(key) == (rent_cz.RENT_PER_M2_CZ.get(key)
+                                          or rent_cz.mf_rent(key))
+    if key == "říčany":
+        assert rent_cz.baseline_rent(key) != rent_cz.RENT_PER_M2_CZ["praha"]
 
 
 @pytest.mark.parametrize("text,rent", [

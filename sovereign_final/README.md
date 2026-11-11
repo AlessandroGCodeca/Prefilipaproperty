@@ -450,9 +450,16 @@ after the first run.
 Czechia: `scraper/rentals_cz.py` reads pronájem listings from Bazoš and
 Bezrealitky, and `engine/rent_comps_cz.py` builds Kč/m² per town the same
 way. `engine/rent_cz.py` has the Deloitte Rent Index figures for Prague,
-Praha 1–10 and the 13 regional capitals; a town outside it (Kladno, Opava,
-Písek…) gets no borrowed rent, so its listings wait unscored until 5+ of its
-rentals give it a live one. The Czech pipeline reads the rentals before it
+Praha 1–10 and the 13 regional capitals. A town outside it (Kladno, Opava,
+Písek…) takes its own figure from the Ministry of Finance's rent map
+(`engine/rent_cz_mf.json`: the 2+kk reference flat, every municipality but the
+1,175 whose name another shares). That flat is a plain one — no balcony, lift
+or garage — so the map runs 15–25 % under Deloitte's where both exist: those
+towns get a conservative rent, and their cards say where it came from. The MF
+publishes the map every quarter; `python dev/build_cz_rent_map.py` (needs
+`pip install openpyxl`) downloads the newest and rebuilds the file. A place
+with neither figure (a name many villages share, a misspelt town) waits
+unscored until 5+ of its rentals give it a live one. The Czech pipeline reads the rentals before it
 scores; so do 🏘️ RENT COMPS (both countries) and a Czech portal's button
 when no Czech rental was read in the last 20 hours. A line above the tabs
 says how many Czech listings wait and in which towns; the RENT COMPS tab

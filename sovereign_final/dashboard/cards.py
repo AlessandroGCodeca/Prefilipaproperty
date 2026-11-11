@@ -217,6 +217,10 @@ def render_card(l, v):
                        if fallback == "default" and _d else
                        "no Czech rent figure for this town"
                        if fallback == "default" else
+                       "the Ministry of Finance rent map's plain 2+kk reference flat — "
+                       "no Deloitte figure for this town; it runs 15–25 % under Deloitte's, "
+                       "so the surplus is conservative"
+                       if fallback == "mf" else
                        f"the {esc(l['rent_key'].title())} median of its towns — no figure for this town")
             else:
                 from config import RENT_PER_M2 as _RENT
