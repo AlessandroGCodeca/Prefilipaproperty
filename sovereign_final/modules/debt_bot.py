@@ -230,6 +230,19 @@ def check_listing(row: dict, refresh: bool = False) -> dict:
 
 
 # ── Unified LV decision (Claude-authoritative, screen fallback) ──────────────
+# Shown wherever LV verdicts are read while no ANTHROPIC_API_KEY is set: the
+# keyword screen is then the only judge — it can miss an entry worded in a way
+# its rules don't know, and it rejects some entries a reader would clear.
+KEYWORD_ONLY_NOTE = ("LV checks use keyword rules only — no ANTHROPIC_API_KEY is set, so "
+                     "Claude's second reading of each title deed is off. Read the LV "
+                     "yourself before an offer, or set the key (README \"API Keys\").")
+
+
+def keyword_only() -> bool:
+    """No Claude reading: the keyword screen alone decides each LV."""
+    return not claude_enabled()
+
+
 def _decide_lv(api_result: dict) -> dict:
     """Refine a screened LV result with Claude's structured LV analysis.
 

@@ -238,9 +238,13 @@ def _scrape_step(module: str, name: str, button: str, market: str | None = None)
 def _lv_step(progress):
     from modules.debt_bot import run_debt_filter
     from database import mark_duplicates
+    from modules.debt_bot import keyword_only
     p, r, u = run_debt_filter(progress_callback=progress)
     mark_duplicates()           # a rejected copy flags the flat's other copies
-    return "success", f"✅ LV done — Clean: {p}, Rejected: {r}, ⚠ Unverified: {u}"
+    done = f"✅ LV done — Clean: {p}, Rejected: {r}, ⚠ Unverified: {u}"
+    if keyword_only():
+        return "warning", done + " · keyword rules only: no ANTHROPIC_API_KEY is set."
+    return "success", done
 
 
 def _cf_step(progress):

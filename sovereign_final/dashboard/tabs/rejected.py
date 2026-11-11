@@ -19,6 +19,9 @@ def render(v) -> None:
     rejected = [_tag_market(r_) for r_ in get_rejected() if in_view(r_)]
     st.markdown('<div class="muted">LV REJECTIONS — LISTINGS THE TITLE-DEED FILTER STOPPED, '
                 'AND WHY. These never reach the deal lists.</div>', unsafe_allow_html=True)
+    from modules.debt_bot import KEYWORD_ONLY_NOTE, keyword_only
+    if keyword_only():
+        st.warning(f"🔑 {KEYWORD_ONLY_NOTE}")
     # The outcome of the last RE-VERIFY below, carried across its rerun.
     _rej_msg = st.session_state.pop("rej_rv_msg", None)
     if _rej_msg:
