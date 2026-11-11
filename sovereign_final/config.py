@@ -256,6 +256,20 @@ BALCONY_RENT_PREMIUM    = 1.03   # balcony / loggia / terrace: +3% (common, mode
 # network.
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
 
+# ── Telegram alerts (modules/alerts.py) ───────────────────────────────────────
+# After each full run the pipeline messages you new deals, price cuts on the
+# deals you track, and runs or portals that failed. Both blank = no alerts.
+# The token is from @BotFather; the chat id is yours (README "Telegram
+# alerts"). Keep the token in .env only: it lets anyone post as your bot.
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+# Which classes count as a deal worth a message. A deal must also not be
+# cash-flow negative (CASHFLOW_MIN_SURPLUS) under its better structure.
+ALERT_CLASSES = [c.strip().upper() for c in
+                 (os.getenv("ALERT_CLASSES") or "GREEN,YELLOW").split(",") if c.strip()]
+# Also message a run that failed for good, and a portal gone quiet.
+ALERT_FAILURES = (os.getenv("ALERT_FAILURES") or "1").strip().lower() in ("1", "true", "yes")
+
 # ── APIs ──────────────────────────────────────────────────────────────────────
 GOOGLE_API_KEY    = os.getenv("GOOGLE_PLACES_API_KEY", "")
 # NOTE: there is no CADASTRAL_API_KEY — ÚGKK SR has no public API or keys.

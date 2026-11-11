@@ -1,6 +1,7 @@
 """
 dashboard/diagnostics.py — 🔗 TEST SITES and 🔗 TEST CZ SITES: what each
-portal answers the scrapers' own first URL.
+portal answers the scrapers' own first URL; 📨 TEST TELEGRAM: whether an
+alert reaches your chat.
 """
 
 import streamlit as st
@@ -57,3 +58,15 @@ def render(sb) -> None:
                 st.info(f"{_icon} **{_name}**{_tag} → robots.txt allows · HTTP {_r.status_code}")
             except Exception as _e:
                 st.error(f"❌ **{_name}**{_tag} → {_e}")
+
+    if getattr(sb, "do_test_tg", False):
+        from modules import alerts
+        if not alerts.enabled():
+            st.warning("📨 Telegram alerts are off: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID "
+                       "in .env, then restart the dashboard (README \"Telegram alerts\").")
+        else:
+            try:
+                alerts.send_test()
+                st.success("📨 Test message sent — check Telegram.")
+            except Exception as _e:
+                st.error(f"📨 Telegram refused: {_e}")
