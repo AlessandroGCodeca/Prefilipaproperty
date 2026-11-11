@@ -8,9 +8,12 @@ import streamlit as st
 import markets
 
 from dashboard.fmt import _tag_market, esc, mkw, money
+from dashboard.listing_cache import price_drops
 
 
 WAITING_TOWNS_SHOWN = 6
+# The price-cut list shows this many of the latest cuts.
+PRICE_CUTS_SHOWN = 50
 
 
 def waiting_note(waiting: dict[str, int]) -> str:
@@ -63,7 +66,6 @@ def render(v, sb) -> None:
     view_market = v.market
     whites = v.whites
     yellows = v.yellows
-    from database import get_price_drops
     # A failed scheduled run is easy to miss in the sidebar (collapsed on a
     # phone), and everything below is as old as the last run that worked.
     if _run_level == "error":
@@ -130,12 +132,22 @@ def render(v, sb) -> None:
                     unsafe_allow_html=True)
 
     # ── Price-cut alerts ──────────────────────────────────────────────────────────
-    _drops = [] if using_demo else [_tag_market(d) for d in get_price_drops(days=14)
+    _drops = [] if using_demo else [_tag_market(d) for d in price_drops(days=14)
                                      if in_view(d)]
     if _drops:
         from engine.financial import below_sanity_floor, class_at_price, discount_to_median
-        with st.expander(f"🔻 {len(_drops)} price cut(s) in the last 14 days", expanded=False):
-            for d in _drops:
+        # Built only when opened, like a card: each row works out the class at
+        # the new price, a regional-median lookup, and a big scrape can bring
+        # hundreds of cuts — it was most of every click's time.
+        box = st.expander(f"🔻 {len(_drops)} price cut(s) in the last 14 days",
+                          key="price_cuts", on_change="rerun")
+        if not box.open:
+            return
+        with box:
+            if len(_drops) > PRICE_CUTS_SHOWN:
+                st.caption(f"The {PRICE_CUTS_SHOWN} latest of {len(_drops)}. "
+                           f"🔻 Price cuts only in the sidebar lists them all in TRIAGE TABLE.")
+            for d in _drops[:PRICE_CUTS_SHOWN]:
                 # The class the new price earns, worked out the way scoring does:
                 # "under max YELLOW" alone would call a price below the sanity
                 # floor (a misread, not a bargain) a deal.

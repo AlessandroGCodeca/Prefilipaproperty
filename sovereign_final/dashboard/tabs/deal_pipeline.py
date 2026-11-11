@@ -81,6 +81,8 @@ def render(v) -> None:
         demo_pick = using_demo and pick_id not in {t["id"] for t in tracked}
         if st.button("MOVE DEAL", width="stretch", disabled=demo_pick):
             set_deal_stage(pick_id, pick_stage, pick_note)
+            from dashboard.listing_cache import clear_listing_cache
+            clear_listing_cache()       # the stages are cached with the listings
             st.rerun()
         if demo_pick:
             st.caption("Demo listing — it can't be moved.")

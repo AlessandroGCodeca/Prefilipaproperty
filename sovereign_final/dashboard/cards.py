@@ -46,6 +46,7 @@ def _save_stage(lid):
     expander whose label changes comes back closed, so it is kept open."""
     from database import set_deal_stage
     set_deal_stage(lid, st.session_state[f"stg_{lid}"], st.session_state[f"stgn_{lid}"])
+    clear_listing_cache()               # the stages are cached with the listings
     st.session_state[f"card_{lid}"] = True
 
 
@@ -425,6 +426,7 @@ def render_card(l, v):
                 if cz and (lv_doc or "").strip() != _LV_DOCS.get(lid, "").strip():
                     from database import set_lv_document
                     set_lv_document(lid, lv_doc or "")
+                    clear_listing_cache()   # even if the check below fails
                 lv_in = flat_lv.strip()
                 ku_in = flat_ku.strip()
                 changed = (lv_in != (l.get("lv_number") or "")

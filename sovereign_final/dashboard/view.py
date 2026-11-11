@@ -104,9 +104,8 @@ def build(sb, view_market) -> View:
         return v if cur == VIEW_CUR else markets.to_eur(v, cur)
 
     # ── Data ──────────────────────────────────────────────────────────────────────
-    from database import (
-        get_price_history, get_deal_stages, latest_vibes, days_on_market,
-    )
+    from database import days_on_market
+    from dashboard.listing_cache import lv_documents, page_context
 
     # The listing load is cached (dashboard/listing_cache.py); a pipeline step
     # finished since the last clear makes it read the database again.
@@ -130,8 +129,7 @@ def build(sb, view_market) -> View:
     # one query.
     _LV_DOCS = {}
     if not using_demo and any(l.get("_market") == "cz" for l in data):
-        from database import get_lv_documents
-        _LV_DOCS = get_lv_documents([l["id"] for l in data if l.get("_market") == "cz"])
+        _LV_DOCS = lv_documents([l["id"] for l in data if l.get("_market") == "cz"])
     if view_market and not data and raw_data and not using_demo:
         st.info(f"ℹ️ No {markets.get(view_market).name} listings yet"
                 + (" — its portals are read by ▶ RUN EVERYTHING and the scheduler."
@@ -139,9 +137,8 @@ def build(sb, view_market) -> View:
 
     # Per-listing context that lives outside the main query: price history, deal
     # stage, latest vibe note, the other portals' copies of the same flat.
-    price_hist = get_price_history()
-    stages     = get_deal_stages()
-    vibes      = latest_vibes()
+    # Cached with the listing load (dashboard/listing_cache.py).
+    price_hist, stages, vibes = page_context()
     dup_members: dict = {}
     for l in data:
         if l.get("dup_group"):

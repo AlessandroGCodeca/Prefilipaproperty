@@ -236,7 +236,9 @@ def test_price_cut_banner_names_the_class_at_the_new_price(db):
         db.set_lv_status(lid, "PASS", "", "clean")
     from modules.cashflow_runner import run_scoring
     run_scoring()
-    md = markdown_of(run_app())
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["price_cuts"] = True        # the list is built once opened
+    md = markdown_of(at.run())
     banner = {lid: next(line for line in md.split("</div>") if f"Flat {lid}" in line
                         and "open ↗" in line) for lid in ("cy", "cf")}
     assert "now YELLOW" in banner["cy"]
@@ -443,25 +445,73 @@ def test_saving_a_stage_keeps_the_card_open(populated_db, monkeypatch):
     assert any(b.key == "stgb_g1" for b in at.button)    # still open
 
 
-def test_cards_come_a_page_at_a_time(db):
-    # B1: 30 WHITE listings — 25 cards on the first page, 5 on the second.
+def _add_many(db, n, prefix, ratio, title):
+    """n Žilina flats of 55 m² at `ratio` × the regional median, scored."""
     from engine.regional_prices import regional_median_price
     from modules.cashflow_runner import run_scoring
-    at_market = round(regional_median_price("Žilina") * 55)
-    for i in range(30):
-        db.upsert_listing(make_listing(f"w{i:02d}", district="Žilina", size_m2=55.0,
-                                       price_eur=float(at_market), title=f"White {i:02d}",
+    price = round(regional_median_price("Žilina") * 55 * ratio)
+    for i in range(n):
+        db.upsert_listing(make_listing(f"{prefix}{i:02d}", district="Žilina", size_m2=55.0,
+                                       price_eur=float(price), title=f"{title} {i:02d}",
                                        scraped_at=_now_iso(9), last_seen_at=_now_iso()))
     run_scoring()
 
-    def white_cards(at):
-        return [e.label for e in at.expander if e.label.startswith("⚪")]
+
+def test_cards_come_a_page_at_a_time(db):
+    # B1: 30 GREEN listings — 25 cards on the first page, 5 on the second.
+    _add_many(db, 30, "g", 0.7, "Green")
+
+    def green_cards(at):
+        return [e.label for e in at.expander if e.label.startswith("🟢")]
     at = run_app()
     assert not at.exception, [e.value for e in at.exception]
-    assert len(white_cards(at)) == 25
-    at.selectbox(key="page_white_30").select_index(1).run()
+    assert len(green_cards(at)) == 25
+    at.selectbox(key="page_green_30").select_index(1).run()
     assert not at.exception, [e.value for e in at.exception]
-    assert len(white_cards(at)) == 5
+    assert len(green_cards(at)) == 5
+
+
+def test_white_listings_are_a_table_not_cards(db):
+    # Most listings are WHITE, and a card each slowed every click: the snag
+    # list shows them in one table instead.
+    _add_many(db, 30, "w", 1.0, "White")
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    assert not [e for e in at.expander if e.label.startswith("⚪")]
+    assert "WHITE — AT MARKET OR NO BENCHMARK (30)" in markdown_of(at)
+    white = next(d.value for d in at.dataframe if "Title" in d.value.columns
+                 and "Grade" not in d.value.columns)     # not the triage table
+    assert len(white) == 30 and white["Title"].str.startswith("White").all()
+    assert not [s for s in at.selectbox if (s.key or "").startswith("page_white")]
+
+
+def test_a_closed_price_cut_list_works_out_nothing(db, monkeypatch):
+    # Each row of the price-cut list works out the class at the new price (a
+    # regional-median lookup). Closed, the list builds no rows; open, it shows
+    # the latest PRICE_CUTS_SHOWN.
+    from dashboard import overview
+    from engine import financial
+    monkeypatch.setattr(overview, "PRICE_CUTS_SHOWN", 3)
+    for i in range(5):
+        lid = f"c{i}"
+        for price, seen in ((120_000.0, _now_iso(30)), (110_000.0, _now_iso(2))):
+            db.upsert_listing(make_listing(lid, district="Trnava", size_m2=50.0,
+                                           price_eur=price, title=f"Cut {i}",
+                                           scraped_at=_now_iso(30), last_seen_at=seen))
+    calls = []
+    real = financial.class_at_price
+    monkeypatch.setattr(financial, "class_at_price",
+                        lambda *a, **k: calls.append(a) or real(*a, **k))
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any(e.label.startswith("🔻 5 price cut(s)") for e in at.expander)
+    assert not calls and "open ↗" not in markdown_of(at)
+    at.session_state["price_cuts"] = True
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert len(calls) == 3
+    assert markdown_of(at).count("open ↗") == 3
+    assert any("The 3 latest of 5" in c.value for c in at.caption)
 
 
 def test_seeded_sample_rows_show_with_the_default_filters(db):

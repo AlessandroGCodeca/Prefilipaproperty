@@ -89,6 +89,7 @@ def render(v) -> None:
                         from database import get_lv_document, set_lv_document
                         if rv_doc.strip() != (get_lv_document(rv_id) or "").strip():
                             set_lv_document(rv_id, rv_doc)
+                            clear_listing_cache()   # even if the check below fails
                     # The listing's own market's short timeout, as on its card:
                     # a Czech flat's lookups go to ČÚZK, not the Slovak cadastre.
                     rv_row = next(r_ for r_ in rejected if r_["id"] == rv_id)

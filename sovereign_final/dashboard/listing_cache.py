@@ -67,11 +67,54 @@ def quiet_portals() -> list[dict]:
         return []
 
 
+@st.cache_data(ttl=LISTINGS_TTL_S, show_spinner=False)
+def _page_context(db_path: str) -> tuple[dict, dict, dict]:
+    import database
+    return database.get_price_history(), database.get_deal_stages(), database.latest_vibes()
+
+
+def page_context() -> tuple[dict, dict, dict]:
+    """(price history, deal stages, latest vibe notes) of every listing — what
+    the cards and tables show beside each row — cached as the listing load is.
+    Each was a full-table read on every click. The page's own writes (SAVE
+    STAGE, MOVE DEAL, SAVE ANNOTATION) clear it."""
+    import database
+    return _page_context(database.SQLITE_PATH)
+
+
+@st.cache_data(ttl=LISTINGS_TTL_S, show_spinner=False)
+def _price_drops(days: int, db_path: str) -> list[dict]:
+    import database
+    return database.get_price_drops(days=days)
+
+
+def price_drops(days: int = 14) -> list[dict]:
+    """database.get_price_drops, cached as the listing load is."""
+    import database
+    return _price_drops(days, database.SQLITE_PATH)
+
+
+@st.cache_data(ttl=LISTINGS_TTL_S, show_spinner=False)
+def _lv_documents(ids: tuple, db_path: str) -> dict[str, str]:
+    import database
+    return database.get_lv_documents(list(ids))
+
+
+def lv_documents(ids) -> dict[str, str]:
+    """database.get_lv_documents for these listing ids, cached as the listing
+    load is. A pasted výpis is saved from the page, which clears it."""
+    import database
+    return _lv_documents(tuple(ids), database.SQLITE_PATH)
+
+
 def clear_listing_cache() -> None:
     """After the dashboard changes listings: the next load reads the database."""
     _load_active.clear()
     _waiting_for_rent.clear()
     _quiet_portals.clear()
+    _page_context.clear()
+    _price_drops.clear()
+    _lv_documents.clear()
 
 
 @st.cache_resource
