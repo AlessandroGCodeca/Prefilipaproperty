@@ -75,6 +75,10 @@ from a phone or another PC:
 Over the internet, put it behind a reverse proxy with HTTPS (Caddy, Cloudflare
 Tunnel, Tailscale) — the password alone travels in the clear over plain HTTP.
 
+After 5 wrong passwords within 15 minutes the login locks for 15 minutes, for
+every browser at once (a guesser just opens new sessions) — the right
+password included. Restarting the dashboard lifts the lock.
+
 API keys live in `.env`, which Docker hands to the containers when they start
 (`env_file`). `.dockerignore` keeps it out of the image, so the keys are never
 baked into an image layer.
@@ -228,6 +232,7 @@ sovereign_final/
 ├── restart.sh                ← Restart the dashboard outside Docker
 ├── docker-compose.yml        ← dashboard + scheduler
 ├── docker/Dockerfile         ← App image
+├── docker/entrypoint.sh     ← Hands the data folders to the app's user, then drops root
 ├── requirements.txt
 ├── .env.example              ← Copy to .env
 ├── scraper/
@@ -826,6 +831,13 @@ docker compose logs -f      # Live logs
 docker compose ps           # Container status
 docker compose restart      # Restart all
 ```
+
+The containers run the app as an unprivileged user, `sovereign` (uid 1000),
+not as root. Each starts as root only long enough to hand that user the
+folders the app writes — the database volume, `logs/` and `backups/` — so a
+database written by an older image, or copied in with `docker compose cp`,
+keeps working. On a Linux host this makes uid 1000 the owner of `logs/` and
+`backups/` in this folder.
 
 The local Mistral model (`model-runner`) is gone: nothing used it. If an older
 setup pulled it, reclaim the space with

@@ -735,11 +735,12 @@ def _safe_content(page) -> str:
     for _ in range(2):
         try:
             return page.content()
-        except Exception:
+        except Exception as e:
+            log.debug(f"    page.content() failed ({type(e).__name__}: {e}); retrying")
             try:
                 page.wait_for_timeout(800)
-            except Exception:
-                pass
+            except Exception as e2:
+                log.debug(f"    wait before the retry failed: {type(e2).__name__}: {e2}")
     return ""
 
 
@@ -1222,10 +1223,11 @@ class _ApiCapture:
             if items and _looks_like_listings(items):
                 self.items.extend(items)
                 log.info(f"    ✅ API hit: {response.url[:80]} → {len(items)} items")
-        except Exception:
+        except Exception as e:
             # Most responses that pass the URL filter aren't listing JSON (or
-            # their body is gone by now); this sniffer runs on every one of them.
-            pass
+            # their body is gone by now); this sniffer runs on every one of
+            # them, so it says so at debug level only.
+            log.debug(f"    not listing JSON: {response.url[:80]} ({type(e).__name__})")
 
     def take(self) -> list[dict]:
         out, self.items = self.items, []

@@ -81,6 +81,18 @@ def run_app(open_cards=()) -> AppTest:
     return at.run()
 
 
+
+def _fake_subprocess_run(monkeypatch, fake):
+    """Stand `fake` (a subprocess.run lookalike) in for the dashboard's
+    subprocess runner, dashboard.actions.run_killing_tree."""
+    from dashboard import actions
+
+    def run(args, timeout):
+        done = fake(args, timeout=timeout)
+        return done.stdout, done.stderr
+    monkeypatch.setattr(actions, "run_killing_tree", run)
+
+
 def markdown_of(at: AppTest) -> str:
     return "\n".join(m.value for m in at.markdown)
 
@@ -578,7 +590,7 @@ def test_a_scrapers_count_is_shown_after_the_rerun(populated_db, monkeypatch):
     import subprocess
     import modules.llm_enrichment as llm
     monkeypatch.setattr(llm, "ANTHROPIC_API_KEY", "")
-    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess(
+    _fake_subprocess_run(monkeypatch, lambda cmd, **k: subprocess.CompletedProcess(
         cmd, 0, '{"ok": true, "n": 7}\n', ""))
     at = run_app()
     _button(at, "🇸🇰 Bazos.sk").click().run()
@@ -598,7 +610,7 @@ def test_a_scraper_that_runs_out_of_time_is_reported_not_a_crash(populated_db, m
 
     def too_slow(cmd, **k):
         raise subprocess.TimeoutExpired(cmd, k.get("timeout"))
-    monkeypatch.setattr(subprocess, "run", too_slow)
+    _fake_subprocess_run(monkeypatch, too_slow)
     at = run_app()
     _button(at, "🇸🇰 Nehnutelnosti.sk").click().run()
     _finished(at)
@@ -963,7 +975,7 @@ def test_run_everything_runs_the_browser_steps_in_a_subprocess(db, monkeypatch):
             except Exception as e:
                 outcomes.append(e)
         return False
-    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+    _fake_subprocess_run(monkeypatch, fake_subprocess_run)
     monkeypatch.setattr(scheduler, "run_pipeline", fake_run_pipeline)
     _finished(_click(run_app(), "▶ RUN EVERYTHING"))
     assert outcomes[0] == 7
@@ -982,7 +994,7 @@ def test_fill_missing_details_reports_what_it_found(populated_db, monkeypatch):
             'Found 3 listings to enrich (LIMIT=200)\n'
             '{"ok": true, "n": {"checked": 3, "price": 1, "size": 2, "district": 0, '
             '"gone": 1}}\n'), "")
-    monkeypatch.setattr(subprocess, "run", fake)
+    _fake_subprocess_run(monkeypatch, fake)
     at = _finished(_click(run_app(), "🔎 FILL MISSING DETAILS"))
     assert "'enrich_pending'" in cmds[0] and '"limit": 200' in cmds[0]
     assert any("Re-read 3: +price 1, +size 2, +district 0, 1 taken down" in s.value
@@ -991,7 +1003,7 @@ def test_fill_missing_details_reports_what_it_found(populated_db, monkeypatch):
 
 def test_fill_missing_details_with_nothing_to_fill(db, monkeypatch):
     import subprocess
-    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess(
+    _fake_subprocess_run(monkeypatch, lambda cmd, **k: subprocess.CompletedProcess(
         cmd, 0, '{"ok": true, "n": {"checked": 0, "price": 0, "size": 0, "district": 0, '
                 '"gone": 0}}\n', ""))
     at = _finished(_click(run_app(), "🔎 FILL MISSING DETAILS"))

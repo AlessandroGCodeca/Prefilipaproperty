@@ -30,8 +30,13 @@ def render_white_table(whites, v) -> None:
             "Stage":    (l.get("_stage") or {}).get("stage", ""),
             "URL":      l.get("url") or "",
         })
+    df = pd.DataFrame(rows)
+    # No WHITE listing has a benchmark: drop the column rather than fill it
+    # with "None".
+    if df["Below%"].isna().all():
+        df = df.drop(columns="Below%")
     st.dataframe(
-        pd.DataFrame(rows), width="stretch", hide_index=True,
+        df, width="stretch", hide_index=True,
         height=min(420, 40 + 35 * len(rows)),
         column_config={
             "Price":   v.money_col("Price"),

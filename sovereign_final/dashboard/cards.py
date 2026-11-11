@@ -291,7 +291,7 @@ def render_card(l, v):
                 else:
                     from config import LTV_RATIO_INVESTOR, MORTGAGE_RATE_PA, LOAN_TERM_YEARS
                     inv_ltv, base_rate, base_term = LTV_RATIO_INVESTOR, MORTGAGE_RATE_PA, LOAN_TERM_YEARS
-                inv = _an(price, size, district or "", rent_override=rent,
+                inv = _an(price, size, district or "", rent_override=rent or None,
                           ltv=inv_ltv,
                           rate=l.get("mortgage_rate_used") or base_rate,
                           term_years=int(l.get("loan_term_years") or base_term), **mkw(l))

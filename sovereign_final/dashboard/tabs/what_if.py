@@ -218,10 +218,13 @@ def render(v) -> None:
             "s.r.o.": r.sro_mortgage_rate * 100},
            {head: f"Cash in {sym}", "Personal (FO)": r.total_cash_invested,
             "s.r.o.": r.total_cash_invested_sro},
-           {head: f"IRR over {wi_hold}y %", "Personal (FO)": (irr_p.irr or 0) * 100,
-            "s.r.o.": (irr_s.irr or 0) * 100},
-           {head: "Equity multiple ×", "Personal (FO)": irr_p.equity_multiple or 0,
-            "s.r.o.": irr_s.equity_multiple or 0},
+           # None when it can't be worked out (the cash flows never turn
+           # positive): shown as "—", not as a 0% that reads like a result.
+           {head: f"IRR over {wi_hold}y %",
+            "Personal (FO)": irr_p.irr * 100 if irr_p.irr is not None else None,
+            "s.r.o.": irr_s.irr * 100 if irr_s.irr is not None else None},
+           {head: "Equity multiple ×", "Personal (FO)": irr_p.equity_multiple,
+            "s.r.o.": irr_s.equity_multiple},
            {head: f"Tax caused by the sale {sym}", "Personal (FO)": irr_p.exit_tax,
             "s.r.o.": irr_s.exit_tax},
            {head: f"Total profit {sym}", "Personal (FO)": irr_p.total_profit,
@@ -229,9 +232,13 @@ def render(v) -> None:
     c_left, c_right = st.columns([3, 2])
     with c_left:
         st.markdown('<div class="muted">TAX TOGGLE — PERSONAL vs s.r.o.</div>', unsafe_allow_html=True)
+        # Text, right-aligned: a number column can only show a missing value
+        # as "None".
+        for col in ("Personal (FO)", "s.r.o."):
+            cmp_df[col] = [f"{x:.2f}" if pd.notna(x) else "—" for x in cmp_df[col]]
         st.dataframe(cmp_df, hide_index=True, width="stretch",
-                     column_config={"Personal (FO)": st.column_config.NumberColumn(format="%.2f"),
-                                    "s.r.o.": st.column_config.NumberColumn(format="%.2f")})
+                     column_config={c: st.column_config.TextColumn(alignment="right")
+                                    for c in ("Personal (FO)", "s.r.o.")})
         if sk:
             st.caption(f"Tax rules {r.tax_year}. Personal: §6(3) passive rental, €500 exempt, no "
                        "health levy, interest not deductible; sale exempt after 5 years. s.r.o.: "

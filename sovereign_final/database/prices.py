@@ -78,18 +78,26 @@ def summarize_price_history(rows, now: datetime | None = None) -> dict:
     return out
 
 
+_IN_CHUNK = 500
+
+
 def get_price_history(listing_ids=None) -> dict:
     """summarize_price_history for every listing (or just `listing_ids`)."""
     conn = _db.get_conn()
     try:
         _ensure_price_history(conn)
         if listing_ids:
-            ids = list(listing_ids)
-            ph = ",".join("?" * len(ids))
-            rows = conn.execute(
-                f"SELECT listing_id, price_eur, observed_at FROM price_history "
-                f"WHERE listing_id IN ({ph}) ORDER BY listing_id, observed_at, id",
-                ids).fetchall()
+            # In chunks, as title_deeds.get_lv_documents does: SQLite caps the
+            # parameters of one query. Each listing's rows stay in one chunk,
+            # in order.
+            ids = list(dict.fromkeys(listing_ids))
+            rows = []
+            for i in range(0, len(ids), _IN_CHUNK):
+                chunk = ids[i:i + _IN_CHUNK]
+                rows += conn.execute(
+                    f"SELECT listing_id, price_eur, observed_at FROM price_history "
+                    f"WHERE listing_id IN ({','.join('?' * len(chunk))}) "
+                    f"ORDER BY listing_id, observed_at, id", chunk).fetchall()
         else:
             rows = conn.execute(
                 "SELECT listing_id, price_eur, observed_at FROM price_history "

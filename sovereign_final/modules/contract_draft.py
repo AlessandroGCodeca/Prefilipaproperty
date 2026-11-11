@@ -167,7 +167,8 @@ def build_contract_draft(listing: dict, *, buyer_name: str, buyer_ico: str = "",
     ico = (buyer_ico or "").strip() or (FILL if ownership == "s.r.o." else "— (fyzická osoba)")
     if escrow:
         payment, term5 = ("✅ Notárska úschova — odporúčané",
-                          "Finančné plnenie cez Notársku úschovu dle § 56a Notárskeho poriadku.")
+                          "Finančné plnenie cez notársku úschovu podľa Notárskeho poriadku; "
+                          "podmienky úschovy dohodne notár.")
     else:
         payment, term5 = ("⚠️ Priamy prevod — neodporúčané",
                           "Finančné plnenie na účet predávajúceho po podpise zmluvy.")
@@ -178,14 +179,14 @@ def build_contract_draft(listing: dict, *, buyer_name: str, buyer_ico: str = "",
 ╚══════════════════════════════════════════════════════════╝
 
 Vygenerované:  {now}
-Stav:          DRAFT — vyžaduje notariálne vyhotovenie
+Stav:          DRAFT — na kontrolu advokátom alebo notárom
 Verzia:        Sovereign RE Dashboard v2026
 
 {_RULE}
 
 § 1. PREDMET ZMLUVY
 
-Nehnuteľnosť: {_text(l.get('title'), '—')}
+Predmet:      byt (presný opis podľa LV doplní advokát alebo notár)
 Adresa:       {_text(l.get('address_raw'))}
 Okres:        {_text(l.get('district'))}
 Výmera:       {_size(l.get('size_m2'))}
@@ -229,7 +230,9 @@ Platobný mechanizmus:
 
 § 4. PODMIENKY
 
-1. Zmluva nadobúda platnosť podpisom oboch strán pred notárom.
+1. Zmluva nadobúda platnosť podpisom oboch zmluvných strán. Pravosť podpisov
+   sa úradne osvedčí (notár alebo matrika), ak zmluvu nespíše advokát
+   alebo nejde o notársku zápisnicu.
 2. Prevod vlastníctva nastáva zápisom do katastra nehnuteľností.
 3. Predávajúci zaručuje, že nehnuteľnosť je bez právnych vád.
 4. Kupujúci vyhlasuje, že je oboznámený so stavom nehnuteľnosti.
@@ -248,8 +251,8 @@ Miesto:  {FILL}
 ⚠️  PRÁVNE UPOZORNENIE
 
 Tento dokument je počítačom generovaný NÁVRH bez právnej záväznosti.
-Nemá žiadnu právnu platnosť bez vyhotovenia a overenia licencovaným
-slovenským notárom. Vždy overte LV bezprostredne pred podpisom.
+Pred podpisom ho musí skontrolovať a dopracovať advokát alebo notár.
+Vždy overte LV bezprostredne pred podpisom.
 Finálny prevod vyžaduje zápis na Katastri nehnuteľností SR.
 
 {_RULE}

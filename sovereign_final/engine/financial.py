@@ -188,8 +188,12 @@ def calc_mortgage(principal: float,
                   years: int = LOAN_TERM_YEARS) -> float:
     if principal <= 0:
         return 0.0
+    if years < 1:
+        raise ValueError(f"a loan needs a term of at least 1 year, not {years}")
     r = rate / 12
     n = years * 12
+    if r == 0:                          # an interest-free loan (family, employer)
+        return principal / n
     return principal * (r * (1 + r) ** n) / ((1 + r) ** n - 1)
 
 
@@ -674,7 +678,8 @@ def analyse(
 
     acquisition     = acquisition_costs(price_eur, **_mkw(mkt))
     rent_key        = match_rent_key(district, **_mkw(mkt))
-    rent            = rent_override or get_rent_estimate(
+    # None means estimate it; 0 is a real figure (a stress case: a year empty).
+    rent            = rent_override if rent_override is not None else get_rent_estimate(
         district, size_m2, rooms, parking, furnished, balcony, rates=rent_rates,
         **_mkw(mkt))
     annual_rent     = rent * 12

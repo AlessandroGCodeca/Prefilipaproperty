@@ -29,6 +29,7 @@ import importlib
 import logging, sys, os
 import threading
 from datetime import datetime, timedelta
+from logging.handlers import RotatingFileHandler
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -47,6 +48,10 @@ RUN_HOUR = 6
 LAST_RUN_FILE = os.path.join(DATA_DIR, "last_pipeline_run")
 
 
+LOG_MAX_BYTES = 5 * 1024 * 1024
+LOG_BACKUPS   = 5
+
+
 def _setup_logging() -> None:
     os.makedirs(LOGS_DIR, exist_ok=True)
     logging.basicConfig(
@@ -54,7 +59,11 @@ def _setup_logging() -> None:
         format="%(asctime)s  %(levelname)-8s  %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
-            logging.FileHandler(os.path.join(LOGS_DIR, "scheduler.log"), encoding="utf-8"),
+            # Rotated: at LOG_MAX_BYTES the file becomes scheduler.log.1 (and
+            # so on, LOG_BACKUPS of them), so a scheduler left running for
+            # months never fills the disk.
+            RotatingFileHandler(os.path.join(LOGS_DIR, "scheduler.log"), encoding="utf-8",
+                                maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS),
             logging.StreamHandler(sys.stdout),
         ],
     )

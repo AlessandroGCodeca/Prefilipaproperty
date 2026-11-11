@@ -579,6 +579,9 @@ def _pin_moved(existing, lat, lng) -> bool:
             or abs(old_lng - lng) > _PIN_MOVE_DEG)
 
 
+_SCHEMA_CHECKED: set = set()
+
+
 def upsert_listing(data: dict):
     """Insert or refresh a scraped listing. `lat`/`lng`, when present, are the
     portal's own map pin; they outrank geocoded coordinates, and a new or
@@ -598,9 +601,15 @@ def upsert_listing(data: dict):
             "currency": data.get("currency") or markets.get(market).currency}
     conn = _db.get_conn()
     try:
-        _ensure_enrichment_columns(conn)
-        _ensure_market_columns(conn)
-        _ensure_price_history(conn)
+        # The schema checks once per database per process, not per listing:
+        # a scrape saves thousands. Keyed by the connection function too, so
+        # a test that swaps in its own database is checked again.
+        schema_key = (_db.SQLITE_PATH, _db.get_conn)
+        if schema_key not in _SCHEMA_CHECKED:
+            _ensure_enrichment_columns(conn)
+            _ensure_market_columns(conn)
+            _ensure_price_history(conn)
+            _SCHEMA_CHECKED.add(schema_key)
         # If a row already exists with this URL (e.g. a prior slug-URL variant
         # that _dedupe_canonical_urls rewrote to the canonical form), reuse its
         # id so ON CONFLICT(id) fires instead of hitting the url UNIQUE constraint.
