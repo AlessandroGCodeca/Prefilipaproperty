@@ -284,7 +284,8 @@ sovereign_final/
 │   ├── jobs.py               ← Runs the sidebar buttons in the background
 │   ├── tax_rates.py          ← 🏛️ UPDATE TAX RATES (Slovakia): apply, confirm or review
 │   ├── tax_rates_cz.py       ← 🏛️ UPDATE TAX RATES (Czechia): every municipality
-│   └── backup.py             ← Daily database copy + export of your data
+│   ├── backup.py             ← Daily database copy + export of your data
+│   └── alerts.py             ← Telegram alerts after each full run
 └── dev/                      ← Debug probes: LV check, nehnutelnosti, topreality
 ```
 
@@ -780,12 +781,48 @@ threshold (€41,445) is the 2023 figure carried over — it is 176.8 × the
 
 ---
 
+## Telegram alerts
+
+After each full run (the 06:00 run, or ▶ RUN EVERYTHING) the dashboard can
+send one Telegram message with what is new:
+
+- **new deals** — GREEN or YELLOW (`ALERT_CLASSES`), not rejected on the
+  title deed, and not cash-flow negative under the better structure
+  (`CASHFLOW_MIN_SURPLUS`); each flat once, whichever portals list it;
+- **price cuts on the deals you track** in DEAL PIPELINE (not CLOSED or
+  PASSED), and whether the new price is inside max 🟡;
+- **problems** — a run that failed with no retry left, a portal gone quiet
+  (`ALERT_FAILURES=0` turns these off).
+
+Nothing new, no message. The first run with alerts on doesn't list the deals
+already on the dashboard; it says how many there are and alerts on new ones
+from then on. An alert Telegram didn't take goes out with the next run.
+Messages carry listing facts only — never your notes, buyer names or LV texts.
+
+To set it up:
+
+1. In Telegram, message **@BotFather** → `/newbot` → pick a name and a
+   username ending in `bot`. Copy the token it gives you. Optionally
+   `/setjoingroups` → Disable.
+2. Open your bot, tap **Start** and send it any message.
+3. Put the token in `.env` as `TELEGRAM_BOT_TOKEN=…`, then find your chat id
+   with `python -m modules.alerts chat-id` (in Docker:
+   `docker compose exec dashboard python -m modules.alerts chat-id`), or in a
+   browser at `https://api.telegram.org/bot<TOKEN>/getUpdates` ("chat":{"id":…}).
+   Put it in `.env` as `TELEGRAM_CHAT_ID=…`.
+4. `docker compose up -d` (or restart `Start Sovereign.command`), then
+   🩺 DIAGNOSTICS → 📨 TEST TELEGRAM.
+
+The token lets anyone post as your bot: keep it in `.env` only. If it leaks,
+send `/revoke` to @BotFather and put the new one in `.env`.
+
 ## API Keys (all optional — demo mode without them)
 
 | Key | Where | Enables |
 |-----|-------|---------|
 | GOOGLE_PLACES_API_KEY | console.cloud.google.com | Google geocoding/places + inline satellite view (OpenStreetMap is used without it) |
 | CZ_CUZK_API_KEY | registrace.cuzk.gov.cz (free) | Czech LV check: the building under a listing's pin, its LV and pending proceedings |
+| TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID | @BotFather in Telegram (free) | Alerts after each run — see "Telegram alerts" |
 
 > LV debt checking needs **no key**: ÚGKK SR has no public API, so
 > `kataster_scraper.py` scrapes kataster.skgeodesy.sk directly (unofficial —

@@ -182,6 +182,9 @@ def render() -> SimpleNamespace:
                                     help="robots.txt and HTTP status of each Czech portal — "
                                          "the ones read and the ones left out.")
                           if _cz_portals or _scheduler.BLOCKED.get("cz") else False)
+            do_test_tg = st.button("📨 TEST TELEGRAM", width="stretch",
+                                   help="Send a test message to your Telegram chat "
+                                        "(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env).")
 
         st.markdown("---")
         st.markdown("#### FILTERS")
@@ -324,6 +327,7 @@ def render() -> SimpleNamespace:
         do_tax=do_tax,
         do_test=do_test,
         do_test_cz=do_test_cz,
+        do_test_tg=do_test_tg,
         do_topreal=do_topreal,
         drops_only=drops_only,
         hide_dev=hide_dev,

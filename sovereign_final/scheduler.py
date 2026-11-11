@@ -628,6 +628,11 @@ def run_all_markets(trigger: str = "06:00", holder: str | None = None,
                     results[m] = False
     log.info("📊 Markets: " + " | ".join(
         f"{m.upper()} {'✅' if ok else '❌'}" for m, ok in results.items()))
+    # New deals, price cuts on tracked deals, failures: one Telegram message
+    # (modules/alerts; off without TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID).
+    # Never fails the run.
+    from modules.alerts import run_quietly
+    run_quietly()
     return results
 
 

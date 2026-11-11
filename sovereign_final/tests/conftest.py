@@ -135,3 +135,12 @@ def _fresh_listings_each_run(request, monkeypatch):
         return real(self, *args, **kwargs)
 
     monkeypatch.setattr(AppTest, "_run", _run)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_telegram(monkeypatch):
+    """config reads .env, and yours may hold a real TELEGRAM_BOT_TOKEN: no test
+    may message your chat. A test of the alerts sets its own fake values."""
+    import config
+    monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", "")
+    monkeypatch.setattr(config, "TELEGRAM_CHAT_ID", "")
