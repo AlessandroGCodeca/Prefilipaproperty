@@ -77,6 +77,8 @@ class Market:
     sro_ltv_ratio: float | None = None
     sro_costs: dict = field(default_factory=dict)
     cashflow_min_surplus: float = 0.0
+    # Your tax base from everything but this flat (engine.financial.other_annual_income).
+    other_annual_income: float = 0.0
 
     # ── Plausibility bounds (native currency) ────────────────────────────
     sale_price_min: float | None = None
@@ -151,6 +153,7 @@ SK = Market(
     sro_rate_premium_pp=config.SRO_RATE_PREMIUM_PP,
     sro_ltv_ratio=config.SRO_LTV_RATIO,
     cashflow_min_surplus=config.CASHFLOW_MIN_SURPLUS,
+    other_annual_income=config.OTHER_ANNUAL_INCOME,
     sale_price_min=config.SALE_PRICE_MIN_EUR,
     sale_price_max=10_000_000,
     rent_min=config.RENT_MIN_EUR,
@@ -364,6 +367,7 @@ CZ = Market(
                           "the Slovak profile's"),
                "checked": "2026-11-05 (zakonyprolidi.cz; price lists)"},
     cashflow_min_surplus=_env_float("CZ_CASHFLOW_MIN_SURPLUS", 0.0),
+    other_annual_income=_env_float("CZ_OTHER_ANNUAL_INCOME", 0.0),
     # Plausibility bounds, not market figures: a Kč amount on a sale listing
     # below 200 000 is a deposit, a rent or a fee; a rent outside
     # 3 000–150 000 Kč a month is a sale price, a nightly rate or a typo.

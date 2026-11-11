@@ -32,7 +32,7 @@ from config import (
     HOA_SMALL, HOA_MEDIUM, HOA_LARGE, HOA_PREMIUM,
     GREEN_DISCOUNT, YELLOW_DISCOUNT, NEAR_FLOOR_DISCOUNT, SRO_SETUP_COST,
     SRO_ANNUAL_RUNNING_COST, SRO_RATE_PREMIUM_PP, SRO_LTV_RATIO,
-    CASHFLOW_MIN_SURPLUS,
+    CASHFLOW_MIN_SURPLUS, OTHER_ANNUAL_INCOME,
     RENT_PER_M2, INDUSTRIAL_ZONES, INDUSTRIAL_RENT_PREMIUM,
     PARKING_RENT_PREMIUM, FURNISHED_RENT_PREMIUM, SEMI_FURNISHED_PREMIUM,
     BALCONY_RENT_PREMIUM,
@@ -69,7 +69,8 @@ def _need(value, what: str, market, where: str = "markets.py"):
 # the room-adjusted benchmark, the rent fallbacks). A stored score from an
 # older model is redone on the next scoring run
 # (database.requeue_scores_from_older_model).
-SCORING_MODEL_VERSION = 6   # 6: Czech costs and rents checked against sources (docs/M1_VERIFICATION.md)
+SCORING_MODEL_VERSION = 7   # 7: 2026 Slovak tax bands, rental taxed on top of OTHER_ANNUAL_INCOME (audit 2)
+#   6: Czech costs and rents checked against sources (docs/M1_VERIFICATION.md)
 
 
 @dataclass
@@ -282,17 +283,49 @@ def personal_rental_base(rules: dict, *, noi_annual: float, rent_annual: float,
     return max(rent_annual - max(flat, actual), 0)
 
 
-def calc_income_tax_personal(annual_net: float, rules: dict | None = None) -> float:
+def personal_bands(rules: dict) -> tuple:
+    """((upper limit or None, rate), …) of a tax table: its own
+    "personal_bands", or the two bands of a table that has only a threshold
+    (Czechia's)."""
+    if rules.get("personal_bands"):
+        return tuple(rules["personal_bands"])
+    return ((rules["personal_threshold"], rules["personal_rate_low"]),
+            (None, rules["personal_rate_high"]))
+
+
+def _banded_tax(base: float, bands) -> float:
+    tax, lower = 0.0, 0.0
+    for upper, rate in bands:
+        if base <= lower:
+            break
+        top = base if upper is None else min(base, upper)
+        tax += (top - lower) * rate
+        if upper is None:
+            break
+        lower = upper
+    return tax
+
+
+def calc_income_tax_personal(annual_net: float, rules: dict | None = None,
+                             other_income: float = 0.0) -> float:
     """Personal income tax on `annual_net` under a year's tax table
-    (config.tax_rules; default the current tax year)."""
+    (config.tax_rules; default the current tax year): the tax it adds on top
+    of `other_income` (your tax base from everything else), each part at the
+    band it lands in. With other_income 0 it is taxed as your only income."""
     t = rules or tax_rules()
     if annual_net <= 0:
         return 0.0
-    threshold = t["personal_threshold"]
-    if annual_net <= threshold:
-        return annual_net * t["personal_rate_low"]
-    return (threshold * t["personal_rate_low"] +
-            (annual_net - threshold) * t["personal_rate_high"])
+    bands = personal_bands(t)
+    other = max(other_income or 0.0, 0.0)
+    return _banded_tax(other + annual_net, bands) - _banded_tax(other, bands)
+
+
+def other_annual_income(market: str = "sk") -> float:
+    """Your tax base from everything but this flat, in the market's currency
+    (config.OTHER_ANNUAL_INCOME; Czechia's CZ_OTHER_ANNUAL_INCOME)."""
+    if _sk(market):
+        return OTHER_ANNUAL_INCOME
+    return markets.get(market).other_annual_income
 
 
 def sro_corporate_rate(annual_revenue: float, rules: dict | None = None) -> float:
@@ -712,7 +745,8 @@ def analyse(
         rules, noi_annual=noi_annual, rent_annual=(rent - vacancy_mo) * 12,
         expenses_annual=(hoa_mo + prop_tax_mo + owner_reserve_mo + mgmt_mo) * 12,
         interest_annual=interest_mo * 12)
-    tax_p_annual    = calc_income_tax_personal(taxable_p, rules)
+    tax_p_annual    = calc_income_tax_personal(taxable_p, rules,
+                                               other_annual_income(mkt))
     levy_p_annual   = taxable_p * rules["health_levy_personal"]  # 0 for passive rental
     tax_p_mo        = tax_p_annual / 12
     levy_p_mo       = levy_p_annual / 12
@@ -1123,7 +1157,8 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
     var_cost_rate = VACANCY_RATE + OWNER_RESERVE_RATE + PROPERTY_MGMT_RATE
 
     def personal_tax(taxable: float) -> float:
-        return calc_income_tax_personal(max(taxable, 0.0), rules)
+        return calc_income_tax_personal(max(taxable, 0.0), rules,
+                                        other_annual_income(mkt))
 
     flows = [-equity_in]
     sale_price = exit_costs = balance = exit_tax = 0.0

@@ -104,3 +104,66 @@ def test_a_new_database_has_nothing_to_check_again(db):
         assert int(row[0]) == RULES_VERSION
     finally:
         conn.close()
+
+
+# ── 2 · The 2026 bands, and the rental taxed on top of your other income ──────
+def test_2026_has_four_bands_from_the_subsistence_minimum():
+    import config
+    bands = config.tax_rules(2026)["personal_bands"]
+    zm = 284.13
+    assert [round(u, 2) if u else None for u, _r in bands] == [
+        round(154.8 * zm, 2), round(212.4 * zm, 2), round(264 * zm, 2), None]
+    assert [r for _u, r in bands] == [0.19, 0.25, 0.30, 0.35]
+
+
+@pytest.mark.parametrize("base, tax", [
+    (10_000, 1_900.0),
+    (43_983.32, 0.19 * 43_983.32),
+    (50_000, 0.19 * 43_983.32 + 0.25 * (50_000 - 43_983.32)),
+    (100_000, 0.19 * 43_983.32 + 0.25 * (60_349.21 - 43_983.32)
+              + 0.30 * (75_010.32 - 60_349.21) + 0.35 * (100_000 - 75_010.32)),
+])
+def test_each_part_of_the_base_is_taxed_at_its_own_band(base, tax):
+    import config
+    from engine.financial import calc_income_tax_personal
+    assert calc_income_tax_personal(base, config.tax_rules(2026)) == pytest.approx(tax)
+
+
+def test_the_rental_is_taxed_on_top_of_a_salary():
+    import config
+    from engine.financial import calc_income_tax_personal
+    rules = config.tax_rules(2026)
+    alone = calc_income_tax_personal(5_000, rules)
+    assert alone == pytest.approx(950)                           # 19 %
+    assert calc_income_tax_personal(5_000, rules, other_income=50_000) == pytest.approx(1_250)  # 25 %
+    assert calc_income_tax_personal(5_000, rules, other_income=80_000) == pytest.approx(1_750)  # 35 %
+    # Straddling a band: €2,000 at 19 %, €3,000 at 25 %.
+    straddle = calc_income_tax_personal(5_000, rules, other_income=43_983.32 - 2_000)
+    assert straddle == pytest.approx(2_000 * 0.19 + 3_000 * 0.25)
+
+
+def test_czech_rules_keep_their_two_bands():
+    import markets
+    from engine.financial import calc_income_tax_personal, personal_bands
+    t = markets.tax_rules(2026, "cz")
+    assert personal_bands(t) == ((t["personal_threshold"], 0.15), (None, 0.23))
+    over = t["personal_threshold"] + 100_000
+    assert calc_income_tax_personal(over, t) == pytest.approx(
+        t["personal_threshold"] * 0.15 + 100_000 * 0.23)
+
+
+def test_a_salary_raises_the_personal_tax_in_the_analysis(db, monkeypatch):
+    from engine import financial
+    base = financial.analyse(100_000, 55, "Žilina", rent_override=900)
+    monkeypatch.setattr(financial, "OTHER_ANNUAL_INCOME", 50_000)
+    salaried = financial.analyse(100_000, 55, "Žilina", rent_override=900)
+    assert base.income_tax_personal > 0
+    # 25 % instead of 19 % on the same taxable rent.
+    assert salaried.income_tax_personal == pytest.approx(base.income_tax_personal * 25 / 19, rel=1e-3)
+    assert salaried.surplus_personal < base.surplus_personal
+    assert salaried.income_tax_sro == base.income_tax_sro       # the company's tax is its own
+
+
+def test_scores_from_before_the_bands_are_redone():
+    from engine.financial import SCORING_MODEL_VERSION
+    assert SCORING_MODEL_VERSION >= 7

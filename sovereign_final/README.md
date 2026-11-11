@@ -594,7 +594,7 @@ Slovak IP — skgeodesy.sk geo-blocks many foreign ones.
 
 | | Personal (FO) | s.r.o. |
 |--|---------|--------|
-| Income Tax | 19% / 25% | 10% reduced (≤€100k rev) / 21% |
+| Income Tax | 19% / 25% / 30% / 35% — bands to €43,983 / €60,349 / €75,010 (154.8× / 212.4× / 264× the životné minimum), applied on top of `OTHER_ANNUAL_INCOME` | 10% reduced (≤€100k rev) / 21% |
 | Health Levy | **0%** — passive §6(3) rental is exempt from zdravotné odvody | 0% |
 | Dividend tax on distribution | n/a | 10% (→ effective double taxation) |
 | Loan | hypotéka 3.8% p.a., 80% LTV (70% for a 3rd+ flat) | company loan: rate + `SRO_RATE_PREMIUM_PP` (1 pp), at most `SRO_LTV_RATIO` (70%) |
@@ -775,9 +775,16 @@ which table scoring uses. A year with no table of its own falls back to the
 latest one and the sidebar warns. Scores worked out under another year's table
 (or by an older version of the engine) are redone on the next scoring run.
 
-**Every January, add the new year to `TAX_YEAR_RULES`.** The 2026 personal
-threshold (€41,445) is the 2023 figure carried over — it is 176.8 × the
-životné minimum, so recompute it.
+**Every January, add the new year to `TAX_YEAR_RULES`.** The personal bands
+are multiples of the životné minimum in force on 1 January (154.8×, 212.4× and
+264× from 2026), so recompute them when it changes.
+
+**Set `OTHER_ANNUAL_INCOME` in `.env`** to your yearly tax base from everything
+else (salary after your own contributions, other income), in EUR. The
+rental's tax is what it adds on top of that: with €50,000 of salary, rental
+profit is taxed at 25 %, not 19 %. Left at 0, the rental is taxed as if it
+were your only income, which understates the tax for most people who work.
+(Czechia: `CZ_OTHER_ANNUAL_INCOME`, in Kč.)
 
 ---
 
