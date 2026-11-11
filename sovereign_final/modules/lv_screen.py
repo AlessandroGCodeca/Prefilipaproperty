@@ -90,12 +90,23 @@ _RULES = (
     ("zaistenie",      "distress",
      r"zaisten\w*\s+(?:nehnutel\w*|majetk\w*|bytu)|trestn\w*\s+poriad\w*"),
     ("vecné bremeno",  "encumbrance", r"vecn\w*\s+bremen\w*"),
+    # A ban on selling or encumbering the flat ("zákaz scudzenia / prevodu /
+    # zaťaženia", "obmedzenie prevodu"): the flat can't pass to you without
+    # its holder's consent. Tiered in _tier: a bank's goes with its mortgage.
+    ("zákaz prevodu",  "encumbrance", r"zakaz\w*\s+(?:scudz|prevod|zatazen)\w*|"
+                                      r"obmedzen\w*\s+(?:prevod|scudz)\w*"),
     ("predkupné právo", "encumbrance", r"predkupn\w*\s+prav\w*"),
     ("zabezpečovacie prevodné právo", "lien",
      r"zabezpecovac\w*\s+prevodn\w*\s+prav\w*"),
     ("záložné právo",  "lien",        r"zalozn\w*\s+prav\w*"),
 )
 _COMPILED = [(label, kind, re.compile(pat)) for label, kind, pat in _RULES]
+
+# Raised whenever a change to the rules could turn a stored PASS into a
+# REJECT: init_db sends the Slovak PASS verdicts made under an older version
+# back to the LV check (database.schema._rescreen_lv_passes).
+# 2: transfer bans ("zákaz prevodu / scudzenia", "obmedzenie prevodu").
+RULES_VERSION = 2
 
 # Who a lien is in favour of. "v prospech" is the register's standard wording;
 # the others turn up in older entries.
@@ -244,6 +255,14 @@ def _tier(label: str, entry_text: str, holder: str) -> tuple[str, str]:
                 _holder_is_company(entry_text) and _TECHNICAL_RE.search(fold(holder))):
             return "soft", "utility / access easement"
         return "hard", "kind of easement not recognised"
+    if label == "zákaz prevodu":
+        # A bank registers one with its mortgage, and it is lifted when the
+        # loan is repaid from the price. Anyone else's — a town's or ŠFRB's on
+        # a subsidised flat, a person's — needs their consent to sell.
+        h = fold(holder)
+        if h and is_bank(holder) and not re.search(r"sfrb|statn\w*\s+fond", h):
+            return "soft", "bank's ban that goes with its mortgage — lifted when it is repaid"
+        return "hard", "ban on transfer: the holder must consent to the sale"
     if _PUBLIC_HOLDER_RE.search(fold(holder)):
         return "soft", "pre-emption right of the state or a municipality"
     return "hard", "pre-emption right of a person or company"

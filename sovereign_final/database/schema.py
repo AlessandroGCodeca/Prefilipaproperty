@@ -677,6 +677,27 @@ def _mark_legacy_lv_passes_unverified(conn) -> int:
     return n
 
 
+def _rescreen_lv_passes(conn) -> int:
+    """Send the Slovak PASS verdicts made under older LV rules back to the LV
+    check, once per new rules version (modules.lv_screen.RULES_VERSION): a
+    rule added since may reject one of them — version 2 added transfer bans,
+    which the screen used to pass as clean. Each keeps its flat LV number, so
+    the next LV DEBT FILTER reads it again. Idempotent."""
+    from modules.lv_screen import RULES_VERSION
+    conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)")
+    row = conn.execute("SELECT value FROM app_state WHERE key = 'lv_rules_sk'").fetchone()
+    if row and int(row[0]) >= RULES_VERSION:
+        return 0
+    n = conn.execute(
+        "UPDATE listings SET lv_status = 'PENDING', "
+        "lv_detail = 'Checked again under updated LV rules (transfer bans).' "
+        "WHERE lv_status IN ('PASS', 'CLEAN') AND COALESCE(market, 'sk') = 'sk'"
+    ).rowcount
+    conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES ('lv_rules_sk', ?)",
+                 (str(RULES_VERSION),))
+    return n
+
+
 def init_db():
     conn = _db.get_conn()
     try:
@@ -693,6 +714,7 @@ def init_db():
                      "ON listings(market, is_active)")
         _backfill_listing_coords(conn)
         _mark_legacy_lv_passes_unverified(conn)
+        _rescreen_lv_passes(conn)
         # rent_comps used to be seeded with hand-typed 'baseline_2026' rows
         # (invented sample counts, never read). The table now holds only live
         # comps built from scraped rentals (engine/rent_comps), so the seed rows

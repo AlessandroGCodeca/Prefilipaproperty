@@ -525,8 +525,8 @@ Existing scores from the old rule are cleared once on upgrade — run
 |-----------|---------|
 | ✅ CLEAN | The flat's **own** LV was read and nothing on it blocks |
 | ⚠ UNVERIFIED | No LV of this flat was read — the card says how far the check got |
-| ❌ REJECTED | The flat's own LV has a non-bank lien, exekúcia, konkurz, súdny spor, a lifetime right to use or live in the flat, a private person's or company's predkupné právo, or a vecné bremeno of a kind the screen can't read |
-| ⚑ soft flag | Shown on a CLEAN (or rejected) flat, not a reason to reject: a utility / access vecné bremeno (lines, pipes, right of way) or a predkupné právo of the state or a municipality. `LV_SOFT_FLAGS_REJECT=1` rejects these too — a judgement call for you or your lawyer |
+| ❌ REJECTED | The flat's own LV has a non-bank lien, exekúcia, konkurz, súdny spor, a lifetime right to use or live in the flat, a private person's or company's predkupné právo, a ban on transferring or encumbering the flat (zákaz prevodu / scudzenia / zaťaženia, obmedzenie prevodu) held by anyone but a bank, or a vecné bremeno of a kind the screen can't read |
+| ⚑ soft flag | Shown on a CLEAN (or rejected) flat, not a reason to reject: a utility / access vecné bremeno (lines, pipes, right of way) a predkupné právo of the state or a municipality, or a bank's zákaz scudzenia / zaťaženia that goes with its mortgage. `LV_SOFT_FLAGS_REJECT=1` rejects these too — a judgement call for you or your lawyer |
 
 How a check runs:
 
