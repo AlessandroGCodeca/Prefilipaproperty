@@ -70,7 +70,9 @@ class TestRegistry:
 # "Ružinov" — takes its own median, not the kraj's — and the property tax,
 # per m² by municipality since October 2026 instead of 0.4 % of the price;
 # Liptovský Mikuláš's at its own 0.50 €/m² since November 2026, not the 1.35
-# fallback)
+# fallback; and the s.r.o. charged for the extra cash its lower LTV needs —
+# audit finding 5, November 2026 — which moved its break-even months and
+# turned Ružinov's recommendation from s.r.o. to personal)
 def _golden():
     with open(os.path.join(HERE, "fixtures", "sk_golden.json"), encoding="utf-8") as f:
         return json.load(f)

@@ -167,3 +167,68 @@ def test_a_salary_raises_the_personal_tax_in_the_analysis(db, monkeypatch):
 def test_scores_from_before_the_bands_are_redone():
     from engine.financial import SCORING_MODEL_VERSION
     assert SCORING_MODEL_VERSION >= 7
+
+
+# ── 5 · s.r.o. and personal compared at the same equity ───────────────────────
+def test_the_sros_extra_cash_is_not_a_saving(db):
+    from engine.financial import analyse
+    r = analyse(150_000, 55, "Bratislava - Petržalka")          # s.r.o. at 70 %, personal 80 %
+    extra = r.total_cash_invested_sro - r.total_cash_invested
+    assert extra == pytest.approx(15_000, rel=0.01)
+    assert r.annual_sro_saving == pytest.approx(
+        (r.surplus_sro - r.surplus_personal) * 12 - extra * r.mortgage_rate, abs=0.15)  # surpluses are stored to the cent
+    # The audit's case: +€104/yr before, from the extra cash alone.
+    assert r.annual_sro_saving < 0 and r.optimal_structure == "PERSONAL"
+    assert "more cash costs" in r.recommendation
+
+
+def test_at_the_same_ltv_nothing_is_charged(db):
+    from engine.financial import analyse
+    r = analyse(150_000, 55, "Bratislava - Petržalka", sro_ltv=0.8)
+    assert r.total_cash_invested_sro == r.total_cash_invested
+    assert r.annual_sro_saving == pytest.approx((r.surplus_sro - r.surplus_personal) * 12, abs=0.15)
+
+
+def _sro_wins(db, monkeypatch, **kw):
+    """A case where the company pays: a high earner's 35 % against 10 % + 10 %,
+    on the same loan and no running cost."""
+    from engine import financial
+    monkeypatch.setattr(financial, "OTHER_ANNUAL_INCOME", 120_000)
+    return financial.analyse(100_000, 55, "Žilina", rent_override=900, sro_ltv=0.8,
+                             sro_rate_premium=0, sro_running_cost=0, **kw)
+
+
+# ── 7 · Headline returns are the recommended structure's ──────────────────────
+def test_headline_returns_follow_the_recommended_structure(db, monkeypatch):
+    from engine.financial import analyse
+    p = analyse(150_000, 55, "Bratislava - Petržalka")
+    assert p.optimal_structure == "PERSONAL"
+    assert p.cash_on_cash == pytest.approx(p.surplus_personal * 12 / p.total_cash_invested, abs=1e-4)
+    assert p.net_rental_yield == pytest.approx(p.surplus_personal * 12 / 150_000, abs=1e-4)
+    assert p.principal_paydown_monthly == p.mortgage_principal_monthly
+    s = _sro_wins(db, monkeypatch)
+    assert s.optimal_structure == "SRO"
+    assert s.cash_on_cash == pytest.approx(s.surplus_sro * 12 / s.total_cash_invested_sro, abs=1e-4)
+
+
+# ── 8 · The hold period decides whether the s.r.o.'s setup pays back ──────────
+def test_a_short_hold_keeps_the_setup_cost_from_paying_back(db, monkeypatch):
+    import config
+    ten = _sro_wins(db, monkeypatch)
+    assert ten.optimal_structure == "SRO" and ten.annual_sro_saving > 0
+    short = max(1, int(config.SRO_SETUP_COST // ten.annual_sro_saving))   # can't repay it
+    assert ten.annual_sro_saving * short <= config.SRO_SETUP_COST
+    held = _sro_wins(db, monkeypatch, hold_years=short)
+    assert held.optimal_structure == "PERSONAL"
+    assert f"beyond the {short}-year hold" in held.recommendation
+
+
+def test_whatif_shows_the_recommended_structures_rate_shock(db):
+    from tests.test_app_smoke import run_app
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    md = "\n".join(m.value for m in at.markdown)
+    # The default custom flat: personal is recommended.
+    assert "RATE SHOCK (personal)" in md and "EQUITY CASH FLOWS (personal)" in md
+    at.slider(key="wi_hold").set_value(3).run()
+    assert not at.exception, [e.value for e in at.exception]

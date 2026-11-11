@@ -123,7 +123,10 @@ def render_card(l, v):
             st.metric(T("Self-Fund"),    fp(ratio))
         with c4:
             st.metric(T("Cap Rate"),   fp(l.get("cap_rate")))
-            st.metric(T("CoC Return"), fp(l.get("cash_on_cash")))
+            st.metric(T("CoC Return"), fp(l.get("cash_on_cash")),
+                      help=(f"Výnos na vložený kapitál při doporučené struktuře ({opt})."
+                            if cz else
+                            f"Cash-on-cash under the structure recommended ({opt})."))
             st.metric(T("IRR 10y"),    _pct_or_dash(l.get("irr_sro") if show_sro else l.get("irr_personal")),
                       help=("IRR za dobu držení se zhodnocením, náklady prodeje a daní ze "
                             "zisku — viz záložka WHAT-IF." if cz else

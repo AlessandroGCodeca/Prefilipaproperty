@@ -130,7 +130,7 @@ def render(v) -> None:
                 "Gross%":  st.column_config.NumberColumn(format="%.2f%%"),
                 "Cap%":    st.column_config.NumberColumn(format="%.2f%%"),
                 "IRR%":    st.column_config.NumberColumn(format="%.1f%%", help="10-year IRR incl. appreciation, exit costs and tax on the gain"),
-                "Yield":   st.column_config.NumberColumn(format="%.2f%%"),
+                "Yield":   st.column_config.NumberColumn(format="%.2f%%", help="Net yield: the yearly cash flow over the price, under the structure recommended for the listing"),
                 "CF":      st.column_config.TextColumn(help="⛔ = monthly surplus below CASHFLOW_MIN_SURPLUS: the class is price vs market, not income"),
                 "Days":    st.column_config.NumberColumn(format="%d", help="Days tracked: since this dashboard first saw the flat on any portal (not the portal's posting date)"),
                 "ΔPrice":  st.column_config.NumberColumn(format="%+.1f%%", help="Price change since first seen"),

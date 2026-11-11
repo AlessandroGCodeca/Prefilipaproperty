@@ -157,8 +157,11 @@ def render(v) -> None:
     sro_kw = dict(sro_ltv=wi_sro_ltv, sro_rate_premium=wi_sro_prem,
                   sro_running_cost=float(wi_sro_cost))
     fin = dict(rent_override=wi_rent or None, ltv=wi_ltv, rate=wi_rate, term_years=wi_term,
-               rooms=wi_rooms or None, **sro_kw, **mk)
+               rooms=wi_rooms or None, hold_years=wi_hold, **sro_kw, **mk)
     r = analyse(wi_price, wi_size, wi_district, **fin)
+    # The rate shock and the cash flows show the structure recommended.
+    best_sro = r.optimal_structure == "SRO"
+    best_tag = "s.r.o." if best_sro else "personal"
     irr_kw = dict(rent=r.estimated_rent, ltv=wi_ltv, rate=wi_rate, term_years=wi_term,
                   hold_years=wi_hold, appreciation=wi_app, rent_growth=wi_rg,
                   exit_cost_rate=wi_exit, **sro_kw, **mk)
@@ -251,18 +254,20 @@ def render(v) -> None:
                        + (markets.tax_rules(r.tax_year, wm).get("summary") or "")
                        + " Confirm with a daňový poradce.")
     with c_right:
-        st.markdown('<div class="muted">RATE SHOCK (s.r.o.)</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="muted">RATE SHOCK ({best_tag})</div>', unsafe_allow_html=True)
         shock_rows = []
         for bump in (0.0, 0.01, 0.02, 0.03):
             x = analyse(wi_price, wi_size, wi_district, **{**fin, "rate": wi_rate + bump})
             shock_rows.append({"Rate": f"{(wi_rate + bump) * 100:.1f}%",
-                               f"Surplus {sym}/mo": x.surplus_sro,
-                               "Self-funding %": x.ratio_sro * 100})
+                               f"Surplus {sym}/mo": x.surplus_sro if best_sro else x.surplus_personal,
+                               "Self-funding %": (x.ratio_sro if best_sro else x.ratio_personal) * 100})
         st.dataframe(pd.DataFrame(shock_rows), hide_index=True, width="stretch",
                      column_config={f"Surplus {sym}/mo": (
                                         st.column_config.NumberColumn(format="euro", step=1) if sk
                                         else st.column_config.NumberColumn(format="localized", step=1)),
                                     "Self-funding %": st.column_config.NumberColumn(format="%.1f%%")})
-        st.markdown('<div class="muted">EQUITY CASH FLOWS (s.r.o.)</div>', unsafe_allow_html=True)
-        st.bar_chart(pd.DataFrame({"Year": list(range(len(irr_s.cash_flows))),
-                                   sym: irr_s.cash_flows}).set_index("Year"), height=180)
+        st.markdown(f'<div class="muted">EQUITY CASH FLOWS ({best_tag})</div>',
+                    unsafe_allow_html=True)
+        flows = (irr_s if best_sro else irr_p).cash_flows
+        st.bar_chart(pd.DataFrame({"Year": list(range(len(flows))),
+                                   sym: flows}).set_index("Year"), height=180)
