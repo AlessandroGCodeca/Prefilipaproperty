@@ -85,6 +85,7 @@ from database.scores import (
     mark_location_tried,
 )
 from database.title_deeds import (
+    purge_old_lv_texts,
     set_lv_status, reset_demo_rejections, set_lv_analysis, _LV_ROW_COLUMNS,
     get_pending_lv, get_lv_row, set_parcel_data, _ensure_lv_documents_table,
     set_lv_document, get_lv_documents, get_lv_document, set_flat_lv, get_lv_todo,
@@ -184,6 +185,7 @@ __all__ = [
     "mark_location_tried",
     "set_lv_status",
     "reset_demo_rejections",
+    "purge_old_lv_texts",
     "set_lv_analysis",
     "_LV_ROW_COLUMNS",
     "get_pending_lv",

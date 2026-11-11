@@ -918,7 +918,9 @@ legal position, and needs advice from a Slovak lawyer **before** it starts:
   unofficially; ÚGKK offers no API or licence for it, and the site geo-blocks
   many foreign IPs.
 - **Personal data (GDPR).** The `cadastre_cache` table keeps owner names,
-  registered addresses and full LV texts; listings and notes can name sellers
+  registered addresses and full LV texts — deleted after
+  `LV_TEXT_RETENTION_DAYS` (180 by default) by the daily housekeeping, which
+  also drops the LV texts of listings off the market that long; listings and notes can name sellers
   and agents; contract drafts name buyers. Using that beyond your own
   purchases needs a legal basis, a retention limit and a privacy notice.
 - **Brokerage.** Arranging sales between other people for a fee is

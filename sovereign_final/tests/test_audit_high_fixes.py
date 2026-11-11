@@ -264,3 +264,82 @@ def test_a_flat_priced_from_the_mf_map_says_so(db):
     r = analyse(2_500_000, 55, "Kladno - Kročehlavy", market="cz")
     assert r.rent_key == "kladno"
     assert "Ministry of Finance rent map" in r.recommendation
+
+
+# ── 10 · Keyword-only LV checks say so ────────────────────────────────────────
+@pytest.mark.parametrize("key_set", [False, True])
+def test_the_lv_tabs_say_when_checks_are_keyword_only(db, monkeypatch, key_set):
+    from modules import debt_bot
+    from tests.test_app_smoke import run_app
+    monkeypatch.setattr(debt_bot, "claude_enabled", lambda: key_set)
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    notes = [w.value for w in at.warning if "keyword rules only" in w.value]
+    assert len(notes) == (0 if key_set else 2)          # LV TO-DO and REJECTED
+
+
+def test_the_lv_step_says_when_checks_are_keyword_only(db, monkeypatch):
+    from dashboard import actions
+    from modules import debt_bot
+    monkeypatch.setattr(debt_bot, "run_debt_filter", lambda **kw: (1, 0, 2))
+    monkeypatch.setattr(debt_bot, "claude_enabled", lambda: False)
+    level, msg = actions._lv_step(lambda *a: None)
+    assert level == "warning" and "keyword rules only" in msg
+    monkeypatch.setattr(debt_bot, "claude_enabled", lambda: True)
+    level, msg = actions._lv_step(lambda *a: None)
+    assert level == "success" and "keyword" not in msg
+
+
+# ── 12 · Old title-deed texts are deleted, verdicts kept ──────────────────────
+def test_old_lv_texts_are_purged_and_verdicts_kept(db):
+    from datetime import datetime, timedelta, timezone
+    from tests.conftest import make_listing
+    old = (datetime.now(timezone.utc) - timedelta(days=200)).isoformat()
+    new = datetime.now(timezone.utc).isoformat()
+    for lid, seen in (("gone", old), ("live", new), ("tracked", old), ("passed", old)):
+        db.upsert_listing(make_listing(lid, market="cz", last_seen_at=seen, scraped_at=old))
+        db.set_lv_document(lid, f"Vlastník: Jan Novák … {lid}")
+        db.set_lv_status(lid, "REJECTED", "zástavní právo", "private lien")
+    conn = db.get_conn()
+    try:
+        conn.execute("UPDATE listings SET is_active = 0, last_seen_at = ? "
+                     "WHERE id IN ('gone', 'tracked', 'passed')", (old,))
+        conn.commit()
+    finally:
+        conn.close()
+    db.set_deal_stage("tracked", "OFFER", "")        # still yours: kept
+    db.set_deal_stage("passed", "PASSED", "")        # given up: purged
+    import kataster_scraper as ks
+    conn = db.get_conn()
+    try:
+        ks._ensure_cache_table(conn)
+        for key, when in (("old", old), ("fresh", new)):
+            conn.execute("INSERT INTO cadastre_cache (cache_key, status, result_json, fetched_at) "
+                         "VALUES (?, 'OK', '{\"lv_text\": \"Vlastník: …\"}', ?)", (key, when))
+        conn.commit()
+    finally:
+        conn.close()
+
+    out = db.purge_old_lv_texts(180)
+    assert out["cadastre_cache"] == 1 and out["lv_documents"] == 2
+    assert set(db.get_lv_documents(["gone", "live", "tracked", "passed"])) == {"live", "tracked"}
+    conn = db.get_conn()
+    try:
+        assert [r[0] for r in conn.execute("SELECT cache_key FROM cadastre_cache")] == ["fresh"]
+        verdicts = dict(conn.execute("SELECT id, lv_status FROM listings").fetchall())
+    finally:
+        conn.close()
+    assert verdicts["gone"] == "REJECTED"           # the verdict stays
+    assert db.purge_old_lv_texts(0) == {}            # 0 keeps everything
+
+
+def test_housekeeping_purges_old_lv_texts(db, monkeypatch):
+    import config
+    import scheduler
+    calls = []
+    monkeypatch.setattr(db, "purge_old_lv_texts", lambda days: calls.append(days) or {"x": 3})
+    monkeypatch.setattr(config, "LV_TEXT_RETENTION_DAYS", 90)
+    step = next(fn for name, fn in scheduler._market_steps("sk", set())
+                if "ousekeeping" in name)
+    _result, msg = step()
+    assert calls == [90] and "removed 3 LV text(s) older than 90 days" in msg

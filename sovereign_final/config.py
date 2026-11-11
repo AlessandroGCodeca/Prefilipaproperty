@@ -325,6 +325,12 @@ CADASTRAL_BACKOFF_MAX  = 60
 # the flat's LV number) is retried after this many days — portal outages and
 # approximate pins shouldn't park a listing for good.
 LV_RECHECK_DAYS        = 7
+# Title-deed texts name owners, their addresses and their creditors. The daily
+# housekeeping deletes the cadastre's cached LV texts fetched longer ago than
+# this, and the LV texts of listings off the market that long (a deal you
+# still track keeps its own). Each listing keeps its verdict and the reason.
+# 0 keeps them for ever.
+LV_TEXT_RETENTION_DAYS = _env_int("LV_TEXT_RETENTION_DAYS", 180)
 
 # ── LV screening ──────────────────────────────────────────────────────────────
 # The encumbrances the LV debt filter rejects on (záložné právo, exekúcia,
