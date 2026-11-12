@@ -106,7 +106,10 @@ _COMPILED = [(label, kind, re.compile(pat)) for label, kind, pat in _RULES]
 # REJECT: init_db sends the Slovak PASS verdicts made under an older version
 # back to the LV check (database.schema._rescreen_lv_passes).
 # 2: transfer bans ("zákaz prevodu / scudzenia", "obmedzenie prevodu").
-RULES_VERSION = 2
+# 3: the owners' statutory lien (§ 15 of Act 182/1993) is a soft flag — this
+#    one can turn a stored REJECT into a PASS, so lien rejections are checked
+#    again too.
+RULES_VERSION = 3
 
 # Who a lien is in favour of. "v prospech" is the register's standard wording;
 # the others turn up in older entries.
@@ -135,6 +138,29 @@ _BANK_RE = re.compile(
     r"(?<!\w)bank(?:a|y|e|u|ou|ovi|ami)?(?!\w)|sporiteln|"
     + "|".join(rf"(?<!\w){re.escape(fold(b))}(?!\w)" for b in LV_BANK_NAMES)
     + ")", re.S)
+
+# The statutory lien of § 15 of Act 182/1993 (o vlastníctve bytov): it arises
+# by law on every flat in a building, in favour of the owners' association
+# (spoločenstvo vlastníkov) or, without one, the other owners, and secures
+# what the flat owes the building (fond opráv, services). It is on a great
+# many LVs and is no private debt — but it does follow the flat, so the card
+# flags it: ask the správca for a potvrdenie o bezdlžnosti. Recognised by the
+# act it cites, or by whom it is in favour of. Owners enforcing it ("výkon
+# záložného práva") is distress and blocks as ever.
+_STATUTORY_ACT_RE = re.compile(r"182\s*/\s*(?:19)?93(?!\d)")
+_STATUTORY_PAR_RE = re.compile(r"§\s*15(?!\d)")
+_OWNERS_RE = re.compile(r"(?<!\w)(?:ostatn\w*\s+)?vlastnik\w*\s+bytov|"
+                        r"(?<!\w)spolocenstv\w*\s+vlastnik\w*")
+STATUTORY_LIEN_NOTE = ("statutory lien of the building's owners (§ 15 of Act 182/1993) — "
+                       "on most flats; ask the správca to confirm the flat owes nothing")
+
+
+def _statutory_owners_lien(entry_text: str, creditor: str) -> bool:
+    """The lien entry (folded text, from its phrase to the entry's end) is the
+    owners' statutory one."""
+    return bool((_STATUTORY_ACT_RE.search(entry_text) and _STATUTORY_PAR_RE.search(entry_text))
+                or _OWNERS_RE.search(fold(creditor or "")))
+
 
 _CREDITOR_SPAN = 60    # longest creditor name read after the marker
 _MARKER_SPAN   = 120   # how far after a lien phrase its creditor may start
@@ -315,6 +341,9 @@ class Vocabulary:
     # awarded by a court's ruling on ownership), which burdens nothing.
     part_c_only: frozenset = frozenset()
     part_c_at: object = None     # (text) -> index of part C's heading, or None
+    # (folded entry text, creditor) -> a non-bank lien that is flagged, not
+    # blocking (Slovakia's § 15 owners' lien); None: every non-bank lien blocks.
+    statutory_lien: object = None
 
 
 # Where part C (ťarchy — the encumbrances) starts in the report's text:
@@ -349,6 +378,7 @@ SK_VOCABULARY = Vocabulary(
     bank_re=_BANK_RE, name_end=_NAME_END, tier=_tier, entry_no_re=_ENTRY_NO_RE,
     distress_lien_prefix="exeku",
     part_c_only=frozenset({"dražba", _OWNERSHIP_RULING_RE}), part_c_at=part_c_start,
+    statutory_lien=_statutory_owners_lien,
 )
 
 
@@ -552,11 +582,20 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
         creditor = _creditor_name(creditor, v.name_end)
         bank = is_bank(creditor, v.bank_re)
         last_lien_at = start
-        entries.append({"flag": label, "kind": kind,
-                         "blocking": not bank,
-                         "tier": "hard" if not bank else None,
-                         "creditor": creditor or None, "note": None,
-                         "excerpt": _excerpt(text, start)})
+        entry = {"flag": label, "kind": kind, "blocking": not bank,
+                 "tier": "hard" if not bank else None,
+                 "creditor": creditor or None, "note": None,
+                 "excerpt": _excerpt(text, start)}
+        if not bank and v.statutory_lien is not None:
+            # This entry only: to the next hit or register number.
+            entry_end = min(nxt, end + _ENTRY_SPAN)
+            sep = v.entry_no_re.search(low, end, entry_end)
+            if sep:
+                entry_end = sep.start()
+            if v.statutory_lien(low[start:entry_end], creditor):
+                entry.update(tier="soft", note=STATUTORY_LIEN_NOTE,
+                             blocking=LV_SOFT_FLAGS_REJECT)
+        entries.append(entry)
     return entries
 
 
@@ -578,6 +617,8 @@ def _holder(text: str, low: str, end: int, entry_end: int,
 
 def describe(entry: dict) -> str:
     """One line for a dashboard detail / log: what was found and in whose favour."""
+    if entry["kind"] == "lien" and entry.get("tier") == "soft":
+        return f"{entry['flag']} — {entry['note']}"
     if entry["kind"] == "lien":
         who = entry.get("creditor") or "unreadable creditor"
         state = "bank" if not entry["blocking"] else "NOT a bank"

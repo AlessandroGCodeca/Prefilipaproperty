@@ -77,7 +77,7 @@ def _parse_lv(lv_text, screen=screen_lv) -> dict:
             # distress (exekúcia / konkurz / súdny spor).
             "claude_may_clear": all(e["kind"] != "distress" for e in blocking),
         }
-    banks = [e for e in entries if e["kind"] == "lien"]
+    banks = [e for e in entries if e["kind"] == "lien" and e.get("tier") != "soft"]
     detail = "Clean title — no blocking encumbrances"
     if banks:
         detail += f" ({len(banks)} bank lien(s): " \
