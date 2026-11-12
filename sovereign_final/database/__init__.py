@@ -101,6 +101,7 @@ from database.pipeline import (
 )
 from database.portal_runs import (
     QUIET_RUNS, count_seen_since, record_portal_run, portal_runs, quiet_portals,
+    portal_health,
 )
 
 __all__ = [
@@ -109,6 +110,7 @@ __all__ = [
     "record_portal_run",
     "portal_runs",
     "quiet_portals",
+    "portal_health",
     "SQLITE_PATH",
     "get_conn",
     "SQLITE_SCHEMA",

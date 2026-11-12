@@ -86,6 +86,36 @@ def _local_stamp(iso: str | None) -> tuple[str, str]:
         return raw.replace("T", " "), raw.replace("-", "").replace(":", "").replace("T", "_")
     return ts.strftime("%Y-%m-%d %H:%M"), ts.strftime("%Y%m%d_%H%M")
 
+def days_since(iso: str | None, now=None) -> int | None:
+    """Whole days since a stored (UTC) timestamp; None when it can't be read."""
+    from datetime import datetime, timezone
+    try:
+        when = datetime.fromisoformat((iso or "").strip())
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(((now or datetime.now(timezone.utc)) - when).days, 0)
+
+
+def last_seen_label(l, cz: bool = False) -> str:
+    """"last seen today" / "yesterday" / "5 days ago" — when a portal last
+    showed the listing. A listing unseen for a week may be gone already (the
+    stale check retires it at 21 days), so from then on it carries a ⚠.
+    "" when the row has no last_seen_at."""
+    days = days_since(l.get("last_seen_at"))
+    if days is None:
+        return ""
+    if cz:
+        text = ("dnes" if days == 0 else "včera" if days == 1 else f"před {days} dny")
+        return f"naposledy viděno {text}" + (" ⚠" if days >= STALE_WARN_DAYS else "")
+    text = ("today" if days == 0 else "yesterday" if days == 1 else f"{days} days ago")
+    return f"last seen {text}" + (" ⚠" if days >= STALE_WARN_DAYS else "")
+
+
+STALE_WARN_DAYS = 7
+
+
 def badge(cls, text):
     return f'<span class="badge b{cls[0].lower()}">{text}</span>'
 

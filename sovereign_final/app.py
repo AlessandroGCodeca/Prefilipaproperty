@@ -33,8 +33,8 @@ logging.getLogger("httpx").setLevel(logging.WARNING)   # one line per Claude cal
 from dashboard import actions, diagnostics, overview, sidebar, style, view  # noqa: E402
 from dashboard.login import require_password  # noqa: E402
 from dashboard.tabs import (  # noqa: E402
-    close, deal_pipeline, lv_todo, map_view, rejected, rent_comps, satellite, snag_list,
-    tax_rates, triage, what_if,
+    close, compare, deal_pipeline, lv_todo, map_view, rejected, rent_comps, satellite,
+    snag_list, tax_rates, triage, what_if,
 )
 
 st.set_page_config(
@@ -87,19 +87,19 @@ overview.render(v, sb)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TABS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Three groups, each with its own tabs: eleven in one row overflowed at
+# Three groups, each with its own tabs: a dozen in one row overflowed at
 # 1440 px and hid the last behind an arrow.
 TAB_GROUPS = (
     ("🎯 DEALS",    (("TRIAGE TABLE", triage), ("ACTIVE SNAG LIST", snag_list),
                      ("MAP", map_view), ("SATELLITE VIEWER", satellite))),
-    ("📊 ANALYSIS", (("WHAT-IF / TAX", what_if), ("RENT COMPS", rent_comps),
-                     ("TAX RATES", tax_rates))),
+    ("📊 ANALYSIS", (("WHAT-IF / TAX", what_if), ("COMPARE", compare),
+                     ("RENT COMPS", rent_comps), ("TAX RATES", tax_rates))),
     ("🗂 WORKFLOW", (("DEAL PIPELINE", deal_pipeline), ("LV TO-DO", lv_todo),
                      ("REJECTED", rejected), ("ONE-CLICK CLOSE", close))),
 )
 # Drawn in the order the tabs were always drawn in, whatever group holds them.
 DRAW_ORDER = (triage, snag_list, map_view, what_if, deal_pipeline, rejected, lv_todo,
-              rent_comps, tax_rates, satellite, close)
+              rent_comps, tax_rates, satellite, close, compare)
 
 _page_tab = {}
 for group, (_label, pages) in zip(st.tabs([g for g, _ in TAB_GROUPS]), TAB_GROUPS):

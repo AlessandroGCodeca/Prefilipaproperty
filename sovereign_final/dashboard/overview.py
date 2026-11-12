@@ -30,6 +30,65 @@ def waiting_note(waiting: dict[str, int]) -> str:
             + " · the RENT COMPS tab lists them all")
 
 
+SPARK = "▁▂▃▄▅▆▇█"
+# A portal whose latest run is older than this (hours) is shown amber: the
+# daily run didn't reach it.
+PORTAL_STALE_H = 36
+
+
+def sparkline(daily) -> str:
+    """One character per day: the day's listings against the week's best day
+    (· = no run that day, ▁ = a run that returned nothing)."""
+    top = max((d for d in daily if d), default=0)
+    return "".join("·" if d is None else SPARK[round(d / top * 7)] if d and top else SPARK[0]
+                   for d in daily)
+
+
+def portal_strip(health: dict, view_market, now=None) -> str:
+    """The portal health strip (HTML): for each portal read in the market(s)
+    on the page, what its latest run returned, the last 7 days as a
+    sparkline and when it ran — red when the latest run failed or returned
+    nothing (with its last good run), amber when it hasn't run for
+    PORTAL_STALE_H hours. "" when no portal in view has a run on record."""
+    import scheduler
+    from datetime import datetime, timezone
+    from modules.pipeline_state import LOCAL_TZ, _short_time
+    now = now or datetime.now(timezone.utc)
+
+    def local(iso):
+        return _short_time(datetime.fromisoformat(iso).astimezone(LOCAL_TZ).isoformat(),
+                           now.astimezone(LOCAL_TZ))
+    chips, any_run = [], False
+    for market in markets.MARKET_CODES:
+        if view_market not in (None, market):
+            continue
+        flag = "🇸🇰" if market == "sk" else "🇨🇿"
+        for name, module in scheduler.SCRAPERS.get(market, ()):
+            h = health.get((market, scheduler.source_of(module)))
+            if not h or not h.get("last"):
+                chips.append(f'<span class="phc none">{flag} {esc(name)} — no run yet</span>')
+                continue
+            any_run = True
+            last = h["last"]
+            bad = not last["listings"] or bool(last["error"])
+            age_h = (now - datetime.fromisoformat(last["run_at"])).total_seconds() / 3600
+            daily = h["daily"]
+            tip = "Listings per day, oldest first: " + ", ".join(
+                "—" if d is None else str(d) for d in daily)
+            if bad:
+                good = h.get("last_good_at")
+                tail = (("failed " if last["error"] else "no listings ") + local(last["run_at"])
+                        + (f" · last good {local(good)}" if good else " · never returned any"))
+                tip += f". Latest run: {last['error'] or 'ran, but returned no listings'}"
+            else:
+                tail = ("last run " if age_h > PORTAL_STALE_H else "") + local(last["run_at"])
+            cls = "bad" if bad else "old" if age_h > PORTAL_STALE_H else "ok"
+            chips.append(f'<span class="phc {cls}" title="{esc(tip[:300])}">{flag} {esc(name)} '
+                         f'<b>{last["listings"]}</b> <span class="spk">{sparkline(daily)}</span> '
+                         f'{esc(tail)}</span>')
+    return f'<div class="ph">{"".join(chips)}</div>' if any_run else ""
+
+
 def quiet_portal_note(q: dict) -> str:
     """The warning for a portal whose last runs returned no listings or failed."""
     import scheduler
@@ -105,6 +164,12 @@ def render(v, sb) -> None:
   <div class="sc a"><div class="sn">{shown['pending']}</div><div class="sl">Pending</div></div>
 </div>
 """, unsafe_allow_html=True)
+    # Portal health: what each portal's latest run returned, its week, when.
+    if not using_demo:
+        from dashboard.listing_cache import portal_health
+        _strip = portal_strip(portal_health(), view_market)
+        if _strip:
+            st.markdown(_strip, unsafe_allow_html=True)
     # With both markets on the page, how the tiles split between them.
     _per_market = {m: sum(1 for l in data if l.get("_market") == m) for m in markets.MARKET_CODES}
     if _per_market.get("cz"):

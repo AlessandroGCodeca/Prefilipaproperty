@@ -69,6 +69,33 @@ section[data-testid="stSidebar"] {
 .brow.tot .l { color:#8a98b5; } .brow.tot .v { color:#e4eaf5; font-weight:700; }
 .brow.pos .v { color:#00e676; } .brow.neg .v { color:#ff5252; }
 
+/* Portal health strip: one chip per portal */
+.ph { display:flex; flex-wrap:wrap; gap:6px; margin:-8px 0 14px; }
+.phc { font-family:var(--mono); font-size:0.66rem; color:#8a98b5; white-space:nowrap;
+       padding:3px 8px; border:1px solid #151924; border-radius:3px; background:#0b0d14; }
+.phc b { color:#e4eaf5; }
+.phc .spk { color:#448aff; letter-spacing:1px; }
+.phc.bad { border-color:#ff5252; color:#ff8a80; } .phc.bad .spk { color:#ff5252; }
+.phc.old { border-color:#ffd740; color:#ffd740; }
+.phc.none { color:#566380; }
+/* On a phone: a long chip wraps, and the portals with no run yet are left out. */
+@media (max-width: 640px) {
+    .phc { white-space:normal; }
+    .phc.none { display:none; }
+}
+
+/* Compact cards (ACTIVE SNAG LIST on a phone): title, price, class, surplus, one button */
+.cc { background:#0b0d14; border:1px solid #151924; border-left:3px solid #37474f;
+      border-radius:3px; padding:10px 12px; margin-bottom:8px; }
+.cc.g { border-left-color:#00e676; } .cc.y { border-left-color:#ffd740; }
+.cc .cct { color:#e4eaf5; font-size:0.9rem; line-height:1.25; }
+.cc .ccm { font-family:var(--mono); font-size:0.74rem; color:#8a98b5; margin:5px 0 8px; }
+.cc .ccm .pos { color:#00e676; } .cc .ccm .neg { color:#ff5252; }
+.cc a.ccb { display:block; text-align:center; padding:9px 0; border:1px solid #2a3350;
+            border-radius:3px; font-family:var(--mono); font-size:0.72rem; letter-spacing:1px;
+            color:#bcc8e0; text-decoration:none; }
+.cc a.ccb:hover { border-color:#00e676; color:#00e676; }
+
 /* Divider */
 .div { border:none; border-top:1px solid #151924; margin:14px 0; }
 

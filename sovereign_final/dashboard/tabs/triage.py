@@ -4,15 +4,27 @@ sortable table, to spot the best surplus or yield in one scan instead of
 opening each card.
 """
 
+from datetime import datetime
+
 import streamlit as st
 
 import markets
 
 from dashboard.fmt import _features_label, _lv_state, money
 
+# Always shown, first and pinned; the column chooser hides any other.
+PINNED = ("", "Grade", "Title", "Price", "Surplus")
+
+
+def triage_csv(df) -> bytes:
+    """The table as a CSV file: every row and column, in the order shown.
+    With a byte-order mark, so Excel reads the diacritics."""
+    return df.to_csv(index=False).encode("utf-8-sig")
+
 
 def render(v) -> None:
     """The TRIAGE TABLE tab."""
+    v_cur = v.cur
     _cf_negative = v.cf_negative
     greens = v.greens
     hidden_note = v.hidden_note
@@ -106,23 +118,47 @@ def render(v) -> None:
             f'risk), then discount. Click any header to re-sort.</div>',
             unsafe_allow_html=True,
         )
+        # The column chooser and the export. Grade, Title, Price and Surplus
+        # always show, first and pinned while the rest scrolls; any other
+        # column can be hidden. The choice is kept as the hidden ones, so a
+        # column that appears later (Native, with both markets) shows.
+        optional = [c for c in df.columns if c not in PINNED]
+        st.session_state["triage_hide"] = [c for c in st.session_state.get("triage_hide", [])
+                                           if c in optional]
+        c_cols, c_csv = st.columns([5, 1])
+        with c_cols:
+            hidden = st.multiselect(
+                "Hide columns", optional, key="triage_hide", label_visibility="collapsed",
+                placeholder="Hide columns — Grade, Title, Price and Surplus always show")
+        with c_csv:
+            # Built on the click, not on every rerun.
+            st.download_button(
+                "⬇️ CSV", data=lambda: triage_csv(df), mime="text/csv", width="stretch",
+                file_name=f"sovereign_triage_{datetime.now():%Y-%m-%d}.csv", key="triage_csv",
+                help=f"Every row and column of this table as filtered — for your bank, "
+                     f"adviser or partner. Money in {v_cur}; opens in Excel.")
         st.dataframe(
             df,
             width="stretch",
             hide_index=True,
             height=min(600, 40 + 35 * len(df)),
+            column_order=[c for c in PINNED if c in df.columns]
+                         + [c for c in optional if c not in hidden],
             column_config={
+                "":        st.column_config.TextColumn(pinned=True),
+                "Grade":   st.column_config.TextColumn(pinned=True),
+                "Title":   st.column_config.TextColumn(pinned=True),
                 "Score":   st.column_config.NumberColumn(format="%d", help="0–100 composite deal score"),
                 "Stage":   st.column_config.TextColumn(width="medium"),
                 "Mkt":     st.column_config.TextColumn(help="Market: Slovakia or Czechia"),
-                "Price":   money_col("Price"),
+                "Price":   money_col("Price", pinned=True),
                 "Native":  st.column_config.TextColumn(help=f"In the listing's own currency · {markets.fx_note()}"),
                 "Max 🟡":  money_col("Max 🟡", help="Highest price that still scores YELLOW"),
                 "Max 🟢":  money_col("Max 🟢", help="Highest price that scores GREEN"),
                 "To 🟡":   st.column_config.NumberColumn(format="%+.1f%%", help="Change from the asking price to the max YELLOW price, as on the card — the cut you need to negotiate (positive = already inside)"),
                 "Size":    st.column_config.NumberColumn(format="%d m²"),
                 "Rent":    money_col("Rent"),
-                "Surplus": money_col("Surplus"),
+                "Surplus": money_col("Surplus", pinned=True),
                 "+2pp":    money_col("+2pp", help="s.r.o. surplus at the mortgage rate + 2 pp"),
                 "Below%":  st.column_config.NumberColumn(
                     format="%.0f%%", help="Asking €/m² below the regional median "

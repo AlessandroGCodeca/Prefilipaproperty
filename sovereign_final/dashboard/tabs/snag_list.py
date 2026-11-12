@@ -73,12 +73,18 @@ def render(v) -> None:
             # The class is price vs market; say how many still lose money.
             n = sum(1 for l in group if _cf_negative(l))
             return f" · ⛔ {n} CASH-FLOW NEGATIVE" if n else ""
+        # For a phone: each deal as its title, price, class, surplus and one
+        # button, instead of the full card.
+        compact = (greens or yellows) and st.toggle(
+            "📱 Compact cards", key="compact_cards",
+            help="For a phone: each deal as its title, price, class and monthly surplus, "
+                 "with one button that opens the listing. Switch it off for the full cards.")
         if greens:
             st.markdown(f'<div class="muted" style="margin:14px 0 8px">🟢 GREEN — ≥20% BELOW MARKET ({len(greens)}){_neg_note(greens)}</div>', unsafe_allow_html=True)
-            render_cards(greens, "green", v)
+            render_cards(greens, "green", v, compact)
         if yellows:
             st.markdown(f'<div class="muted" style="margin:18px 0 8px">🟡 YELLOW — 10–20% BELOW MARKET ({len(yellows)}){_neg_note(yellows)}</div>', unsafe_allow_html=True)
-            render_cards(yellows, "yellow", v)
+            render_cards(yellows, "yellow", v, compact)
         if whites:
             st.markdown(f'<div class="muted" style="margin:18px 0 8px">⚪ WHITE — AT MARKET OR NO BENCHMARK ({len(whites)})</div>', unsafe_allow_html=True)
             render_white_table(whites, v)

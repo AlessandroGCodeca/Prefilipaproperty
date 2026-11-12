@@ -128,3 +128,36 @@ def quiet_portals(market: str | None = None, runs: int = QUIET_RUNS) -> list[dic
         finally:
             conn.close()
     return quiet
+
+
+def portal_health(days: int = 7, now: datetime | None = None) -> dict[tuple, dict]:
+    """Each portal's record over the last `days` days, for the dashboard's
+    health strip: {(market, source): {"daily": the most listings a run
+    returned on each day, oldest first (None: no run that day), "last": its
+    latest run {"run_at", "listings", "error"}, "last_good_at": its latest
+    run that returned listings without an error, or None}}. Days are UTC."""
+    now = now or datetime.now(timezone.utc)
+    first_day = (now - timedelta(days=days - 1)).date()
+    conn = _db.get_conn()
+    try:
+        _ensure_portal_runs(conn)
+        rows = conn.execute(
+            "SELECT market, source, run_at, listings, error FROM portal_runs "
+            "ORDER BY run_at, id").fetchall()
+    finally:
+        conn.close()
+    out: dict[tuple, dict] = {}
+    for r in rows:
+        h = out.setdefault((r["market"], r["source"]),
+                           {"daily": [None] * days, "last": None, "last_good_at": None})
+        run = {"run_at": r["run_at"], "listings": r["listings"], "error": r["error"]}
+        h["last"] = run                                   # rows come oldest first
+        if not _bad(run):
+            h["last_good_at"] = r["run_at"]
+        try:
+            i = (datetime.fromisoformat(r["run_at"]).date() - first_day).days
+        except ValueError:
+            continue
+        if 0 <= i < days:
+            h["daily"][i] = max(h["daily"][i] or 0, 0 if _bad(run) else r["listings"])
+    return out

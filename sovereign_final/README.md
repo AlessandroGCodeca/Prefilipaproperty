@@ -191,7 +191,7 @@ gives each source and what changed.
 
 ```
 sovereign_final/
-├── app.py                    ← Streamlit dashboard (11 tabs in 3 groups): the page, top to
+├── app.py                    ← Streamlit dashboard (12 tabs in 3 groups): the page, top to
 │                               bottom; each part is drawn by dashboard/
 ├── dashboard/
 │   ├── sidebar.py            ← Pipeline status, step buttons, filters
@@ -207,7 +207,7 @@ sovereign_final/
 │   └── tabs/                 ← One module per tab, each with render(view):
 │                               triage, snag_list, map_view, what_if,
 │                               deal_pipeline, satellite, rejected, lv_todo,
-│                               rent_comps, tax_rates, close
+│                               rent_comps, tax_rates, close, compare
 ├── scheduler.py              ← Daily 06:00 CET automation, retries a failed run
 ├── config.py                 ← All 2026 Slovak tax rates
 ├── markets.py                ← Market registry: the SK and CZ profiles
@@ -293,18 +293,19 @@ sovereign_final/
 
 ## Dashboard Tabs
 
-The eleven tabs sit in three groups (one row of eleven overflowed at 1440 px):
+The twelve tabs sit in three groups (one row of them overflowed at 1440 px):
 
 - **🎯 DEALS** — TRIAGE TABLE, ACTIVE SNAG LIST, MAP, SATELLITE VIEWER
-- **📊 ANALYSIS** — WHAT-IF / TAX, RENT COMPS, TAX RATES
+- **📊 ANALYSIS** — WHAT-IF / TAX, COMPARE, RENT COMPS, TAX RATES
 - **🗂 WORKFLOW** — DEAL PIPELINE, LV TO-DO, REJECTED, ONE-CLICK CLOSE
 
 | Tab | What it does |
 |-----|-------------|
-| TRIAGE TABLE | Flat, sortable view of every scored listing — grade, price, **max offer** (🟡/🟢), ask vs max offer, below-market %, rent, surplus, **+2 pp stress**, gross yield, cap rate, **IRR**, **days tracked** (since the first scrape — not the portal's posting date), **price change**, **portals**, deal stage, vibe, LV status, **⛔ cash-flow negative** |
+| TRIAGE TABLE | Flat, sortable view of every scored listing — grade, price, **max offer** (🟡/🟢), ask vs max offer, below-market %, rent, surplus, **+2 pp stress**, gross yield, cap rate, **IRR**, **days tracked** (since the first scrape — not the portal's posting date), **price change**, **portals**, deal stage, vibe, LV status, **⛔ cash-flow negative**. Grade, Title, Price and Surplus stay pinned on the left; **Hide columns** hides any other, and **⬇️ CSV** downloads every row and column of the filtered table (opens in Excel) |
 | ACTIVE SNAG LIST | 🟢🟡 deal cards, 25 a page per class, each built when you open it (⚪ WHITE listings are one table, not cards): cost breakdown (the s.r.o.'s own loan and running cost), financing stress (+2 pp, 70% LTV), location risk with sources, price history, other portals' copies, deal stage, vibe notes, **PDF memo**, LV status and flat-LV verify; a ⛔ CASH-FLOW NEGATIVE badge and a ⚠ rent-fallback warning where they apply |
-| MAP | Every listing with coordinates, coloured by class (faded = area-level geocode) |
+| MAP | Every listing with coordinates, coloured by class or by monthly cash flow (faded = area-level geocode). **Group nearby pins** draws neighbours as one circle with their count; **Near** narrows the map to the listings within 1–50 km of a point — an address, or coordinates as `48.1486, 17.1077`. The distance is a straight line: travel time would need a routing service |
 | WHAT-IF / TAX | The tax toggle calculator: any listing (or a custom one) re-run with your own price, rate, LTV, term, rent, hold period, growth and exit costs, and the s.r.o.'s loan premium, LTV and running cost — personal vs s.r.o. side by side, rate-shock table, IRR, max offer |
+| COMPARE | Two to four listings side by side, one column each: price and price per m², the regional median, rent and yield, the surplus under both structures and the better one, IRR, the title deed, location and risk flags, days tracked, price change |
 | DEAL PIPELINE | Board of the deals you're working: WATCHING → VIEWING → OFFER → NEGOTIATING → DUE DILIGENCE → NOTARY → CLOSED / PASSED, with a timeline per deal |
 | SATELLITE VIEWER | Listing photo vs Google satellite + Street View + vibe score, and every note saved for the listing |
 | REJECTED | Every LV rejection with its reason, detail and LV risk read; re-verify from here |
@@ -316,6 +317,17 @@ The eleven tabs sit in three groups (one row of eleven overflowed at 1440 px):
 A 🔻 banner above the tabs lists price cuts from the last 14 days (the 50
 latest, built when you open it), and says
 whether the new price now sits inside the max YELLOW offer.
+
+Under the tiles, a **portal health strip** has one chip per portal: what its
+latest run returned, the last seven days as a small bar chart (· = no run
+that day) and when it ran. A chip turns red when the latest run failed or
+returned nothing (with its last good run), amber when the portal hasn't run
+for 36 hours.
+
+In ACTIVE SNAG LIST, **📱 Compact cards** shows each deal as its title, price,
+class and monthly surplus with one button that opens the listing — for a
+phone. Every full card ends with when a portal last showed the listing
+("last seen 4 days ago"; ⚠ from a week on: it may be gone).
 
 Each listing also gets a **composite deal grade (A–D)** blending financial
 (cap rate + discount to the regional median), location, energy class,
