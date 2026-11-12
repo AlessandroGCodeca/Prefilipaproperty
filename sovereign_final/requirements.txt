@@ -2,12 +2,12 @@
 # instead of whatever was newest that day (a floating `streamlit>=` could pull
 # a release that drops an argument the app uses). Dependabot
 # (.github/dependabot.yml) proposes upgrades as PRs, and CI tests each one.
-streamlit==1.66.1       # ≥1.55: lazy st.expander (on_change="rerun"); "euro" format
+streamlit==1.67.0       # ≥1.55: lazy st.expander (on_change="rerun"); "euro" format
 pydeck==0.9.3          # the MAP tab imports it directly
 requests==2.34.2
 beautifulsoup4==4.15.0
 python-dotenv==1.2.4
-pandas==3.1.0          # <4 until Streamlit stops calling reset_index(inplace=True) (.github/dependabot.yml ignores 4.x)
+pandas==3.1.1          # <4 until Streamlit stops calling reset_index(inplace=True) (.github/dependabot.yml ignores 4.x)
 apscheduler==3.11.3    # 4.x is a different API
 lxml==6.1.3
 pytz==2026.6
