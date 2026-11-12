@@ -32,6 +32,9 @@ def render(v) -> None:
                 "the seller's papers or the agent — the building plot found under the map pin "
                 'has a different LV. Type the numbers in below and save them in one go.</div>',
                 unsafe_allow_html=True)
+    from modules.debt_bot import KEYWORD_ONLY_NOTE, keyword_only
+    if keyword_only():
+        st.warning(f"🔑 {KEYWORD_ONLY_NOTE}")
     # The outcome of the last save below, carried across its rerun.
     _lv_msg = st.session_state.pop("lv_todo_msg", None)
     if _lv_msg:

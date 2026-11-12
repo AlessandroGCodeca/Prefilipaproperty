@@ -310,23 +310,31 @@ def _market_steps(market: str, scraped: set) -> list[tuple[str, object]]:
     `market`'s listings only. `scraped` holds the portals read this run."""
     def housekeeping():
         from database import deactivate_stale_listings, backfill_dev_project_flags
+        from database import purge_old_lv_texts
+        from config import LV_TEXT_RETENTION_DAYS
         dev = backfill_dev_project_flags()
+        purged = sum(purge_old_lv_texts(LV_TEXT_RETENTION_DAYS).values())
+        dev_note = f"flagged {dev} dev projects" + (
+            f" | removed {purged} LV text(s) older than {LV_TEXT_RETENTION_DAYS} days"
+            if purged else "")
         if not scraped:
-            return None, f"flagged {dev} dev projects | stale check skipped (no portal read)"
+            return None, f"{dev_note} | stale check skipped (no portal read)"
         # Per portal, and only the portals that returned listings this run: a
         # blocked or broken portal shows none of its listings, and "not seen
         # for 21 days" says nothing about them.
         stale = deactivate_stale_listings(days=21, market=market,
                                           sources=[source_of(m) for m in scraped])
         kept = [name for name, m in SCRAPERS.get(market, ()) if m not in scraped]
-        return None, (f"Deactivated {stale} stale | flagged {dev} dev projects"
+        return None, (f"Deactivated {stale} stale | {dev_note}"
                       + (f" | stale check skipped for {', '.join(kept)} (no listings this run)"
                          if kept else ""))
 
     def lv():
         from modules.debt_bot import run_debt_filter
+        from modules.debt_bot import keyword_only
         p, r, u = run_debt_filter(market=market)
-        return None, f"Clean: {p} | Rejected: {r} | Unverified: {u}"
+        return None, (f"Clean: {p} | Rejected: {r} | Unverified: {u}"
+                      + (" | keyword rules only (no ANTHROPIC_API_KEY)" if keyword_only() else ""))
 
     # Optional; needs ANTHROPIC_API_KEY (no-op without). Before scoring, so
     # blank districts resolve to a real rent rate instead of the €6.50/m²

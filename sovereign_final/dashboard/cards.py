@@ -11,7 +11,8 @@ from database import DEAL_STAGES
 from dashboard.listing_cache import clear_listing_cache
 from dashboard.fmt import (
     _floor_label, _labels, _lv_link, _lv_state_t, _of100, _pct_or_dash,
-    _quick_cadastre, _rent_fallback, _risk_label, amt, badge, esc, fp, market_badge,
+    _quick_cadastre, _rent_fallback, _risk_label, amt, badge, esc, fp, last_seen_label,
+    market_badge,
     mkw, sgn, tier_badge,
 )
 
@@ -123,7 +124,10 @@ def render_card(l, v):
             st.metric(T("Self-Fund"),    fp(ratio))
         with c4:
             st.metric(T("Cap Rate"),   fp(l.get("cap_rate")))
-            st.metric(T("CoC Return"), fp(l.get("cash_on_cash")))
+            st.metric(T("CoC Return"), fp(l.get("cash_on_cash")),
+                      help=(f"Výnos na vložený kapitál při doporučené struktuře ({opt})."
+                            if cz else
+                            f"Cash-on-cash under the structure recommended ({opt})."))
             st.metric(T("IRR 10y"),    _pct_or_dash(l.get("irr_sro") if show_sro else l.get("irr_personal")),
                       help=("IRR za dobu držení se zhodnocením, náklady prodeje a daní ze "
                             "zisku — viz záložka WHAT-IF." if cz else
@@ -214,6 +218,10 @@ def render_card(l, v):
                        if fallback == "default" and _d else
                        "no Czech rent figure for this town"
                        if fallback == "default" else
+                       "the Ministry of Finance rent map's plain 2+kk reference flat — "
+                       "no Deloitte figure for this town; it runs 15–25 % under Deloitte's, "
+                       "so the surplus is conservative"
+                       if fallback == "mf" else
                        f"the {esc(l['rent_key'].title())} median of its towns — no figure for this town")
             else:
                 from config import RENT_PER_M2 as _RENT
@@ -448,10 +456,12 @@ def render_card(l, v):
             except Exception as e:
                 st.warning(f"Re-verify: {e}")
 
+        seen = last_seen_label(l, cz)
+        seen = f" · {seen}" if seen else ""
         if cz:
-            st.markdown(f'<div class="muted">Zdroj: {esc((l.get("source") or "").upper())} · Tento přehled jej poprvé viděl: {esc((l.get("scraped_at") or "")[:10])}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="muted">Zdroj: {esc((l.get("source") or "").upper())} · Tento přehled jej poprvé viděl: {esc((l.get("scraped_at") or "")[:10])}{seen}</div>', unsafe_allow_html=True)
         else:
-            st.markdown(f'<div class="muted">Source: {esc((l.get("source") or "").upper())} · First seen by this dashboard: {esc((l.get("scraped_at") or "")[:10])}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="muted">Source: {esc((l.get("source") or "").upper())} · First seen by this dashboard: {esc((l.get("scraped_at") or "")[:10])}{seen}</div>', unsafe_allow_html=True)
 
 
 def render_memo_button(l, key):
@@ -491,10 +501,36 @@ def render_memo_button(l, key):
 CARDS_PER_PAGE = 25
 
 
-def render_cards(listings, section, v):
+def compact_cards_html(listings, v) -> str:
+    """The compact cards of one page, as one block of HTML: for each listing
+    its title, price, class, monthly surplus and one button — the portal's
+    own page. No widgets, so a page of them costs a phone almost nothing."""
+    out = []
+    for l in listings:
+        cls = (l.get("cf_class") or l.get("classification") or "PENDING").upper()
+        emoji = {"GREEN": "🟢", "YELLOW": "🟡", "WHITE": "⚪"}.get(cls, "⏳")
+        surplus = l.get("surplus_sro") if v.show_sro else l.get("surplus_personal")
+        tone = "" if surplus is None else ("neg" if v.cf_negative(l) else "pos")
+        disc = l.get("market_discount")
+        below = (f" · {abs(disc):.0%} {'below' if disc >= 0 else 'above'} market"
+                 if disc is not None else "")
+        stage = (l.get("_stage") or {}).get("stage")
+        out.append(
+            f'<div class="cc {"g" if cls == "GREEN" else "y" if cls == "YELLOW" else ""}">'
+            f'<div class="cct">{emoji} {esc((l.get("title") or l.get("district") or "—")[:70])}'
+            f'</div><div class="ccm">{amt(l, l.get("price_eur") or 0)} · {cls}{below} · '
+            f'<span class="{tone}">{sgn(l, surplus)}</span>'
+            + (f" · [{esc(stage)}]" if stage else "") + "</div>"
+            + (f'<a class="ccb" href="{esc(l["url"])}" target="_blank">OPEN LISTING ↗</a>'
+               if l.get("url") else "") + "</div>")
+    return "".join(out)
+
+
+def render_cards(listings, section, v, compact: bool = False):
     """One page of a section's cards, so a click never redraws hundreds of
     them. The picker's key carries the count: when the filters change how
-    many there are, the section starts again at its first page."""
+    many there are, the section starts again at its first page. `compact`
+    draws the page as compact cards (compact_cards_html) instead."""
     pages = -(-len(listings) // CARDS_PER_PAGE)
     page = 0
     if pages > 1:
@@ -503,5 +539,9 @@ def render_cards(listings, section, v):
             "Cards", range(pages), key=f"page_{section}_{n}", width=260,
             format_func=lambda p: f"{p * CARDS_PER_PAGE + 1}–"
                                   f"{min((p + 1) * CARDS_PER_PAGE, n)} of {n}")
-    for l in listings[page * CARDS_PER_PAGE:(page + 1) * CARDS_PER_PAGE]:
+    shown = listings[page * CARDS_PER_PAGE:(page + 1) * CARDS_PER_PAGE]
+    if compact:
+        st.markdown(compact_cards_html(shown, v), unsafe_allow_html=True)
+        return
+    for l in shown:
         render_card(l, v)

@@ -191,7 +191,7 @@ gives each source and what changed.
 
 ```
 sovereign_final/
-├── app.py                    ← Streamlit dashboard (11 tabs in 3 groups): the page, top to
+├── app.py                    ← Streamlit dashboard (12 tabs in 3 groups): the page, top to
 │                               bottom; each part is drawn by dashboard/
 ├── dashboard/
 │   ├── sidebar.py            ← Pipeline status, step buttons, filters
@@ -207,7 +207,7 @@ sovereign_final/
 │   └── tabs/                 ← One module per tab, each with render(view):
 │                               triage, snag_list, map_view, what_if,
 │                               deal_pipeline, satellite, rejected, lv_todo,
-│                               rent_comps, tax_rates, close
+│                               rent_comps, tax_rates, close, compare
 ├── scheduler.py              ← Daily 06:00 CET automation, retries a failed run
 ├── config.py                 ← All 2026 Slovak tax rates
 ├── markets.py                ← Market registry: the SK and CZ profiles
@@ -293,18 +293,19 @@ sovereign_final/
 
 ## Dashboard Tabs
 
-The eleven tabs sit in three groups (one row of eleven overflowed at 1440 px):
+The twelve tabs sit in three groups (one row of them overflowed at 1440 px):
 
 - **🎯 DEALS** — TRIAGE TABLE, ACTIVE SNAG LIST, MAP, SATELLITE VIEWER
-- **📊 ANALYSIS** — WHAT-IF / TAX, RENT COMPS, TAX RATES
+- **📊 ANALYSIS** — WHAT-IF / TAX, COMPARE, RENT COMPS, TAX RATES
 - **🗂 WORKFLOW** — DEAL PIPELINE, LV TO-DO, REJECTED, ONE-CLICK CLOSE
 
 | Tab | What it does |
 |-----|-------------|
-| TRIAGE TABLE | Flat, sortable view of every scored listing — grade, price, **max offer** (🟡/🟢), ask vs max offer, below-market %, rent, surplus, **+2 pp stress**, gross yield, cap rate, **IRR**, **days tracked** (since the first scrape — not the portal's posting date), **price change**, **portals**, deal stage, vibe, LV status, **⛔ cash-flow negative** |
+| TRIAGE TABLE | Flat, sortable view of every scored listing — grade, price, **max offer** (🟡/🟢), ask vs max offer, below-market %, rent, surplus, **+2 pp stress**, gross yield, cap rate, **IRR**, **days tracked** (since the first scrape — not the portal's posting date), **price change**, **portals**, deal stage, vibe, LV status, **⛔ cash-flow negative**. Grade, Title, Price and Surplus stay pinned on the left; **Hide columns** hides any other, and **⬇️ CSV** downloads every row and column of the filtered table (opens in Excel) |
 | ACTIVE SNAG LIST | 🟢🟡 deal cards, 25 a page per class, each built when you open it (⚪ WHITE listings are one table, not cards): cost breakdown (the s.r.o.'s own loan and running cost), financing stress (+2 pp, 70% LTV), location risk with sources, price history, other portals' copies, deal stage, vibe notes, **PDF memo**, LV status and flat-LV verify; a ⛔ CASH-FLOW NEGATIVE badge and a ⚠ rent-fallback warning where they apply |
-| MAP | Every listing with coordinates, coloured by class (faded = area-level geocode) |
+| MAP | Every listing with coordinates, coloured by class or by monthly cash flow (faded = area-level geocode). **Group nearby pins** draws neighbours as one circle with their count; **Near** narrows the map to the listings within 1–50 km of a point — an address, or coordinates as `48.1486, 17.1077`. The distance is a straight line: travel time would need a routing service |
 | WHAT-IF / TAX | The tax toggle calculator: any listing (or a custom one) re-run with your own price, rate, LTV, term, rent, hold period, growth and exit costs, and the s.r.o.'s loan premium, LTV and running cost — personal vs s.r.o. side by side, rate-shock table, IRR, max offer |
+| COMPARE | Two to four listings side by side, one column each: price and price per m², the regional median, rent and yield, the surplus under both structures and the better one, IRR, the title deed, location and risk flags, days tracked, price change |
 | DEAL PIPELINE | Board of the deals you're working: WATCHING → VIEWING → OFFER → NEGOTIATING → DUE DILIGENCE → NOTARY → CLOSED / PASSED, with a timeline per deal |
 | SATELLITE VIEWER | Listing photo vs Google satellite + Street View + vibe score, and every note saved for the listing |
 | REJECTED | Every LV rejection with its reason, detail and LV risk read; re-verify from here |
@@ -316,6 +317,17 @@ The eleven tabs sit in three groups (one row of eleven overflowed at 1440 px):
 A 🔻 banner above the tabs lists price cuts from the last 14 days (the 50
 latest, built when you open it), and says
 whether the new price now sits inside the max YELLOW offer.
+
+Under the tiles, a **portal health strip** has one chip per portal: what its
+latest run returned, the last seven days as a small bar chart (· = no run
+that day) and when it ran. A chip turns red when the latest run failed or
+returned nothing (with its last good run), amber when the portal hasn't run
+for 36 hours.
+
+In ACTIVE SNAG LIST, **📱 Compact cards** shows each deal as its title, price,
+class and monthly surplus with one button that opens the listing — for a
+phone. Every full card ends with when a portal last showed the listing
+("last seen 4 days ago"; ⚠ from a week on: it may be gone).
 
 Each listing also gets a **composite deal grade (A–D)** blending financial
 (cap rate + discount to the regional median), location, energy class,
@@ -450,9 +462,16 @@ after the first run.
 Czechia: `scraper/rentals_cz.py` reads pronájem listings from Bazoš and
 Bezrealitky, and `engine/rent_comps_cz.py` builds Kč/m² per town the same
 way. `engine/rent_cz.py` has the Deloitte Rent Index figures for Prague,
-Praha 1–10 and the 13 regional capitals; a town outside it (Kladno, Opava,
-Písek…) gets no borrowed rent, so its listings wait unscored until 5+ of its
-rentals give it a live one. The Czech pipeline reads the rentals before it
+Praha 1–10 and the 13 regional capitals. A town outside it (Kladno, Opava,
+Písek…) takes its own figure from the Ministry of Finance's rent map
+(`engine/rent_cz_mf.json`: the 2+kk reference flat, every municipality but the
+1,175 whose name another shares). That flat is a plain one — no balcony, lift
+or garage — so the map runs 15–25 % under Deloitte's where both exist: those
+towns get a conservative rent, and their cards say where it came from. The MF
+publishes the map every quarter; `python dev/build_cz_rent_map.py` (needs
+`pip install openpyxl`) downloads the newest and rebuilds the file. A place
+with neither figure (a name many villages share, a misspelt town) waits
+unscored until 5+ of its rentals give it a live one. The Czech pipeline reads the rentals before it
 scores; so do 🏘️ RENT COMPS (both countries) and a Czech portal's button
 when no Czech rental was read in the last 20 hours. A line above the tabs
 says how many Czech listings wait and in which towns; the RENT COMPS tab
@@ -525,8 +544,8 @@ Existing scores from the old rule are cleared once on upgrade — run
 |-----------|---------|
 | ✅ CLEAN | The flat's **own** LV was read and nothing on it blocks |
 | ⚠ UNVERIFIED | No LV of this flat was read — the card says how far the check got |
-| ❌ REJECTED | The flat's own LV has a non-bank lien, exekúcia, konkurz, súdny spor, a lifetime right to use or live in the flat, a private person's or company's predkupné právo, or a vecné bremeno of a kind the screen can't read |
-| ⚑ soft flag | Shown on a CLEAN (or rejected) flat, not a reason to reject: a utility / access vecné bremeno (lines, pipes, right of way) or a predkupné právo of the state or a municipality. `LV_SOFT_FLAGS_REJECT=1` rejects these too — a judgement call for you or your lawyer |
+| ❌ REJECTED | The flat's own LV has a non-bank lien, exekúcia, konkurz, súdny spor, a lifetime right to use or live in the flat, a private person's or company's predkupné právo, a ban on transferring or encumbering the flat (zákaz prevodu / scudzenia / zaťaženia, obmedzenie prevodu) held by anyone but a bank, or a vecné bremeno of a kind the screen can't read |
+| ⚑ soft flag | Shown on a CLEAN (or rejected) flat, not a reason to reject: a utility / access vecné bremeno (lines, pipes, right of way) a predkupné právo of the state or a municipality, a bank's zákaz scudzenia / zaťaženia that goes with its mortgage, or the owners' statutory lien of § 15 of Act 182/1993 (on most flats; in favour of the spoločenstvo or the other owners — ask the správca for a potvrdenie o bezdlžnosti). `LV_SOFT_FLAGS_REJECT=1` rejects these too — a judgement call for you or your lawyer |
 
 How a check runs:
 
@@ -594,7 +613,7 @@ Slovak IP — skgeodesy.sk geo-blocks many foreign ones.
 
 | | Personal (FO) | s.r.o. |
 |--|---------|--------|
-| Income Tax | 19% / 25% | 10% reduced (≤€100k rev) / 21% |
+| Income Tax | 19% / 25% / 30% / 35% — bands to €43,983 / €60,349 / €75,010 (154.8× / 212.4× / 264× the životné minimum), applied on top of `OTHER_ANNUAL_INCOME` | 10% reduced (≤€100k rev) / 21% |
 | Health Levy | **0%** — passive §6(3) rental is exempt from zdravotné odvody | 0% |
 | Dividend tax on distribution | n/a | 10% (→ effective double taxation) |
 | Loan | hypotéka 3.8% p.a., 80% LTV (70% for a 3rd+ flat) | company loan: rate + `SRO_RATE_PREMIUM_PP` (1 pp), at most `SRO_LTV_RATIO` (70%) |
@@ -775,9 +794,23 @@ which table scoring uses. A year with no table of its own falls back to the
 latest one and the sidebar warns. Scores worked out under another year's table
 (or by an older version of the engine) are redone on the next scoring run.
 
-**Every January, add the new year to `TAX_YEAR_RULES`.** The 2026 personal
-threshold (€41,445) is the 2023 figure carried over — it is 176.8 × the
-životné minimum, so recompute it.
+**Every January, add the new year to `TAX_YEAR_RULES`.** The personal bands
+are multiples of the životné minimum in force on 1 January (154.8×, 212.4× and
+264× from 2026), so recompute them when it changes.
+
+**Mortgage interest (personal).** The personal model leaves the mortgage
+interest out of the tax base. Slovak guidance says a person may deduct it for
+§ 6(3) rental as a provable expense; once your účtovník confirms that for your
+case, set `PERSONAL_INTEREST_DEDUCTIBLE=1` in `.env` and click ♻️ RESCORE ALL.
+On a €120,000 loan that lowers the modelled personal tax by roughly
+€650–900 a year, which matters for the personal-vs-s.r.o. answer.
+
+**Set `OTHER_ANNUAL_INCOME` in `.env`** to your yearly tax base from everything
+else (salary after your own contributions, other income), in EUR. The
+rental's tax is what it adds on top of that: with €50,000 of salary, rental
+profit is taxed at 25 %, not 19 %. Left at 0, the rental is taxed as if it
+were your only income, which understates the tax for most people who work.
+(Czechia: `CZ_OTHER_ANNUAL_INCOME`, in Kč.)
 
 ---
 
@@ -904,7 +937,9 @@ legal position, and needs advice from a Slovak lawyer **before** it starts:
   unofficially; ÚGKK offers no API or licence for it, and the site geo-blocks
   many foreign IPs.
 - **Personal data (GDPR).** The `cadastre_cache` table keeps owner names,
-  registered addresses and full LV texts; listings and notes can name sellers
+  registered addresses and full LV texts — deleted after
+  `LV_TEXT_RETENTION_DAYS` (180 by default) by the daily housekeeping, which
+  also drops the LV texts of listings off the market that long; listings and notes can name sellers
   and agents; contract drafts name buyers. Using that beyond your own
   purchases needs a legal basis, a retention limit and a privacy notice.
 - **Brokerage.** Arranging sales between other people for a fee is

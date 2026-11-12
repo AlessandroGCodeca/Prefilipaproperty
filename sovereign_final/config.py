@@ -47,6 +47,20 @@ INVESTOR_LTV_FROM      = "2026-10-01"   # date the 70% cap takes effect
 # purchase is your 3rd+, so scoring uses LTV_RATIO_INVESTOR instead of
 # LTV_RATIO (see engine.financial.default_ltv). Set in .env.
 PROPERTIES_OWNED       = _env_int("PROPERTIES_OWNED", 0)
+# Your yearly personal tax base from everything else (salary after your
+# employee contributions, other income), in EUR. The rental's tax is the tax
+# it adds on top of it, at the bands it lands in: with €50,000 of salary the
+# rental is taxed at 25 %, not 19 %. 0 taxes the rental as your only income.
+# Set in .env; Czechia has its own (CZ_OTHER_ANNUAL_INCOME, in Kč).
+OTHER_ANNUAL_INCOME    = _env_float("OTHER_ANNUAL_INCOME", 0)
+# Whether a person renting out a flat (§ 6 ods. 3 ZDP) may deduct the interest
+# on the mortgage that bought it. Slovak guidance says yes, as a provable
+# expense (§ 19 ods. 3 písm. t); the engine has always left it out, which
+# overstates the personal tax by 19–35 % of a year's interest and so favours
+# the s.r.o. Off until your účtovník confirms it for your case: set 1 in .env,
+# then ♻️ RESCORE ALL. (Czechia already deducts it: § 9 ZDP.)
+PERSONAL_INTEREST_DEDUCTIBLE = (os.getenv("PERSONAL_INTEREST_DEDUCTIBLE") or "0"
+                                ).strip().lower() in ("1", "true", "yes")
 
 # Rate-shock stress test. NBS makes banks test affordability (DSTI) at the
 # offered rate + 2 percentage points; a fixation ending in a higher-rate market
@@ -81,14 +95,22 @@ EXIT_COST_RATE         = 0.035
 TAX_YEAR_RULES = {
     2026: {
         # Fyzická osoba (personal), passive rental under §6 ods. 3 ZDP.
-        "personal_rate_low":   0.19,    # up to the threshold
-        "personal_rate_high":  0.25,    # above it
-        # 176.8 × the životné minimum. 41,445 is 176.8 × €234.42, the životné
-        # minimum of 2023 — carried over, not re-derived for 2026. Replace it
-        # with 176.8 × the životné minimum valid on 1 January of the year.
-        # Only these two bands are modelled; check whether more apply to your
-        # total income (the rental stacks on your salary).
-        "personal_threshold":  41_445,
+        # §15: from 2026 four bands, each a multiple of the životné minimum
+        # in force on 1 January (€284.13 a month): 19 % up to 154.8×, 25 % up
+        # to 212.4×, 30 % up to 264×, 35 % above. (Until 2025: 19 % up to
+        # 176.8×, 25 % above.) Each rate applies only to the part of the tax
+        # base inside its band. The rental is taxed on top of your other
+        # income (OTHER_ANNUAL_INCOME below), at the bands it lands in.
+        "personal_bands": (
+            (43_983.32, 0.19),        # 154.8 × 284.13
+            (60_349.21, 0.25),        # 212.4 × 284.13
+            (75_010.32, 0.30),        # 264.0 × 284.13
+            (None,      0.35),
+        ),
+        # The first two bands under their old names, for code that reads them.
+        "personal_rate_low":   0.19,
+        "personal_rate_high":  0.25,
+        "personal_threshold":  43_983.32,
         # §9 ods. 1 písm. g): the first €500 of rental income is exempt;
         # expenses are reduced proportionally. Modelled as a flat €500
         # deduction from the base.
@@ -111,10 +133,13 @@ TAX_YEAR_RULES = {
         # Withholding tax on dividends paid out to the owner — the second half
         # of s.r.o. double taxation (corporate tax + dividend tax).
         "dividend_tax":        0.10,
-        "source": ("Zákon 595/2003 (ZDP) after the consolidation package, as "
-                   "entered in May 2026 — not re-checked against the act since; "
-                   "threshold carried over from 2023"),
-        "checked": "2026-05",
+        "source": ("Zákon 595/2003 (ZDP) after the 2026 consolidation package. "
+                   "Personal bands 2026 (154.8× / 212.4× / 264× the životné minimum "
+                   "of €284.13) from PwC Worldwide Tax Summaries, Forvis Mazars CEE "
+                   "tax guide 2026 and Slovak tax advisers' 2026 tables — have an "
+                   "účtovník confirm them against the act; the rest as entered in "
+                   "May 2026"),
+        "checked": "2026-11-11",
     },
 }
 # The tax year scoring uses. Defaults to the calendar year; set TAX_YEAR in .env
@@ -308,6 +333,12 @@ CADASTRAL_BACKOFF_MAX  = 60
 # the flat's LV number) is retried after this many days — portal outages and
 # approximate pins shouldn't park a listing for good.
 LV_RECHECK_DAYS        = 7
+# Title-deed texts name owners, their addresses and their creditors. The daily
+# housekeeping deletes the cadastre's cached LV texts fetched longer ago than
+# this, and the LV texts of listings off the market that long (a deal you
+# still track keeps its own). Each listing keeps its verdict and the reason.
+# 0 keeps them for ever.
+LV_TEXT_RETENTION_DAYS = _env_int("LV_TEXT_RETENTION_DAYS", 180)
 
 # ── LV screening ──────────────────────────────────────────────────────────────
 # The encumbrances the LV debt filter rejects on (záložné právo, exekúcia,

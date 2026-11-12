@@ -49,25 +49,28 @@ def test_waiting_for_rent_counts_the_towns_without_one(full_db):
     import database as db
     from engine import rent_comps_cz
     from modules.cashflow_runner import run_scoring, waiting_for_rent
+    # Names many municipalities share: the MF rent map can't say which, so
+    # they have no figure. Kladno has the map's own: it doesn't wait.
     for i in range(3):
-        db.upsert_listing(_cz(f"kl{i}", "Kladno - Kročehlavy"))
-    db.upsert_listing(_cz("op1", "Opava"))
+        db.upsert_listing(_cz(f"nv{i}", "Nová Ves 3"))
+    db.upsert_listing(_cz("lh1", "Lhota"))
     db.upsert_listing(_cz("pl1", "Plzeň 3"))             # has a figure: not waiting
-    db.upsert_listing(_cz("pi1", "Písek"))
+    db.upsert_listing(_cz("kl1", "Kladno - Kročehlavy"))  # the MF map's: not waiting
+    db.upsert_listing(_cz("pe1", "Petrovice"))
     db.upsert_listing(make_listing("sk1", district="Žilina"))
-    assert waiting_for_rent("cz") == {"kladno": 3, "opava": 1, "písek": 1}
-    assert list(waiting_for_rent("cz"))[0] == "kladno"   # most first
+    assert waiting_for_rent("cz") == {"nová ves": 3, "lhota": 1, "petrovice": 1}
+    assert list(waiting_for_rent("cz"))[0] == "nová ves"   # most first
     assert waiting_for_rent("sk") == {}
 
-    # Písek's comps give it a live rate: its listing no longer waits.
+    # Petrovice's comps give it a live rate: its listing no longer waits.
     for i in range(6):
-        db.upsert_rental(_rental(i, "písek"))
+        db.upsert_rental(_rental(i, "petrovice"))
     rent_comps_cz.rebuild_rent_comps()
-    assert waiting_for_rent("cz") == {"kladno": 3, "opava": 1}
+    assert waiting_for_rent("cz") == {"nová ves": 3, "lhota": 1}
 
     # Scored listings don't wait; the ones without a rent still do.
-    assert run_scoring(market="cz") == 2               # Plzeň and Písek
-    assert waiting_for_rent("cz") == {"kladno": 3, "opava": 1}
+    assert run_scoring(market="cz") == 3               # Plzeň, Kladno and Petrovice
+    assert waiting_for_rent("cz") == {"nová ves": 3, "lhota": 1}
 
 
 def test_a_rejected_listing_does_not_wait(full_db):

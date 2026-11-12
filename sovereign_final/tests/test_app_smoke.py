@@ -110,7 +110,7 @@ def test_empty_database_renders_the_demo_view(db):
     assert ">None<" not in markdown_of(at)
 
 
-PAGE_TABS = ["TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER", "WHAT-IF / TAX",
+PAGE_TABS = ["TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER", "WHAT-IF / TAX", "COMPARE",
              "RENT COMPS", "TAX RATES", "DEAL PIPELINE", "LV TO-DO", "REJECTED",
              "ONE-CLICK CLOSE"]
 GROUP_TABS = ["🎯 DEALS", "📊 ANALYSIS", "🗂 WORKFLOW"]
@@ -132,7 +132,7 @@ def test_the_tabs_are_grouped(populated_db):
     labels = tab_labels(at)
     # Each group's own tabs follow it.
     assert labels == ["🎯 DEALS", "TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER",
-                      "📊 ANALYSIS", "WHAT-IF / TAX", "RENT COMPS", "TAX RATES",
+                      "📊 ANALYSIS", "WHAT-IF / TAX", "COMPARE", "RENT COMPS", "TAX RATES",
                       "🗂 WORKFLOW", "DEAL PIPELINE", "LV TO-DO", "REJECTED", "ONE-CLICK CLOSE"]
 
 

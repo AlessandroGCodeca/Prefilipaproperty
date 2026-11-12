@@ -266,3 +266,39 @@ def queue_lv_check(listing_id: str) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def purge_old_lv_texts(days: int) -> dict[str, int]:
+    """Delete the title-deed texts kept longer than `days` (GDPR's storage
+    limitation: they name owners, addresses and creditors):
+
+    - cadastre_cache rows fetched before then (the scraper's cache, unused
+      after its own 30-day limit anyway);
+    - pasted LV texts (lv_documents) and raw LV responses (lv_checks) of
+      listings off the market since before then — not a deal you still
+      track (any stage but PASSED).
+
+    Each listing keeps its LV verdict and reason. {table: rows}; {} for
+    days <= 0."""
+    if days <= 0:
+        return {}
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    gone = ("SELECT id FROM listings WHERE is_active = 0 AND last_seen_at < ? "
+            "AND id NOT IN (SELECT listing_id FROM deal_stages WHERE stage != 'PASSED')")
+    out = {}
+    conn = _db.get_conn()
+    try:
+        if _has_table(conn, "cadastre_cache"):
+            out["cadastre_cache"] = conn.execute(
+                "DELETE FROM cadastre_cache WHERE fetched_at < ?", (cutoff,)).rowcount
+        if _has_table(conn, "lv_documents"):
+            out["lv_documents"] = conn.execute(
+                f"DELETE FROM lv_documents WHERE listing_id IN ({gone})", (cutoff,)).rowcount
+        if _has_table(conn, "lv_checks"):
+            out["lv_checks"] = conn.execute(
+                "UPDATE lv_checks SET raw_response = NULL WHERE raw_response IS NOT NULL "
+                f"AND listing_id IN ({gone})", (cutoff,)).rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return out

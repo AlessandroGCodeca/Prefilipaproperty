@@ -271,11 +271,13 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
     pdf.table(["Kč / month" if cz else "€ / month", "Personal", "s.r.o."], table_rows,
               [80, 50, 50])
     pdf.ln(1)
+    # Cash-on-cash, net yield and paydown are the recommended structure's.
+    best = "s.r.o." if (l.get("optimal_structure") or "").upper() == "SRO" else "personal"
     pdf.kv([
         ("Cap rate (unlevered)", _pct(l.get("cap_rate"), 2)),
-        ("Cash-on-cash", _pct(l.get("cash_on_cash"), 2)),
+        (f"Cash-on-cash ({best})", _pct(l.get("cash_on_cash"), 2)),
         ("Gross yield", _pct(l.get("gross_yield"), 2)),
-        ("Net yield", _pct(l.get("net_rental_yield"), 2)),
+        (f"Net yield ({best})", _pct(l.get("net_rental_yield"), 2)),
     ])
 
     pdf.h2("Financing & stress test")
@@ -289,7 +291,7 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
         ("s.r.o. loan: LTV / rate", f"{_pct(l.get('sro_ltv_used'), 0)} / "
                                     f"{_pct(l.get('sro_rate_used'), 2)}"),
         ("s.r.o. cash in", money(l.get("total_cash_invested_sro"))),
-        ("Principal paydown (s.r.o.)", f"{money(l.get('principal_paydown_monthly'))}/mo"),
+        (f"Principal paydown ({best})", f"{money(l.get('principal_paydown_monthly'))}/mo"),
         ("At rate +2 pp: surplus", f"{money(l.get('stress_surplus_sro'), True)}/mo"),
         ("At rate +2 pp: self-funding", _pct(l.get("stress_ratio_sro"))),
     ])

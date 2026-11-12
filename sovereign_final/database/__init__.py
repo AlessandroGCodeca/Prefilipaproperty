@@ -85,6 +85,7 @@ from database.scores import (
     mark_location_tried,
 )
 from database.title_deeds import (
+    purge_old_lv_texts,
     set_lv_status, reset_demo_rejections, set_lv_analysis, _LV_ROW_COLUMNS,
     get_pending_lv, get_lv_row, set_parcel_data, _ensure_lv_documents_table,
     set_lv_document, get_lv_documents, get_lv_document, set_flat_lv, get_lv_todo,
@@ -100,6 +101,7 @@ from database.pipeline import (
 )
 from database.portal_runs import (
     QUIET_RUNS, count_seen_since, record_portal_run, portal_runs, quiet_portals,
+    portal_health,
 )
 
 __all__ = [
@@ -108,6 +110,7 @@ __all__ = [
     "record_portal_run",
     "portal_runs",
     "quiet_portals",
+    "portal_health",
     "SQLITE_PATH",
     "get_conn",
     "SQLITE_SCHEMA",
@@ -184,6 +187,7 @@ __all__ = [
     "mark_location_tried",
     "set_lv_status",
     "reset_demo_rejections",
+    "purge_old_lv_texts",
     "set_lv_analysis",
     "_LV_ROW_COLUMNS",
     "get_pending_lv",

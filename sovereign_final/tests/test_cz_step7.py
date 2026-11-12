@@ -22,13 +22,19 @@ NOW = "2099-01-01T00:00:00+00:00"
     ("Plzeň 3", "plzeň", 301), ("Olomouc", "olomouc", 296), ("Liberec", "liberec", 289),
     ("Zlín", "zlín", 287), ("České Budějovice", "české budějovice", 283),
     ("Karlovy Vary", "karlovy vary", 246),
-    ("Říčany, Praha-východ", "říčany", None), ("Brno-venkov", "brno-venkov", None),
-    ("Plzeň-jih", "plzeň-jih", None), ("Kladno - Kročehlavy", "kladno", None),
-    ("", "default", None),
+    # A town the Deloitte index doesn't name: its own MF rent-map figure.
+    ("Říčany, Praha-východ", "říčany", "mf"), ("Kladno - Kročehlavy", "kladno", "mf"),
+    # An okres is no municipality, and a name many share is no one town's.
+    ("Brno-venkov", "brno-venkov", None), ("Plzeň-jih", "plzeň-jih", None),
+    ("Nová Ves 3", "nová ves", None), ("", "default", None),
 ])
 def test_rent_keys(district, key, rate):
     assert rent_cz.match_rent_key(district) == key
-    assert rent_cz.baseline_rent(key) == rate
+    if rate == "mf":
+        assert key not in rent_cz.RENT_PER_M2_CZ
+        assert rent_cz.baseline_rent(key) == rent_cz.mf_rent(key) is not None
+    else:
+        assert rent_cz.baseline_rent(key) == rate
 
 
 def test_a_czech_rent_has_no_rooms_multiplier_and_no_borrowed_figure():
@@ -36,11 +42,15 @@ def test_a_czech_rent_has_no_rooms_multiplier_and_no_borrowed_figure():
     assert fin.get_rent_estimate("Praha 2", 40, rooms=1) != fin.get_rent_estimate(
         "Praha 2", 40, rooms=2)                                   # Slovakia: still applies
     with pytest.raises(LookupError, match="engine/rent_cz.py"):
-        fin.get_rent_estimate("Kladno - Kročehlavy", 55, market="cz")
+        fin.get_rent_estimate("Nová Ves 3", 55, market="cz")
     # Live comps give a town without a published figure its rate.
-    assert fin.get_rent_estimate("Kladno - Kročehlavy", 55, rates={"kladno": 280.0},
+    assert fin.get_rent_estimate("Nová Ves 3", 55, rates={"nová ves": 280.0},
                                  market="cz") == 280 * 55
-    assert fin.rent_fallback_kind("kladno", market="cz") is None
+    assert fin.rent_fallback_kind("nová ves", market="cz") is None
+    # Kladno's own figure is the MF rent map's, and the card says so.
+    assert fin.rent_fallback_kind("kladno", market="cz") == "mf"
+    assert fin.get_rent_estimate("Kladno - Kročehlavy", 55, market="cz") == \
+        rent_cz.mf_rent("kladno") * 55
 
 
 # ── Rent comps: Czech rows stay Czech, Slovak stay Slovak ─────────────────────
@@ -64,13 +74,20 @@ def test_czech_comps(full_db):
     db.upsert_listing(make_listing("cz1", market="cz", currency="CZK", district="Kladno 3",
                                    price_eur=3_000_000.0, url="https://x/l/cz1"))
     out = rent_comps_cz.rebuild_rent_comps()
-    assert out["keys"] == 2 and out["rentals"] == 12 and "kladno" in out["changed"]
+    assert out["keys"] == 2 and out["rentals"] == 12
+    # Kladno's comps land within RESCORE_THRESHOLD of its MF rent-map figure:
+    # its listings keep their scores. (A rate appearing re-scores:
+    # tests/test_cz_rent_waiting.py.)
+    assert "kladno" not in out["changed"]
     rates = rent_comps_cz.load_live_rates()
     from config import RENT_COMP_ASKING_HAIRCUT, RENT_COMP_PRIOR_WEIGHT
     kladno_median = sorted((14_000 + i * 100) / 50 for i in range(6))
     med = (kladno_median[2] + kladno_median[3]) / 2
-    assert rates["kladno"] == round(med * RENT_COMP_ASKING_HAIRCUT, 2)  # no baseline: live
     k = RENT_COMP_PRIOR_WEIGHT
+    # Kladno's baseline is the MF rent map's figure: its comps blend with it,
+    # as Prague's do with Deloitte's.
+    mf = rent_cz.mf_rent("kladno")
+    assert rates["kladno"] == round((6 * med * RENT_COMP_ASKING_HAIRCUT + k * mf) / (6 + k), 2)
     assert rates["praha"] == round((6 * 500 * RENT_COMP_ASKING_HAIRCUT + k * 462) / (6 + k), 2)
     # The Slovak rebuild reads only Slovak rentals and keeps the Czech comps.
     sk = rent_comps.rebuild_rent_comps()
@@ -79,7 +96,7 @@ def test_czech_comps(full_db):
     assert set(rent_comps_cz.load_live_rates()) == {"kladno", "praha"}
     rows = rent_comps_cz.comps_table()
     assert {r["District key"]: r["Source"] for r in rows} == {
-        "kladno": "live", "praha": "live blend"}
+        "kladno": "live blend", "praha": "live blend"}
 
 
 def test_slovak_comps_never_touch_czech_scores(full_db):

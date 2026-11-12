@@ -11,10 +11,12 @@ every place it names: Prague and its ten districts (Praha 1–10), the regional
 capitals Brno, Ostrava, Plzeň, Olomouc, Liberec, Hradec Králové, Pardubice,
 Zlín, České Budějovice, Jihlava, Karlovy Vary and Ústí nad Labem. Its
 Středočeský kraj figure is a whole region's, so it is not used for any town
-in it. Kladno, Opava, Písek and the rest have no figure here, and none is
-borrowed from a neighbour or invented. Such a place still gets its own key
-(its town's name), so live rental comps (engine.rent_comps_cz) can supply its
-rate; with neither, the listing is not scored and the run says why.
+in it. A town the index doesn't name (Kladno, Opava, Písek …) takes its own
+figure from the Ministry of Finance's rent map (rent_cz_mf.json, below) —
+never a neighbour's, and none is invented. Every place keeps its own key (its
+town's name), so live rental comps (engine.rent_comps_cz) blend into its
+rate; with no figure and no comps, the listing is not scored and the run
+says why.
 
 What the figures are: Deloitte's own report says it "collects data from real
 estate portals" and gives the "rent from realised offers" (cena nájmu ze
@@ -30,6 +32,9 @@ Czech rooms multiplier is 1.0.
 
 from __future__ import annotations
 
+import functools
+import json
+import os
 import re
 import unicodedata
 
@@ -155,13 +160,47 @@ def key_label(key: str) -> str:
                     for i, w in enumerate((key or "").split()))
 
 
+# The Ministry of Finance's rent map (Cenová mapa nájemného, vyhláška
+# 456/2024 Sb.), for the towns the Deloitte index doesn't name: the town's
+# own official figure, not a neighbour's. Its "reference flat" is a plain one
+# — unfurnished, over five years old, no balcony, garage or lift — so it runs
+# 15–25 % under Deloitte's in the cities both cover (Brno 302 against 390
+# Kč/m²): a town priced from it gets a conservative rent. Built by
+# dev/build_cz_rent_map.py from the MF's quarterly XLSX.
+MF_MAP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rent_cz_mf.json")
+
+
+@functools.lru_cache(maxsize=1)
+def _mf_map() -> dict:
+    try:
+        with open(MF_MAP_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {"rents": {}, "source": "", "published": ""}
+
+
+def mf_rent(key: str) -> float | None:
+    """The MF rent map's Kč/m² for a town key; None when it has none."""
+    row = _mf_map()["rents"].get(key or "")
+    return float(row[0]) if row else None
+
+
+def mf_source() -> str:
+    return _mf_map().get("source") or ""
+
+
 def baseline_rent(key: str) -> float | None:
-    """Kč/m² for a key with a published figure; None for any other."""
-    return RENT_PER_M2_CZ.get(key)
+    """Kč/m² for a key with a published figure — the Deloitte index's, else
+    the MF rent map's for that town; None for any other."""
+    return RENT_PER_M2_CZ.get(key) or mf_rent(key)
 
 
 def rent_fallback_kind(key: str) -> str | None:
-    """Czech rents never fall back to another place's figure: a key either
-    has its own (published or live) rate or none at all. "default" only for
-    a blank district."""
-    return "default" if not key or key == "default" else None
+    """Czech rents never borrow another place's figure. "mf" when the town's
+    own figure is the MF rent map's (no Deloitte one: conservative, see
+    MF_MAP_PATH); "default" only for a blank district; None otherwise."""
+    if not key or key == "default":
+        return "default"
+    if key not in RENT_PER_M2_CZ and mf_rent(key) is not None:
+        return "mf"
+    return None

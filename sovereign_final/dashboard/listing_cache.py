@@ -107,11 +107,30 @@ def lv_documents(ids) -> dict[str, str]:
     return _lv_documents(tuple(ids), database.SQLITE_PATH)
 
 
+@st.cache_data(ttl=LISTINGS_TTL_S, show_spinner=False)
+def _portal_health(db_path: str) -> dict:
+    import database
+    return database.portal_health()
+
+
+def portal_health() -> dict:
+    """database.portal_health (each portal's last 7 days of runs), cached as
+    the listing load is. {} when it can't be read: the page still draws."""
+    import database
+    try:
+        return _portal_health(database.SQLITE_PATH)
+    except Exception:
+        import logging
+        logging.getLogger("sovereign").exception("Portal health not read")
+        return {}
+
+
 def clear_listing_cache() -> None:
     """After the dashboard changes listings: the next load reads the database."""
     _load_active.clear()
     _waiting_for_rent.clear()
     _quiet_portals.clear()
+    _portal_health.clear()
     _page_context.clear()
     _price_drops.clear()
     _lv_documents.clear()

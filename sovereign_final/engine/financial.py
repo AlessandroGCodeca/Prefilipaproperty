@@ -32,7 +32,7 @@ from config import (
     HOA_SMALL, HOA_MEDIUM, HOA_LARGE, HOA_PREMIUM,
     GREEN_DISCOUNT, YELLOW_DISCOUNT, NEAR_FLOOR_DISCOUNT, SRO_SETUP_COST,
     SRO_ANNUAL_RUNNING_COST, SRO_RATE_PREMIUM_PP, SRO_LTV_RATIO,
-    CASHFLOW_MIN_SURPLUS,
+    CASHFLOW_MIN_SURPLUS, OTHER_ANNUAL_INCOME, PERSONAL_INTEREST_DEDUCTIBLE,
     RENT_PER_M2, INDUSTRIAL_ZONES, INDUSTRIAL_RENT_PREMIUM,
     PARKING_RENT_PREMIUM, FURNISHED_RENT_PREMIUM, SEMI_FURNISHED_PREMIUM,
     BALCONY_RENT_PREMIUM,
@@ -69,7 +69,8 @@ def _need(value, what: str, market, where: str = "markets.py"):
 # the room-adjusted benchmark, the rent fallbacks). A stored score from an
 # older model is redone on the next scoring run
 # (database.requeue_scores_from_older_model).
-SCORING_MODEL_VERSION = 6   # 6: Czech costs and rents checked against sources (docs/M1_VERIFICATION.md)
+SCORING_MODEL_VERSION = 7   # 7: 2026 Slovak tax bands, rental taxed on top of OTHER_ANNUAL_INCOME (audit 2)
+#   6: Czech costs and rents checked against sources (docs/M1_VERIFICATION.md)
 
 
 @dataclass
@@ -111,6 +112,7 @@ class FinancialResult:
     # Key metrics
     noi_monthly:            float   # net operating income (unlevered, pre-tax)
     cap_rate:               float   # NOI / price — unlevered yardstick
+    # These five are under the structure recommended (optimal_structure).
     cash_on_cash:           float   # levered cashflow / total cash invested
     net_rental_yield:       float
     gross_yield:            float
@@ -262,7 +264,8 @@ def personal_rental_base(rules: dict, *, noi_annual: float, rent_annual: float,
     """The rental income a person is taxed on, under the tax table's market.
 
     Slovakia (§6 ods. 3 ZDP): the net operating income less the €500
-    exemption; mortgage interest is not deducted.
+    exemption; mortgage interest is deducted only with
+    config.PERSONAL_INTEREST_DEDUCTIBLE (off until an účtovník confirms it).
     Czechia (§9 ZDP): the rent received less the larger of the actual
     expenses (running costs and mortgage interest; depreciation is left out,
     which over- rather than under-states the tax) and the flat-rate
@@ -273,7 +276,8 @@ def personal_rental_base(rules: dict, *, noi_annual: float, rent_annual: float,
     management)."""
     flat_rate = rules.get("rental_flat_expense_rate")
     if flat_rate is None:
-        return max(noi_annual - rules["rental_exemption"], 0)
+        deductible_interest = interest_annual if PERSONAL_INTEREST_DEDUCTIBLE else 0.0
+        return max(noi_annual - deductible_interest - rules["rental_exemption"], 0)
     flat = rent_annual * flat_rate
     cap = rules.get("rental_flat_expense_cap")
     if cap is not None:
@@ -282,17 +286,49 @@ def personal_rental_base(rules: dict, *, noi_annual: float, rent_annual: float,
     return max(rent_annual - max(flat, actual), 0)
 
 
-def calc_income_tax_personal(annual_net: float, rules: dict | None = None) -> float:
+def personal_bands(rules: dict) -> tuple:
+    """((upper limit or None, rate), …) of a tax table: its own
+    "personal_bands", or the two bands of a table that has only a threshold
+    (Czechia's)."""
+    if rules.get("personal_bands"):
+        return tuple(rules["personal_bands"])
+    return ((rules["personal_threshold"], rules["personal_rate_low"]),
+            (None, rules["personal_rate_high"]))
+
+
+def _banded_tax(base: float, bands) -> float:
+    tax, lower = 0.0, 0.0
+    for upper, rate in bands:
+        if base <= lower:
+            break
+        top = base if upper is None else min(base, upper)
+        tax += (top - lower) * rate
+        if upper is None:
+            break
+        lower = upper
+    return tax
+
+
+def calc_income_tax_personal(annual_net: float, rules: dict | None = None,
+                             other_income: float = 0.0) -> float:
     """Personal income tax on `annual_net` under a year's tax table
-    (config.tax_rules; default the current tax year)."""
+    (config.tax_rules; default the current tax year): the tax it adds on top
+    of `other_income` (your tax base from everything else), each part at the
+    band it lands in. With other_income 0 it is taxed as your only income."""
     t = rules or tax_rules()
     if annual_net <= 0:
         return 0.0
-    threshold = t["personal_threshold"]
-    if annual_net <= threshold:
-        return annual_net * t["personal_rate_low"]
-    return (threshold * t["personal_rate_low"] +
-            (annual_net - threshold) * t["personal_rate_high"])
+    bands = personal_bands(t)
+    other = max(other_income or 0.0, 0.0)
+    return _banded_tax(other + annual_net, bands) - _banded_tax(other, bands)
+
+
+def other_annual_income(market: str = "sk") -> float:
+    """Your tax base from everything but this flat, in the market's currency
+    (config.OTHER_ANNUAL_INCOME; Czechia's CZ_OTHER_ANNUAL_INCOME)."""
+    if _sk(market):
+        return OTHER_ANNUAL_INCOME
+    return markets.get(market).other_annual_income
 
 
 def sro_corporate_rate(annual_revenue: float, rules: dict | None = None) -> float:
@@ -642,6 +678,7 @@ def analyse(
     sro_rate_premium: float | None = None,
     sro_running_cost: float | None = None,
     market: str = "sk",
+    hold_years: int | None = None,
 ) -> FinancialResult:
     """Score one property under both ownership structures.
 
@@ -656,6 +693,9 @@ def analyse(
     `market` picks every one of those defaults, the tax rules and the
     currency: price_eur and every amount in the result are in the market's
     own currency (CZK for "cz") — the name predates the Czech market.
+
+    hold_years (default config.HOLD_YEARS) is how long you'd keep it: the
+    s.r.o. is recommended only when it repays its setup cost within it.
     """
     mkt = markets.normalize(market)
     sk = mkt == "sk"
@@ -712,7 +752,8 @@ def analyse(
         rules, noi_annual=noi_annual, rent_annual=(rent - vacancy_mo) * 12,
         expenses_annual=(hoa_mo + prop_tax_mo + owner_reserve_mo + mgmt_mo) * 12,
         interest_annual=interest_mo * 12)
-    tax_p_annual    = calc_income_tax_personal(taxable_p, rules)
+    tax_p_annual    = calc_income_tax_personal(taxable_p, rules,
+                                               other_annual_income(mkt))
     levy_p_annual   = taxable_p * rules["health_levy_personal"]  # 0 for passive rental
     tax_p_mo        = tax_p_annual / 12
     levy_p_mo       = levy_p_annual / 12
@@ -735,26 +776,39 @@ def analyse(
     surplus_s       = rent - total_s_mo
     ratio_s         = rent / total_s_mo if total_s_mo > 0 else 0
 
-    # ── Key metrics (on the s.r.o.'s own financing, as before) ────
-    annual_cf_sro   = surplus_s * 12
-    coc             = annual_cf_sro / cash_invested_s if cash_invested_s > 0 else 0
-    net_yield       = annual_cf_sro / price_eur if price_eur > 0 else 0
     gross_yield     = annual_rent / price_eur if price_eur > 0 else 0
-    principal_paydown_annual = principal_s_mo * 12
-    # Total return adds equity built via amortization (appreciation NOT modelled).
-    total_return_annual = annual_cf_sro + principal_paydown_annual
-    total_roi       = total_return_annual / cash_invested_s if cash_invested_s > 0 else 0
 
     # ── Decision ──────────────────────────────────────────────────
     # The s.r.o. is recommended only when it comes out ahead after its
     # running cost and company-loan terms, and that gain repays the setup
     # cost within the hold period.
-    annual_sro_saving   = (surplus_s - surplus_p) * 12
+    # The s.r.o. borrows less (its LTV cap), so it needs more of your own
+    # cash, and part of its lower mortgage payment is just that cash at work.
+    # Charged what the same cash costs as personal mortgage (its interest),
+    # the two compare at equal equity: otherwise putting more money in reads
+    # as a tax saving.
+    extra_cash_s        = max(cash_invested_s - cash_invested, 0.0)
+    extra_cash_cost     = extra_cash_s * rate
+    annual_sro_saving   = (surplus_s - surplus_p) * 12 - extra_cash_cost
     break_even          = math.ceil(setup_cost / (annual_sro_saving / 12)) \
                          if annual_sro_saving > 0 else None
+    hold                = HOLD_YEARS if hold_years is None else max(int(hold_years), 1)
     sro_pays            = (annual_sro_saving > 0
-                           and annual_sro_saving * HOLD_YEARS > setup_cost)
+                           and annual_sro_saving * hold > setup_cost)
     optimal             = "SRO" if sro_pays else "PERSONAL"
+
+    # ── Key metrics, under the structure recommended ──────────────
+    # (They were always the s.r.o.'s, while personal is the usual pick.)
+    if optimal == "SRO":
+        annual_cf, cash_in, principal_kept_mo = surplus_s * 12, cash_invested_s, principal_s_mo
+    else:
+        annual_cf, cash_in, principal_kept_mo = surplus_p * 12, cash_invested, principal_mo
+    coc             = annual_cf / cash_in if cash_in > 0 else 0
+    net_yield       = annual_cf / price_eur if price_eur > 0 else 0
+    principal_paydown_annual = principal_kept_mo * 12
+    # Total return adds equity built via amortization (appreciation NOT modelled).
+    total_return_annual = annual_cf + principal_paydown_annual
+    total_roi       = total_return_annual / cash_in if cash_in > 0 else 0
 
     # ── Class: discount to the room-adjusted regional median €/m² ─
     median = benchmark_median(district, rooms, **_mkw(mkt))
@@ -787,16 +841,20 @@ def analyse(
 
     if sro_pays:
         parts.append(f"s.r.o. nets {_money(annual_sro_saving, mkt)}/yr more than personal "
-                     f"after its {_money(running_annual, mkt)}/yr running cost. Setup cost "
-                     f"recovered in {break_even} months.")
+                     f"after its {_money(running_annual, mkt)}/yr running cost"
+                     + (f" and {_money(extra_cash_cost, mkt)}/yr for the "
+                        f"{_money(extra_cash_s, mkt)} more cash it needs" if extra_cash_s else "")
+                     + f". Setup cost recovered in {break_even} months.")
     elif annual_sro_saving > 0:
         parts.append(f"s.r.o. nets only {_money(annual_sro_saving, mkt)}/yr more — its "
                      f"{_money(setup_cost, mkt)} setup cost takes {break_even} months to "
-                     f"recover, beyond the {HOLD_YEARS}-year hold. Personal is better.")
+                     f"recover, beyond the {hold}-year hold. Personal is better.")
     else:
         parts.append(f"Personal ownership is better: the s.r.o. comes out "
                      f"{_money(-annual_sro_saving, mkt)}/yr worse after its running cost "
-                     f"and company-loan terms.")
+                     f"and company-loan terms"
+                     + (f", counting what its {_money(extra_cash_s, mkt)} more cash costs"
+                        if extra_cash_s else "") + ".")
 
     if rent_override is None:
         fallback = rent_fallback_kind(rent_key, **_mkw(mkt))
@@ -807,6 +865,10 @@ def analyse(
         elif fallback == "kraj":
             parts.append(f"⚠️ Rent uses the {rent_key.title()} median of its towns — "
                          f"no rent figure for this town itself.")
+        elif fallback == "mf":
+            parts.append("⚠️ Rent from the Ministry of Finance rent map (a plain 2+kk "
+                         "reference flat): no Deloitte figure for this town. It runs "
+                         "15–25 % under Deloitte's where both exist — a conservative rent.")
 
     if is_industrial_zone(district, **_mkw(mkt)):
         parts.append(f"⚙️ Industrial zone premium applied ({district}).")
@@ -853,7 +915,7 @@ def analyse(
         cash_on_cash          = round(coc, 4),
         net_rental_yield      = round(net_yield, 4),
         gross_yield           = round(gross_yield, 4),
-        principal_paydown_monthly = round(principal_s_mo, 2),
+        principal_paydown_monthly = round(principal_kept_mo, 2),
         total_return_annual   = round(total_return_annual, 2),
         total_roi             = round(total_roi, 4),
         regional_median_m2    = median,
@@ -1123,7 +1185,8 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
     var_cost_rate = VACANCY_RATE + OWNER_RESERVE_RATE + PROPERTY_MGMT_RATE
 
     def personal_tax(taxable: float) -> float:
-        return calc_income_tax_personal(max(taxable, 0.0), rules)
+        return calc_income_tax_personal(max(taxable, 0.0), rules,
+                                        other_annual_income(mkt))
 
     flows = [-equity_in]
     sale_price = exit_costs = balance = exit_tax = 0.0

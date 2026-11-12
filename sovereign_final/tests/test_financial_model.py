@@ -60,7 +60,9 @@ class TestAmortizationSplit:
 
     def test_total_return_adds_principal_paydown(self):
         r = _deal()
-        expected = r.surplus_sro * 12 + r.principal_paydown_monthly * 12
+        # The recommended structure's (audit finding 7): personal here.
+        assert r.optimal_structure == "PERSONAL"
+        expected = r.surplus_personal * 12 + r.principal_paydown_monthly * 12
         assert r.total_return_annual == pytest.approx(expected, abs=1.0)
 
     def test_zero_loan_no_amortization(self):
@@ -76,10 +78,12 @@ class TestAcquisitionCosts:
         )
 
     def test_coc_uses_total_cash_invested(self):
-        # Cash-on-cash is the s.r.o.'s, on the s.r.o.'s own deposit.
+        # Cash-on-cash is the recommended structure's, on its own deposit
+        # (audit finding 7) — personal here.
         r = _deal()
+        assert r.optimal_structure == "PERSONAL"
         assert r.cash_on_cash == pytest.approx(
-            (r.surplus_sro * 12) / r.total_cash_invested_sro, rel=1e-3
+            (r.surplus_personal * 12) / r.total_cash_invested, rel=1e-3
         )
         assert r.total_cash_invested_sro == pytest.approx(
             r.price_eur * (1 - r.sro_ltv) + r.acquisition_costs, abs=0.01)

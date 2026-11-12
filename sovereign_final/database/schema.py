@@ -677,6 +677,42 @@ def _mark_legacy_lv_passes_unverified(conn) -> int:
     return n
 
 
+def _rescreen_lv_passes(conn) -> int:
+    """Send the Slovak LV verdicts an older version of the rules could have
+    got wrong back to the LV check, once per new rules version
+    (modules.lv_screen.RULES_VERSION). Each keeps its flat LV number, so the
+    next LV DEBT FILTER reads it again. Idempotent.
+
+    - version 2 added transfer bans, which the screen used to pass as clean:
+      every PASS is checked again;
+    - version 3 made the owners' statutory lien (§ 15 of Act 182/1993) a soft
+      flag: every flat rejected on a lien is checked again."""
+    from modules.lv_screen import RULES_VERSION
+    conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)")
+    row = conn.execute("SELECT value FROM app_state WHERE key = 'lv_rules_sk'").fetchone()
+    stored = int(row[0]) if row else 0
+    if stored >= RULES_VERSION:
+        return 0
+    n = 0
+    if stored < 2:
+        n += conn.execute(
+            "UPDATE listings SET lv_status = 'PENDING', "
+            "lv_detail = 'Checked again under updated LV rules (transfer bans).' "
+            "WHERE lv_status IN ('PASS', 'CLEAN') AND COALESCE(market, 'sk') = 'sk'"
+        ).rowcount
+    if stored < 3 and _has_table(conn, "rejections_log"):
+        n += conn.execute(
+            "UPDATE listings SET lv_status = 'PENDING', "
+            "lv_detail = 'Checked again under updated LV rules (the owners'' statutory "
+            "lien no longer rejects).' "
+            "WHERE lv_status = 'REJECTED' AND COALESCE(market, 'sk') = 'sk' "
+            "AND id IN (SELECT listing_id FROM rejections_log WHERE reason = 'záložné právo')"
+        ).rowcount
+    conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES ('lv_rules_sk', ?)",
+                 (str(RULES_VERSION),))
+    return n
+
+
 def init_db():
     conn = _db.get_conn()
     try:
@@ -693,6 +729,7 @@ def init_db():
                      "ON listings(market, is_active)")
         _backfill_listing_coords(conn)
         _mark_legacy_lv_passes_unverified(conn)
+        _rescreen_lv_passes(conn)
         # rent_comps used to be seeded with hand-typed 'baseline_2026' rows
         # (invented sample counts, never read). The table now holds only live
         # comps built from scraped rentals (engine/rent_comps), so the seed rows

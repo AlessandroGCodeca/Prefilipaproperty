@@ -40,7 +40,7 @@ class View:
     lv_docs: dict               # Czech listing id → its pasted LV extract
     in_view: Callable           # (row) → it belongs to the market picked
     in_view_cur: Callable       # (row, amount) → the amount in `cur`
-    money_col: Callable         # (name, help=None) → a money column in `cur`
+    money_col: Callable         # (name, help=None, pinned=None) → a money column in `cur`
     cf_negative: Callable       # (row) → the structure shown loses money monthly
     passes_filters: Callable    # (row, by_class=True) → the sidebar filters let it through
     hidden_note: Callable       # (what="listings") → the "filters hid it" line
@@ -87,13 +87,14 @@ def build(sb, view_market) -> View:
         """The listing belongs to the market picked at the top."""
         return view_market is None or markets.of_row(l) == view_market
 
-    def money_col(name: str, help=None):
+    def money_col(name: str, help=None, pinned=None):
         """A money column in the view's currency: EUR (the euro format) for
         Slovakia and for all markets together, Kč for Czechia alone."""
         if VIEW_CUR == "EUR":
-            return st.column_config.NumberColumn(format="euro", step=1, help=help)
+            return st.column_config.NumberColumn(format="euro", step=1, help=help, pinned=pinned)
         return st.column_config.NumberColumn(f"{name} ({markets.get(view_market).currency_symbol})",
-                                             format="localized", step=1, help=help)
+                                             format="localized", step=1, help=help,
+                                             pinned=pinned)
 
     def in_view_cur(l, v):
         """An amount of row `l` in the view's currency (VIEW_CUR): as stored
