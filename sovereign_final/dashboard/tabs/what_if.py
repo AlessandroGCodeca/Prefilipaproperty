@@ -243,8 +243,13 @@ def render(v) -> None:
                      column_config={c: st.column_config.TextColumn(alignment="right")
                                     for c in ("Personal (FO)", "s.r.o.")})
         if sk:
+            from engine import financial as _fin
+            _interest = ("mortgage interest deducted (PERSONAL_INTEREST_DEDUCTIBLE=1)"
+                         if _fin.PERSONAL_INTEREST_DEDUCTIBLE else
+                         "interest not deducted (PERSONAL_INTEREST_DEDUCTIBLE=1 in .env "
+                         "deducts it — ask your účtovník first)")
             st.caption(f"Tax rules {r.tax_year}. Personal: §6(3) passive rental, €500 exempt, no "
-                       "health levy, interest not deductible; sale exempt after 5 years. s.r.o.: "
+                       f"health levy, {_interest}; sale exempt after 5 years. s.r.o.: "
                        "company loan on its own terms, interest and running cost deductible, "
                        "corporate + 10% dividend tax; the sale is taxed whenever it happens. "
                        "s.r.o. is recommended only when it nets more than personal and repays "

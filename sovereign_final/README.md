@@ -533,7 +533,7 @@ Existing scores from the old rule are cleared once on upgrade — run
 | ✅ CLEAN | The flat's **own** LV was read and nothing on it blocks |
 | ⚠ UNVERIFIED | No LV of this flat was read — the card says how far the check got |
 | ❌ REJECTED | The flat's own LV has a non-bank lien, exekúcia, konkurz, súdny spor, a lifetime right to use or live in the flat, a private person's or company's predkupné právo, a ban on transferring or encumbering the flat (zákaz prevodu / scudzenia / zaťaženia, obmedzenie prevodu) held by anyone but a bank, or a vecné bremeno of a kind the screen can't read |
-| ⚑ soft flag | Shown on a CLEAN (or rejected) flat, not a reason to reject: a utility / access vecné bremeno (lines, pipes, right of way) a predkupné právo of the state or a municipality, or a bank's zákaz scudzenia / zaťaženia that goes with its mortgage. `LV_SOFT_FLAGS_REJECT=1` rejects these too — a judgement call for you or your lawyer |
+| ⚑ soft flag | Shown on a CLEAN (or rejected) flat, not a reason to reject: a utility / access vecné bremeno (lines, pipes, right of way) a predkupné právo of the state or a municipality, a bank's zákaz scudzenia / zaťaženia that goes with its mortgage, or the owners' statutory lien of § 15 of Act 182/1993 (on most flats; in favour of the spoločenstvo or the other owners — ask the správca for a potvrdenie o bezdlžnosti). `LV_SOFT_FLAGS_REJECT=1` rejects these too — a judgement call for you or your lawyer |
 
 How a check runs:
 
@@ -785,6 +785,13 @@ latest one and the sidebar warns. Scores worked out under another year's table
 **Every January, add the new year to `TAX_YEAR_RULES`.** The personal bands
 are multiples of the životné minimum in force on 1 January (154.8×, 212.4× and
 264× from 2026), so recompute them when it changes.
+
+**Mortgage interest (personal).** The personal model leaves the mortgage
+interest out of the tax base. Slovak guidance says a person may deduct it for
+§ 6(3) rental as a provable expense; once your účtovník confirms that for your
+case, set `PERSONAL_INTEREST_DEDUCTIBLE=1` in `.env` and click ♻️ RESCORE ALL.
+On a €120,000 loan that lowers the modelled personal tax by roughly
+€650–900 a year, which matters for the personal-vs-s.r.o. answer.
 
 **Set `OTHER_ANNUAL_INCOME` in `.env`** to your yearly tax base from everything
 else (salary after your own contributions, other income), in EUR. The

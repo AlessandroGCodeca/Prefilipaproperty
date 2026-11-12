@@ -32,7 +32,7 @@ from config import (
     HOA_SMALL, HOA_MEDIUM, HOA_LARGE, HOA_PREMIUM,
     GREEN_DISCOUNT, YELLOW_DISCOUNT, NEAR_FLOOR_DISCOUNT, SRO_SETUP_COST,
     SRO_ANNUAL_RUNNING_COST, SRO_RATE_PREMIUM_PP, SRO_LTV_RATIO,
-    CASHFLOW_MIN_SURPLUS, OTHER_ANNUAL_INCOME,
+    CASHFLOW_MIN_SURPLUS, OTHER_ANNUAL_INCOME, PERSONAL_INTEREST_DEDUCTIBLE,
     RENT_PER_M2, INDUSTRIAL_ZONES, INDUSTRIAL_RENT_PREMIUM,
     PARKING_RENT_PREMIUM, FURNISHED_RENT_PREMIUM, SEMI_FURNISHED_PREMIUM,
     BALCONY_RENT_PREMIUM,
@@ -264,7 +264,8 @@ def personal_rental_base(rules: dict, *, noi_annual: float, rent_annual: float,
     """The rental income a person is taxed on, under the tax table's market.
 
     Slovakia (§6 ods. 3 ZDP): the net operating income less the €500
-    exemption; mortgage interest is not deducted.
+    exemption; mortgage interest is deducted only with
+    config.PERSONAL_INTEREST_DEDUCTIBLE (off until an účtovník confirms it).
     Czechia (§9 ZDP): the rent received less the larger of the actual
     expenses (running costs and mortgage interest; depreciation is left out,
     which over- rather than under-states the tax) and the flat-rate
@@ -275,7 +276,8 @@ def personal_rental_base(rules: dict, *, noi_annual: float, rent_annual: float,
     management)."""
     flat_rate = rules.get("rental_flat_expense_rate")
     if flat_rate is None:
-        return max(noi_annual - rules["rental_exemption"], 0)
+        deductible_interest = interest_annual if PERSONAL_INTEREST_DEDUCTIBLE else 0.0
+        return max(noi_annual - deductible_interest - rules["rental_exemption"], 0)
     flat = rent_annual * flat_rate
     cap = rules.get("rental_flat_expense_cap")
     if cap is not None:

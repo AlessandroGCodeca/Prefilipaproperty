@@ -55,6 +55,64 @@ def test_a_court_ban_on_disposal_is_still_distress_not_a_transfer_ban():
         == ["predbežné opatrenie"]
 
 
+# ── 4 · The owners' statutory lien (§ 15 of Act 182/1993) is flagged, not rejected ─
+@pytest.mark.parametrize("entry", [
+    "1 Záložné právo v zmysle § 15 zák. č. 182/1993 Z.z. v prospech vlastníkov bytov a "
+    "nebytových priestorov v dome súpisné číslo 1234, Z 1234/2005",
+    "1 Zákonné záložné právo podľa § 15 zákona č. 182/1993 Z. z. v prospech ostatných "
+    "vlastníkov bytov",
+    "1 Zákonné záložné právo v zmysle § 15 zákona NR SR č. 182/93 Z.z. v znení neskorších "
+    "predpisov",                                      # no creditor named: the act says it
+    "1 Záložné právo v prospech Spoločenstvo vlastníkov bytov Mlynská 5, Z 77/2010",
+])
+def test_the_owners_statutory_lien_is_a_soft_flag(entry):
+    from modules.debt_bot import _parse_lv
+    assert _hits(entry) == [("záložné právo", "soft", False)]
+    out = _parse_lv(HEAD + entry)
+    assert out["status"] == "PASS" and "bank lien" not in out["detail"]
+    assert "§ 15 of Act 182/1993" in out["soft_flags"][0]
+    assert "správca" in out["soft_flags"][0]          # what to do about it
+
+
+@pytest.mark.parametrize("entries, flags", [
+    # A private lien beside it still rejects.
+    ("1 Záložné právo v prospech Jozef Mrkvička podľa V 1234/2020\n"
+     "2 Záložné právo podľa § 15 zák. 182/1993 Z.z. v prospech vlastníkov bytov",
+     [("záložné právo", "hard", True), ("záložné právo", "soft", False)]),
+    # The owners enforcing it is distress.
+    ("1 Záložné právo § 15 zák. 182/1993 v prospech vlastníkov bytov\n"
+     "2 Začatie výkonu záložného práva v prospech vlastníkov bytov",
+     [("záložné právo", "soft", False), ("výkon záložného práva", "hard", True),
+      ("záložné právo", "soft", False)]),
+    # Another statutory lien (the tax office's) is no owners' lien.
+    ("1 Zákonné záložné právo v prospech Daňový úrad Bratislava podľa § 81 zák. 563/2009",
+     [("záložné právo", "hard", True)]),
+    # Another act's § 15, or Act 182/1993 without § 15, with a private creditor.
+    ("1 Záložné právo podľa § 15 zák. 40/1964 v prospech Ján Novák",
+     [("záložné právo", "hard", True)]),
+])
+def test_only_the_owners_lien_is_softened(entries, flags):
+    assert _hits(entries) == flags
+
+
+def test_the_owners_lien_rejects_when_soft_flags_do(monkeypatch):
+    from modules import lv_screen
+    monkeypatch.setattr(lv_screen, "LV_SOFT_FLAGS_REJECT", True)
+    assert _hits("1 Záložné právo § 15 zák. 182/1993 v prospech vlastníkov bytov") == [
+        ("záložné právo", "soft", True)]
+
+
+def test_a_czech_lien_for_owners_still_blocks():
+    # The Czech register has no such statutory lien: the rule is Slovak.
+    from modules import lv_screen_cz
+    assert lv_screen_cz.VOCABULARY.statutory_lien is None
+    hits = lv_screen_cz.screen_lv_cz(
+        "Výpis z katastru nemovitostí\nC Omezení vlastnického práva\n"
+        "  o Zástavní právo smluvní\n      Oprávnění pro Společenství vlastníků bytů Dlouhá 5\n"
+        "      V-123/2020-101\n")
+    assert [(h["flag"], h["blocking"]) for h in hits] == [("zástavní právo", True)]
+
+
 @pytest.fixture
 def db(monkeypatch, tmp_path):
     import database
@@ -66,21 +124,28 @@ def db(monkeypatch, tmp_path):
 def test_passes_from_the_older_rules_are_checked_again_once(db):
     from database.schema import _rescreen_lv_passes
     from tests.conftest import make_listing
-    for lid, market in (("sk1", "sk"), ("sk2", "sk"), ("cz1", "cz")):
+    for lid, market in (("sk1", "sk"), ("sk2", "sk"), ("sk3", "sk"), ("cz1", "cz"),
+                        ("cz2", "cz")):
         db.upsert_listing(make_listing(lid, market=market))
         db.set_lv_status(lid, "PASS", "", "clean")
-    db.set_lv_status("sk2", "REJECTED", "záložné právo", "private lien")
+    db.set_lv_status("sk2", "REJECTED", "záložné právo", "lien: vlastníkov bytov")
+    db.set_lv_status("sk3", "REJECTED", "exekúcia", "exekúcia EX 1/2024")
+    db.set_lv_status("cz2", "REJECTED", "zástavní právo", "private lien")
     conn = db.get_conn()
     try:
-        # A database screened under version 1 (before transfer bans).
+        # A database screened under version 1: before transfer bans (2) and
+        # before the owners' statutory lien became a soft flag (3).
         conn.execute("UPDATE app_state SET value = '1' WHERE key = 'lv_rules_sk'")
         conn.commit()
-        assert _rescreen_lv_passes(conn) == 1
+        assert _rescreen_lv_passes(conn) == 2
         conn.commit()
         assert _rescreen_lv_passes(conn) == 0                # once per version
     finally:
         conn.close()
-    assert _lv_status(db) == {"sk1": "PENDING", "sk2": "REJECTED", "cz1": "PASS"}
+    # The PASS (a ban may now reject it) and the lien rejection (the owners'
+    # lien may now pass) are checked again; distress and Czech verdicts stay.
+    assert _lv_status(db) == {"sk1": "PENDING", "sk2": "PENDING", "sk3": "REJECTED",
+                              "cz1": "PASS", "cz2": "REJECTED"}
     assert any(r["id"] == "sk1" for r in db.get_pending_lv())  # queued for the check
     # Checked again and clean: it stays PASS on the next start.
     db.set_lv_status("sk1", "PASS", "", "clean")
@@ -343,3 +408,29 @@ def test_housekeeping_purges_old_lv_texts(db, monkeypatch):
                 if "ousekeeping" in name)
     _result, msg = step()
     assert calls == [90] and "removed 3 LV text(s) older than 90 days" in msg
+
+
+# ── 6 · Mortgage interest in the personal tax base: a switch, off by default ──
+def test_interest_is_deducted_only_when_switched_on(db, monkeypatch):
+    from engine import financial
+    off = financial.analyse(100_000, 55, "Žilina", rent_override=900)
+    monkeypatch.setattr(financial, "PERSONAL_INTEREST_DEDUCTIBLE", True)
+    on = financial.analyse(100_000, 55, "Žilina", rent_override=900)
+    interest = off.mortgage_interest_monthly * 12
+    assert interest > 1_000
+    # 19 % of a year's interest less tax, every month.
+    assert off.income_tax_personal - on.income_tax_personal == pytest.approx(
+        interest * 0.19 / 12, abs=0.02)
+    assert on.surplus_personal > off.surplus_personal
+    assert on.income_tax_sro == off.income_tax_sro      # the company always deducted it
+    # The IRR's yearly tax uses the same base.
+    kw = dict(structure="PERSONAL", rent=900)
+    monkeypatch.setattr(financial, "PERSONAL_INTEREST_DEDUCTIBLE", False)
+    irr_off = financial.project_irr(100_000, 55, "Žilina", **kw).irr
+    monkeypatch.setattr(financial, "PERSONAL_INTEREST_DEDUCTIBLE", True)
+    assert financial.project_irr(100_000, 55, "Žilina", **kw).irr > irr_off
+
+
+def test_interest_is_left_out_by_default():
+    import config
+    assert config.PERSONAL_INTEREST_DEDUCTIBLE is False

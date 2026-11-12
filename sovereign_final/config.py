@@ -53,6 +53,14 @@ PROPERTIES_OWNED       = _env_int("PROPERTIES_OWNED", 0)
 # rental is taxed at 25 %, not 19 %. 0 taxes the rental as your only income.
 # Set in .env; Czechia has its own (CZ_OTHER_ANNUAL_INCOME, in Kč).
 OTHER_ANNUAL_INCOME    = _env_float("OTHER_ANNUAL_INCOME", 0)
+# Whether a person renting out a flat (§ 6 ods. 3 ZDP) may deduct the interest
+# on the mortgage that bought it. Slovak guidance says yes, as a provable
+# expense (§ 19 ods. 3 písm. t); the engine has always left it out, which
+# overstates the personal tax by 19–35 % of a year's interest and so favours
+# the s.r.o. Off until your účtovník confirms it for your case: set 1 in .env,
+# then ♻️ RESCORE ALL. (Czechia already deducts it: § 9 ZDP.)
+PERSONAL_INTEREST_DEDUCTIBLE = (os.getenv("PERSONAL_INTEREST_DEDUCTIBLE") or "0"
+                                ).strip().lower() in ("1", "true", "yes")
 
 # Rate-shock stress test. NBS makes banks test affordability (DSTI) at the
 # offered rate + 2 percentage points; a fixation ending in a higher-rate market
