@@ -85,6 +85,13 @@ section[data-testid="stSidebar"] {
 }
 
 /* Compact cards (ACTIVE SNAG LIST on a phone): title, price, class, surplus, one button */
+.lvc { font-family:var(--mono); font-size:0.72rem; line-height:1.7; color:#bcc8e0;
+       background:#0b0d14; border:1px solid #151924; border-radius:3px; padding:10px 12px;
+       margin-top:6px; max-height:420px; overflow:auto; white-space:pre-wrap; word-break:break-word; }
+.lvh { background:#5c1f1f; color:#ffb4ab; padding:0 3px; border-radius:2px; }
+.lvs { background:#4d3f00; color:#ffe082; padding:0 3px; border-radius:2px; }
+.lvb { background:#12381f; color:#a5d6a7; padding:0 3px; border-radius:2px; }
+.lvu { background:#2a2350; color:#d1c4e9; padding:0 3px; border-radius:2px; outline:1px dashed #7e57c2; }
 .cc { background:#0b0d14; border:1px solid #151924; border-left:3px solid #37474f;
       border-radius:3px; padding:10px 12px; margin-bottom:8px; }
 .cc.g { border-left-color:#00e676; } .cc.y { border-left-color:#ffd740; }

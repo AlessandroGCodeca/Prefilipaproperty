@@ -12,7 +12,7 @@ from dashboard.listing_cache import clear_listing_cache
 from dashboard.fmt import (
     _floor_label, _labels, _lv_link, _lv_state_t, _of100, _pct_or_dash,
     _quick_cadastre, _rent_fallback, _risk_label, amt, badge, esc, fp, last_seen_label,
-    market_badge,
+    lv_checked_label, market_badge,
     mkw, sgn, tier_badge,
 )
 
@@ -201,9 +201,10 @@ def render_card(l, v):
         soft_note = l.get("lv_soft_flags") or ""
         if soft_note and soft_note in lv_detail:
             soft_note = ""
+        # When the deed was last read: a PASS is as good as its date.
         for lv_note in (lv_detail, "" if lv_summary in lv_detail else lv_summary,
                         f"⚑ soft flags (not rejected — check with your lawyer): {soft_note}"
-                        if soft_note else ""):
+                        if soft_note else "", lv_checked_label(l, cz)):
             if lv_note:
                 st.markdown(
                     f'<div class="muted" style="margin-top:6px">⚖️ LV: {esc(lv_note)}</div>',
@@ -455,6 +456,9 @@ def render_card(l, v):
                     st.warning(f"Re-verify: {r.get('detail', r['status'])}")
             except Exception as e:
                 st.warning(f"Re-verify: {e}")
+
+        from dashboard.lv_view import render_part_c
+        render_part_c(l, _LV_DOCS)
 
         seen = last_seen_label(l, cz)
         seen = f" · {seen}" if seen else ""

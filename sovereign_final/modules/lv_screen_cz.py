@@ -126,7 +126,8 @@ _NON_BANK = (r"leasing|pojistovn|(?<!\w)auto(?!\w)|fa[ck]toring|invest(?!ic)|"
 # Raiffeisenbank, UniCredit, MONETA, mBank, the state housing funds, …).
 _BANK_RE = re.compile(
     rf"^(?!.*(?:{_NON_BANK})).*?(?:"
-    r"(?<!\w)bank(?:a|y|u|ou)?(?!\w)|(?<!\w)bance(?!\w)|sporiteln|"
+    # as a word or a word's ending ("Sberbank CZ", "Volksbank", "Citibank")
+    r"(?<!\w)\w*bank(?:a|y|u|ou)?(?!\w)|(?<!\w)\w*bance(?!\w)|sporiteln|"
     + "|".join(rf"(?<!\w){re.escape(fold(b))}(?!\w)" for b in _bank_names())
     + ")", re.S)
 # A Czech creditor's name keeps its dashes ("Wüstenrot - stavební spořitelna",

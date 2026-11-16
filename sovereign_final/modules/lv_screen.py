@@ -96,6 +96,36 @@ _RULES = (
     ("zákaz prevodu",  "encumbrance", r"zakaz\w*\s+(?:scudz|prevod|zatazen)\w*|"
                                       r"obmedzen\w*\s+(?:prevod|scudz)\w*"),
     ("predkupné právo", "encumbrance", r"predkupn\w*\s+prav\w*"),
+    # ── Entries the screen used to pass as clean (audit of 12 Nov 2026) ──
+    # A plomba: the cadastre has a proposal on file that will change the
+    # rights to the flat (a sale to someone else, a new lien). It is printed
+    # with the property, so it is read in every part. A pending "návrh na
+    # vklad" / "prebieha konanie" says the same in words (part C on).
+    ("plomba",         "encumbrance", r"(?<!\w)plomb\w*"),
+    ("prebiehajúce konanie", "encumbrance",
+     r"navrh\w*\s+na\s+vklad\w*|prebieha\w*\s+konan\w*|"
+     r"konan\w*\s+o\s+(?:povolen\w*\s+)?vklad\w*"),
+    # A right to live in or use the flat for life, written without the words
+    # "vecné bremeno" ("Právo doživotného bývania a užívania bytu …").
+    ("doživotné užívanie", "encumbrance",
+     r"dozivotn\w*\s+(?:\w+\s+){0,2}?(?:byvan|uzivan|prav)\w*|prav\w*\s+dozivotn\w*"),
+    ("právo spätnej kúpy", "encumbrance", r"spatn\w*\s+(?:kup|odkup)\w*"),
+    ("nájomné právo",  "encumbrance",
+     r"najomn\w*\s+(?:prav|zmluv|vztah)\w*|(?<!\w)najomc\w*"),
+    ("zádržné právo",  "encumbrance", r"zadrzn\w*\s+prav\w*"),
+    # The title itself is in doubt, or the owner can't dispose of the flat.
+    ("duplicitné vlastníctvo", "distress", r"duplicit\w*\s+vlastn\w*"),
+    ("spochybnená hodnovernosť", "distress",
+     r"hodnovernost\w*[^.]{0,80}?spochybn\w*|spochybn\w*[^.]{0,80}?hodnovernost\w*"),
+    ("obmedzenie nakladania", "distress",
+     r"obmedzen\w*\s+(?:naklad|dispozic)\w*|obmedzen\w*\s+vlastnick\w*\s+prav\w*"),
+    ("nútená správa",  "distress",    r"nuten\w*\s+sprav\w*"),
+    ("vyvlastnenie",   "distress",    r"(?<!\w)vyvlast\w*"),
+    # Restructuring, debt relief, protection from creditors: insolvency by
+    # another name ("konkurz" has its own rule).
+    ("reštrukturalizácia", "distress",
+     r"restrukturaliz\w*|(?<!\w)oddlzen\w*|splatkov\w*\s+kalendar\w*|"
+     r"ochran\w*\s+pred\s+veritel\w*"),
     ("zabezpečovacie prevodné právo", "lien",
      r"zabezpecovac\w*\s+prevodn\w*\s+prav\w*"),
     ("záložné právo",  "lien",        r"zalozn\w*\s+prav\w*"),
@@ -109,7 +139,11 @@ _COMPILED = [(label, kind, re.compile(pat)) for label, kind, pat in _RULES]
 # 3: the owners' statutory lien (§ 15 of Act 182/1993) is a soft flag — this
 #    one can turn a stored REJECT into a PASS, so lien rejections are checked
 #    again too.
-RULES_VERSION = 3
+# 4: twelve more kinds of entry (plomba, lifetime use without "vecné bremeno",
+#    restrictions on disposal, …), a part C entry no rule names no longer
+#    passes (unrecognised_entries), and one-word bank names ("Privatbanka",
+#    "SLSP") are banks: PASS verdicts and lien rejections are checked again.
+RULES_VERSION = 4
 
 # Who a lien is in favour of. "v prospech" is the register's standard wording;
 # the others turn up in older entries.
@@ -135,7 +169,9 @@ _LIMITED_COMPANY = r"(?<!\w)s\.?\s?r\.?\s?o(?!\w)|(?<!\w)spol\.?\s+s\s+r\.?\s?o"
 _NON_BANK = r"leasing|poistov|fa[ck]toring|invest(?!ic)|druzstv|" + _LIMITED_COMPANY
 _BANK_RE = re.compile(
     rf"^(?!.*(?:{_NON_BANK})).*?(?:"
-    r"(?<!\w)bank(?:a|y|e|u|ou|ovi|ami)?(?!\w)|sporiteln|"
+    # "banka" / "bank" as a word or a word's ending: Privatbanka, and the
+    # names old liens still carry (Istrobanka, Volksbank, Sberbank, Citibank).
+    r"(?<!\w)\w*bank(?:a|y|e|u|ou|ovi|ami)?(?!\w)|sporiteln|"
     + "|".join(rf"(?<!\w){re.escape(fold(b))}(?!\w)" for b in LV_BANK_NAMES)
     + ")", re.S)
 
@@ -271,6 +307,19 @@ def _holder_is_company(entry_text: str) -> bool:
                 or _LEGAL_FORM_RE.match(rest[len(name):].lstrip(" \t\r\n,")))
 
 
+# Kinds of entry whose tier doesn't depend on who holds them.
+_FIXED_TIERS = {
+    "doživotné užívanie": ("hard", "lifetime right to use or live in it"),
+    "právo spätnej kúpy": ("hard", "someone holds a right to buy it back"),
+    "nájomné právo":      ("hard", "a lease is registered on it — it binds a new owner"),
+    "zádržné právo":      ("hard", "a creditor's right to retain it"),
+    "plomba":             ("soft", "a change of rights is pending at the cadastre (plomba) — "
+                                   "find out what it is before an offer"),
+    "prebiehajúce konanie": ("soft", "proceedings on it are pending at the cadastre — "
+                                     "find out what they are before an offer"),
+}
+
+
 def _tier(label: str, entry_text: str, holder: str) -> tuple[str, str]:
     """("hard" | "soft", why) for an easement or a pre-emption right, from its
     own entry's text (folded) and the holder's name."""
@@ -281,6 +330,8 @@ def _tier(label: str, entry_text: str, holder: str) -> tuple[str, str]:
                 _holder_is_company(entry_text) and _TECHNICAL_RE.search(fold(holder))):
             return "soft", "utility / access easement"
         return "hard", "kind of easement not recognised"
+    if label in _FIXED_TIERS:
+        return _FIXED_TIERS[label]
     if label == "zákaz prevodu":
         # A bank registers one with its mortgage, and it is lifted when the
         # loan is repaid from the price. Anyone else's — a town's or ŠFRB's on
@@ -344,6 +395,10 @@ class Vocabulary:
     # (folded entry text, creditor) -> a non-bank lien that is flagged, not
     # blocking (Slovakia's § 15 owners' lien); None: every non-bank lien blocks.
     statutory_lien: object = None
+    # {label: label}: a hit of the first is part of the second's entry when
+    # that one came just before it ("Vecné bremeno - právo doživotného
+    # užívania" is one easement, not an easement and a lifetime right).
+    absorbed_by: tuple = ()
 
 
 # Where part C (ťarchy — the encumbrances) starts in the report's text:
@@ -377,8 +432,10 @@ SK_VOCABULARY = Vocabulary(
     holder_markers=_CREDITOR_MARKERS[:1], reference_before=_REFERENCE_BEFORE,
     bank_re=_BANK_RE, name_end=_NAME_END, tier=_tier, entry_no_re=_ENTRY_NO_RE,
     distress_lien_prefix="exeku",
-    part_c_only=frozenset({"dražba", _OWNERSHIP_RULING_RE}), part_c_at=part_c_start,
+    part_c_only=frozenset({"dražba", "prebiehajúce konanie", _OWNERSHIP_RULING_RE}),
+    part_c_at=part_c_start,
     statutory_lien=_statutory_owners_lien,
+    absorbed_by=(("doživotné užívanie", "vecné bremeno"),),
 )
 
 
@@ -419,9 +476,14 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
                         gap <= _ENTRY_SPAN
                         and not v.entry_no_re.search(low, last_seen[label], start)):
                     continue
+            absorber = dict(v.absorbed_by).get(label)
+            if (absorber in last_seen and start - last_seen[absorber] <= _ENTRY_SPAN
+                    and not v.entry_no_re.search(low, last_seen[absorber], start)):
+                continue
             last_seen[label] = start
             entry = {"flag": label, "kind": kind, "blocking": True, "tier": "hard",
-                     "creditor": None, "note": None, "excerpt": _excerpt(text, start)}
+                     "creditor": None, "note": None, "excerpt": _excerpt(text, start),
+                     "at": start}
             if kind == "encumbrance":
                 # The entry runs to the next entry's number or another kind
                 # of hit, so another entry's wording can't soften this one.
@@ -585,7 +647,7 @@ def screen_lv(lv_text, vocabulary: Vocabulary | None = None) -> list[dict]:
         entry = {"flag": label, "kind": kind, "blocking": not bank,
                  "tier": "hard" if not bank else None,
                  "creditor": creditor or None, "note": None,
-                 "excerpt": _excerpt(text, start)}
+                 "excerpt": _excerpt(text, start), "at": start}
         if not bank and v.statutory_lien is not None:
             # This entry only: to the next hit or register number.
             entry_end = min(nxt, end + _ENTRY_SPAN)
@@ -613,6 +675,121 @@ def _holder(text: str, low: str, end: int, entry_end: int,
         return ""
     start = end + m.end()
     return _creditor_name(text[start:min(entry_end, start + _CREDITOR_SPAN)], v.name_end)
+
+
+# ── The safety net: an entry no rule names ───────────────────────────────────
+# Words that announce a right, a restriction, a note or proceedings. In part C
+# each of them should sit in an entry one of the rules names; one that doesn't
+# belongs to a kind of entry this screen doesn't know, so the title can't be
+# called clean on the screen's word alone (modules/debt_bot.check_flat_lv).
+_GENERIC_BURDEN_RE = re.compile(
+    r"(?<!\w)prav[oa](?!\w)|(?<!\w)zakaz\w*|(?<!\w)obmedzen\w*|(?<!\w)poznamk\w*|"
+    r"(?<!\w)konan\w*|(?<!\w)spor(?:u|y|e|om|ov|och|n\w*)?(?!\w)|"
+    r"(?<!\w)najom\w*|(?<!\w)bremen\w*")
+# The ones that only label or describe an entry ("Poznámka: Exekučný príkaz …",
+# "právo zodpovedajúce vecnému bremenu") may come just before the words a
+# rule knows. A ban, a restriction, a lease, a dispute or proceedings must be
+# named by a rule itself, or follow one in its entry.
+_LABEL_WORD_RE = re.compile(r"prav[oa]|poznamk\w*|bremen\w*")
+# "Poznámka: Bez zápisu", "Poznámky: žiadne" — the section is empty.
+_NO_ENTRY_AFTER_RE = re.compile(
+    r"\w*\s*[:\-–]?\s*(?:bez\s+(?:zapisu|zapisov|tiarch|poznam\w*|udajov)|ziadn\w*)")
+# "… prevod vlastníckeho práva …" names the ownership itself, not a burden.
+_OWNERSHIP_BEFORE_RE = re.compile(r"vlastnick\w*\s+$")
+_EXPLAINED_BEFORE = 80     # a rule's entry may open this far before its words
+_EXPLAINED_AFTER = 300     # … and run this far after them, or to the next entry
+# Where the entry after a recognised one starts, when it has no register
+# number of its own: the report's next section ("Iné údaje:", "Poznámka:"),
+# or an ordinal and a capitalised word ("6 Právo stavby …").
+_SECTION_RE = re.compile(r"(?<!\w)(?:ine\s+udaje|poznamk\w*)\s*:")
+_ORDINAL_ENTRY_RE = re.compile(r"(?<![\w./,])\d{1,3}\.?\s+(?=[A-ZÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ][a-záäčďéíĺľňóôŕšťúýž])")
+
+
+def _unknown_at(text: str, low: str, v: Vocabulary) -> tuple[int | None, list[int]]:
+    """(where part C's text starts, where each unrecognised entry's telling
+    word is) — (None, []) without a part C heading."""
+    heading = _PART_C_RE.search(low)
+    if not heading:
+        return None, []
+    start = heading.end()
+    # Where each recognised entry's own text may lie: from a little before
+    # the rule's words (never past the entry number that opens it) to the
+    # next entry's heading.
+    zones, before = [], []
+    for _label, _kind, rx in v.rules:
+        for m in rx.finditer(low, start):
+            a = max(start, m.start() - _EXPLAINED_BEFORE)
+            for n in v.entry_no_re.finditer(low, a, m.start()):
+                a = n.end()
+            before.append((a, m.start()))
+            a = m.start()
+            b = min(len(low), m.end() + _EXPLAINED_AFTER)
+            heads = [h.start() for h in (_SK_ENTRY_HEAD_RE.search(low, m.end(), b),
+                                         _SK_NEW_ENTRY_RE.search(text, m.end(), b),
+                                         _SECTION_RE.search(low, m.end(), b),
+                                         _ORDINAL_ENTRY_RE.search(text, m.end(), b)) if h]
+            zones.append((a, min(heads, default=b)))
+    out, reported_to = [], -1
+    for g in _GENERIC_BURDEN_RE.finditer(low, start):
+        at = g.start()
+        if at < reported_to or any(a <= at < b for a, b in zones):
+            continue
+        if _LABEL_WORD_RE.fullmatch(g.group()) and any(a <= at < b for a, b in before):
+            continue
+        if _NO_ENTRY_AFTER_RE.match(low, g.end()) or _OWNERSHIP_BEFORE_RE.search(low[max(0, at - 16):at]):
+            continue
+        reported_to = at + _UNKNOWN_SPAN
+        out.append(at)
+    return start, out
+
+
+_UNKNOWN_SPAN = 90      # how much of an unrecognised entry is quoted
+
+
+def unrecognised_entries(lv_text, vocabulary: Vocabulary | None = None) -> list[str]:
+    """Excerpts of part C that announce a right, a restriction, a note or
+    proceedings which none of the rules names — a kind of entry this screen
+    doesn't know. Empty when every such word sits in a recognised entry, and
+    when the text has no part C heading to read from (check_flat_lv handles
+    that case itself)."""
+    text = str(lv_text or "")
+    start, found = _unknown_at(text, fold(text), vocabulary or SK_VOCABULARY)
+    return [re.sub(r"\s+", " ", text[max(start, at - 30):at + _UNKNOWN_SPAN]).strip(" .:-–")
+            for at in found]
+
+
+def part_c_marks(lv_text, vocabulary: Vocabulary | None = None) -> list[tuple[str, str]]:
+    """Part C of an LV as (text, mark) pieces for the dashboard's "Read part
+    C": mark is "hard" (blocks), "soft" (flagged), "bank" (an ordinary bank
+    lien), "unknown" (an entry no rule names) or "" (plain text). [] when the
+    text has no part C heading."""
+    v = vocabulary or SK_VOCABULARY
+    text = str(lv_text or "")
+    low = fold(text)
+    start = part_c_start(text)
+    if start is None:
+        return []
+    spans = []
+    for e in screen_lv(text, v):
+        if e.get("at") is None or e["at"] < start:
+            continue
+        mark = ("hard" if e["blocking"] else "soft" if e.get("tier") == "soft" else "bank")
+        spans.append((e["at"], e["at"] + 60, mark))
+    spans += [(at, at + _UNKNOWN_SPAN, "unknown") for at in _unknown_at(text, low, v)[1]]
+    spans.sort()
+    pieces, pos = [], start
+    for i, (a, b, mark) in enumerate(spans):
+        if a < pos:
+            continue
+        # A mark never runs into the next entry's.
+        b = min(b, len(text), *(n[0] for n in spans[i + 1:i + 2]))
+        if a > pos:
+            pieces.append((text[pos:a], ""))
+        pieces.append((text[a:b], mark))
+        pos = b
+    if pos < len(text):
+        pieces.append((text[pos:], ""))
+    return pieces
 
 
 def describe(entry: dict) -> str:

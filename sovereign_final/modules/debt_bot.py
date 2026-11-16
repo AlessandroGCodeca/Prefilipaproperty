@@ -37,14 +37,14 @@ import re
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import LV_RECHECK_DAYS
+from config import LV_RECHECK_DAYS, LV_PASS_RECHECK_DAYS, LV_PASS_RECHECK_DEAL_DAYS
 from database import (
     get_pending_lv, get_lv_row, set_lv_status, set_lv_analysis,
     set_parcel_data, set_flat_lv, reset_demo_rejections, init_db,
     queue_lv_check,
 )
 from kataster_scraper import enrich_parcel, enrich_lv, parcel_at, fold
-from modules.lv_screen import screen_lv, describe, part_c_start
+from modules.lv_screen import screen_lv, describe, part_c_start, unrecognised_entries
 from engine.regional_prices import kraj_for_district
 from modules.llm_enrichment import (
     is_enabled as claude_enabled, analyze_lv as claude_analyze_lv,
@@ -132,6 +132,18 @@ def check_flat_lv(area, lv_no, refresh: bool = False) -> dict:
                 f"LV {lv_no}: the cadastre's answer has no part C ('ČASŤ C: ŤARCHY') — "
                 f"not a readable LV (an error or maintenance page?), so its "
                 f"encumbrances weren't read.")
+        # Nothing the rules know blocks — but part C may hold an entry worded
+        # in a way no rule names. The screen can't call that clean: Claude
+        # reads it when a key is set (_decide_lv), otherwise you do.
+        unknown = unrecognised_entries(text)
+        if unknown:
+            shown = "; ".join(f"“{u[:70]}”" for u in unknown[:3])
+            return _unverified(
+                f"LV {lv_no}: nothing the screen knows blocks, but part C holds "
+                f"{len(unknown)} entr{'y' if len(unknown) == 1 else 'ies'} it has no rule "
+                f"for ({shown}) — read part C before relying on this title.",
+                raw=text, unknown_entries=unknown,
+                soft_flags=decision.get("soft_flags") or [])
     flats = _flat_numbers(text)
     if decision["status"] == "REJECT" and len(flats) > 1:
         # A shared LV: a lien on it may sit on another flat's share.
@@ -261,7 +273,10 @@ def _decide_lv(api_result: dict) -> dict:
     if not claude_enabled():
         return api_result
     raw = api_result.get("raw")
-    if not raw or api_result.get("status") == "UNVERIFIED":
+    # An UNVERIFIED result carries no deed to read — except one the screen
+    # held back for an entry it has no rule for: Claude reads that deed.
+    unknown = api_result.get("unknown_entries") or []
+    if not raw or (api_result.get("status") == "UNVERIFIED" and not unknown):
         return api_result
 
     # A Czech LV (modules/lv_cz) is read with the Czech prompt; a Slovak one
@@ -308,11 +323,20 @@ def _decide_lv(api_result: dict) -> dict:
             "detail": f"{api_result.get('detail', '')} (Claude read it as "
                       f"{level}; {why})",
         })
+    elif unknown and not saw_whole_lv:
+        # Claude may not have seen the entry the screen has no rule for.
+        return api_result
     else:
         decided.update({
             "status": "PASS",
             "detail": note or api_result.get("detail", "Clean title"),
         })
+        if unknown:
+            # Claude read the entries the screen has no rule for and found
+            # them harmless: said on the card, so you can read them too.
+            decided["soft_flags"] = decided["soft_flags"] + [
+                f"entry the keyword screen has no rule for, read by Claude as "
+                f"{level}: “{u[:70]}”" for u in unknown[:3]]
     return decided
 
 
@@ -354,7 +378,9 @@ def run_debt_filter(progress_callback=None, market: str | None = None) -> tuple[
     if healed:
         log.info(f"♻️  Reset {healed} fabricated [DEMO] rejections back to PENDING.")
 
-    pending = get_pending_lv(recheck_days=LV_RECHECK_DAYS, market=market)
+    pending = get_pending_lv(recheck_days=LV_RECHECK_DAYS, market=market,
+                             pass_days=LV_PASS_RECHECK_DAYS,
+                             deal_days=LV_PASS_RECHECK_DEAL_DAYS)
     if not pending:
         log.info("✅ No pending LV checks.")
         return 0, 0, 0
@@ -367,7 +393,10 @@ def run_debt_filter(progress_callback=None, market: str | None = None) -> tuple[
         if progress_callback:
             progress_callback(i + 1, len(pending), addr)
 
-        result = _check_and_store(row)
+        # A PASS due again is read from the cadastre itself: the cached copy
+        # is the deed as it was when the tick was given.
+        again = (row.get("lv_status") or "") in ("PASS", "CLEAN")
+        result = _check_and_store(row, refresh=True) if again else _check_and_store(row)
         if result["status"] == "REJECT":
             rejected += 1
             log.warning(f"  ❌ {addr} — {result['detail']}")

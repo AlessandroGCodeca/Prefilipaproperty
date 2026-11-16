@@ -663,6 +663,30 @@ def enrich_lv(cadastral_area: str, lv_no, refresh: bool = False) -> dict:
     return result
 
 
+def cached_lv_text(cadastral_area, lv_no) -> tuple[str, str] | None:
+    """(LV text, when it was fetched) from the cache alone — whatever its
+    age, and never the cadastre itself: the dashboard shows the deed the last
+    check read. None when there is none (never fetched, or deleted after
+    LV_TEXT_RETENTION_DAYS)."""
+    if not cadastral_area or not lv_no:
+        return None
+    key = f"lv|{_norm(str(cadastral_area))}|{_norm(str(lv_no))}"
+    conn = database.get_conn()
+    try:
+        _ensure_cache_table(conn)
+        row = conn.execute("SELECT result_json, fetched_at FROM cadastre_cache "
+                           "WHERE cache_key=? AND status='OK'", (key,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    try:
+        text = json.loads(row[0]).get("lv_text")
+    except ValueError:
+        return None
+    return (text, row[1]) if text else None
+
+
 # ── demo / self-test ─────────────────────────────────────────────────────────
 def _print_result(result: dict):
     printable = dict(result)

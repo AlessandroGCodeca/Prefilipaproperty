@@ -333,6 +333,12 @@ CADASTRAL_BACKOFF_MAX  = 60
 # the flat's LV number) is retried after this many days — portal outages and
 # approximate pins shouldn't park a listing for good.
 LV_RECHECK_DAYS        = 7
+# A PASS says the deed was clean on the day it was read. The daily LV step
+# reads a PASS again once it is this old, and weekly for a deal you have in
+# OFFER or later (DEAL PIPELINE): an exekúcia entered since then must not hide
+# behind an old tick. The card shows the date of the check. 0 never re-reads.
+LV_PASS_RECHECK_DAYS      = _env_int("LV_PASS_RECHECK_DAYS", 30)
+LV_PASS_RECHECK_DEAL_DAYS = _env_int("LV_PASS_RECHECK_DEAL_DAYS", 7)
 # Title-deed texts name owners, their addresses and their creditors. The daily
 # housekeeping deletes the cadastre's cached LV texts fetched longer ago than
 # this, and the LV texts of listings off the market that long (a deal you
@@ -353,6 +359,10 @@ LV_TEXT_RETENTION_DAYS = _env_int("LV_TEXT_RETENTION_DAYS", 180)
 LV_BANK_NAMES = [
     "vúb", "čsob", "unicredit", "oberbank", "mbank", "365.bank",
     "štátny fond rozvoja bývania", "šfrb",
+    # Abbreviations banks are entered under: Slovenská sporiteľňa, Prvá
+    # stavebná sporiteľňa (since 2021 "PSS, a. s."), Slovenská záručná a
+    # rozvojová banka.
+    "slsp", "pss", "szrb",
 ]
 
 # Easements and pre-emption rights come in two tiers (modules/lv_screen):
