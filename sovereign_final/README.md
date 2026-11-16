@@ -34,8 +34,8 @@ older Python beside it.
 The first start installs the libraries and the scrapers' browser (Chromium)
 into `.venv/` — a few minutes; later starts take seconds, and a newer
 `requirements.txt` is installed on the next start. Keep the Terminal window it
-opens: closing it (or Ctrl+C) stops the dashboard. Double-clicking the file
-while the dashboard runs just opens the page again.
+opens: closing it (or Ctrl+C) stops the dashboard and the scheduler. Double-clicking
+the file while the dashboard runs just opens the page again.
 
 If macOS won't open the file ("Apple could not verify…", usual for a
 downloaded file), click **Open Anyway** in System Settings → Privacy &
@@ -45,10 +45,13 @@ Security, or start it once from Terminal in `sovereign_final/`:
 bash "Start Sovereign.command"
 ```
 
-No scheduler runs without Docker: click **▶ RUN EVERYTHING** in the sidebar to
-refresh everything (or run `python scheduler.py` in a second Terminal window,
-from `sovereign_final/` with `.venv/bin/activate` sourced, for the daily 06:00
-run).
+The start file also starts the **scheduler** beside the dashboard: the daily
+06:00 run (backup, every portal, LV checks, scoring, Telegram alerts), as
+Docker's second container does it. It runs while the Terminal window is open;
+a 06:00 missed while the Mac slept runs when it wakes, and on its first start
+it runs at once when no run has finished since the last 06:00. Its lines go to
+`logs/scheduler.log`. `SOVEREIGN_NO_SCHEDULER=1` leaves it out (then click
+**▶ RUN EVERYTHING** yourself).
 
 The start file serves the dashboard to this Mac only (`--server.address
 127.0.0.1`), as `docker-compose.yml` does. A bare `streamlit run app.py`
@@ -293,26 +296,27 @@ sovereign_final/
 
 ## Dashboard Tabs
 
-The twelve tabs sit in three groups (one row of them overflowed at 1440 px):
+The thirteen tabs sit in three groups (one row of them overflowed at 1440 px):
 
 - **🎯 DEALS** — TRIAGE TABLE, ACTIVE SNAG LIST, MAP, SATELLITE VIEWER
 - **📊 ANALYSIS** — WHAT-IF / TAX, COMPARE, RENT COMPS, TAX RATES
-- **🗂 WORKFLOW** — DEAL PIPELINE, LV TO-DO, REJECTED, ONE-CLICK CLOSE
+- **🗂 WORKFLOW** — DEAL PIPELINE, LV TO-DO, REJECTED, ONE-CLICK CLOSE, ALERTS
 
 | Tab | What it does |
 |-----|-------------|
 | TRIAGE TABLE | Flat, sortable view of every scored listing — grade, price, **max offer** (🟡/🟢), ask vs max offer, below-market %, rent, surplus, **+2 pp stress**, gross yield, cap rate, **IRR**, **days tracked** (since the first scrape — not the portal's posting date), **price change**, **portals**, deal stage, vibe, LV status, **⛔ cash-flow negative**. Grade, Title, Price and Surplus stay pinned on the left; **Hide columns** hides any other, and **⬇️ CSV** downloads every row and column of the filtered table (opens in Excel) |
-| ACTIVE SNAG LIST | 🟢🟡 deal cards, 25 a page per class, each built when you open it (⚪ WHITE listings are one table, not cards): cost breakdown (the s.r.o.'s own loan and running cost), financing stress (+2 pp, 70% LTV), location risk with sources, price history, other portals' copies, deal stage, vibe notes, **PDF memo**, LV status and flat-LV verify; a ⛔ CASH-FLOW NEGATIVE badge and a ⚠ rent-fallback warning where they apply |
+| ACTIVE SNAG LIST | 🟢🟡 deal cards, 25 a page per class, each built when you open it (⚪ WHITE listings are one table, not cards): cost breakdown (the s.r.o.'s own loan and running cost), financing stress (+2 pp, 70% LTV), location risk with sources, price history, other portals' copies, deal stage, vibe notes, **PDF memo**, **📑 offer sheet** (one page for the viewing: your max offer, the flats like it listed now, time on the market and price cuts), **Why grade A?** (the grade's parts and their points), LV status with the date of the check, flat-LV verify and **📜 Read part C** (the deed's encumbrances, marked: blocks, flagged, bank lien, no rule for it); a ⛔ CASH-FLOW NEGATIVE badge and a ⚠ rent-fallback warning where they apply |
 | MAP | Every listing with coordinates, coloured by class or by monthly cash flow (faded = area-level geocode). **Group nearby pins** draws neighbours as one circle with their count; **Near** narrows the map to the listings within 1–50 km of a point — an address, or coordinates as `48.1486, 17.1077`. The distance is a straight line: travel time would need a routing service |
-| WHAT-IF / TAX | The tax toggle calculator: any listing (or a custom one) re-run with your own price, rate, LTV, term, rent, hold period, growth and exit costs, and the s.r.o.'s loan premium, LTV and running cost — personal vs s.r.o. side by side, rate-shock table, IRR, max offer |
+| WHAT-IF / TAX | The tax toggle calculator: any listing (or a custom one) re-run with your own price, rate, LTV, term, rent, hold period, growth and exit costs, and the s.r.o.'s loan premium, LTV and running cost — personal vs s.r.o. side by side, rate-shock table, IRR, max offer. **🏦 Compare mortgage offers**: two or three banks' offers (rate, years fixed, the rate you expect after, term, LTV, fees) worked through the hold with the payment recomputed when each fixation ends |
 | COMPARE | Two to four listings side by side, one column each: price and price per m², the regional median, rent and yield, the surplus under both structures and the better one, IRR, the title deed, location and risk flags, days tracked, price change |
-| DEAL PIPELINE | Board of the deals you're working: WATCHING → VIEWING → OFFER → NEGOTIATING → DUE DILIGENCE → NOTARY → CLOSED / PASSED, with a timeline per deal |
+| DEAL PIPELINE | Board of the deals you're working: WATCHING → VIEWING → OFFER → NEGOTIATING → DUE DILIGENCE → NOTARY → CLOSED / PASSED, with a timeline per deal. For the deal picked: a **due-diligence checklist** (twelve checks from the viewing to the meter readings), its **documents** (LV, the správca's confirmation, energy certificate, bank offer, contract — kept in the database and so in the backup) and the **letter to the správca / SVJ** asking for the confirmation of no arrears, the repair fund, the building's loans and planned works |
 | SATELLITE VIEWER | Listing photo vs Google satellite + Street View + vibe score, and every note saved for the listing |
 | REJECTED | Every LV rejection with its reason, detail and LV risk read; re-verify from here |
 | LV TO-DO | Every GREEN / YELLOW deal whose title deed isn't verified, with what the plot check found; type the flats' own LV numbers in bulk, then save (checked on the next LV run) or save & verify now (in the background, like the pipeline buttons) |
 | RENT COMPS | Live €/m² per district from prenájom listings vs the baseline table; in the Czech view, live Kč/m² per town vs the Deloitte Rent Index, and the Czech towns whose listings wait unscored for a rent figure |
 | TAX RATES | Slovakia: each town's flat property-tax rate — what the engine charges, what the town's own site says, and the source; a doubtful reading waits here to be accepted or turned down, and a town whose site blocks automated requests takes an uploaded ordinance. Czechia: every municipality's size and local coefficients with the ordinances they come from, and a lookup by place. One click re-reads both countries |
 | ONE-CLICK CLOSE | Pre-filled Slovak notary contract draft with download; the deal's numbers are a separate download, not part of the draft |
+| ALERTS | The Telegram alert rules: saved searches by market, class, grade, district, size, price and least monthly surplus; what fits them now |
 
 A 🔻 banner above the tabs lists price cuts from the last 14 days (the 50
 latest, built when you open it), and says
@@ -328,6 +332,14 @@ In ACTIVE SNAG LIST, **📱 Compact cards** shows each deal as its title, price,
 class and monthly surplus with one button that opens the listing — for a
 phone. Every full card ends with when a portal last showed the listing
 ("last seen 4 days ago"; ⚠ from a week on: it may be gone).
+
+The sidebar's **Figures shown** picks whose surplus, costs, IRR and stress
+test the page shows: **Recommended** (the default — for each flat the
+structure the engine recommends, personal for most), Personal or s.r.o. The ⛔
+flag, the cash-flow filter and the alerts use the same rule. **👤 YOUR
+SITUATION** holds your own figures — other income, properties owned, your
+bank's rate, term and loan share, and the Czech ones — saved to
+`data/settings.json` (they outrank `.env`); saving re-scores every listing.
 
 Each listing also gets a **composite deal grade (A–D)** blending financial
 (cap rate + discount to the regional median), location, energy class,
@@ -545,7 +557,27 @@ Existing scores from the old rule are cleared once on upgrade — run
 | ✅ CLEAN | The flat's **own** LV was read and nothing on it blocks |
 | ⚠ UNVERIFIED | No LV of this flat was read — the card says how far the check got |
 | ❌ REJECTED | The flat's own LV has a non-bank lien, exekúcia, konkurz, súdny spor, a lifetime right to use or live in the flat, a private person's or company's predkupné právo, a ban on transferring or encumbering the flat (zákaz prevodu / scudzenia / zaťaženia, obmedzenie prevodu) held by anyone but a bank, or a vecné bremeno of a kind the screen can't read |
-| ⚑ soft flag | Shown on a CLEAN (or rejected) flat, not a reason to reject: a utility / access vecné bremeno (lines, pipes, right of way) a predkupné právo of the state or a municipality, a bank's zákaz scudzenia / zaťaženia that goes with its mortgage, or the owners' statutory lien of § 15 of Act 182/1993 (on most flats; in favour of the spoločenstvo or the other owners — ask the správca for a potvrdenie o bezdlžnosti). `LV_SOFT_FLAGS_REJECT=1` rejects these too — a judgement call for you or your lawyer |
+| ⚑ soft flag | Shown on a CLEAN (or rejected) flat, not a reason to reject: a utility / access vecné bremeno (lines, pipes, right of way) a predkupné právo of the state or a municipality, a bank's zákaz scudzenia / zaťaženia that goes with its mortgage, the owners' statutory lien of § 15 of Act 182/1993 (on most flats; in favour of the spoločenstvo or the other owners — ask the správca for a potvrdenie o bezdlžnosti), or a **plomba** / a pending návrh na vklad (a change of rights is under way — find out what before an offer). `LV_SOFT_FLAGS_REJECT=1` rejects these too — a judgement call for you or your lawyer |
+
+Also REJECTED, since the audit of 12 Nov 2026: a lifetime right to live in or
+use the flat however it is worded, a buy-back right, a registered lease, a
+retention right (zádržné právo), duplicate ownership, doubted cadastre data,
+a restriction on disposal (obmedzenie nakladania), forced administration,
+expropriation, and restructuring / debt relief. A bank is one whose name ends
+in "-banka" / "-bank" too (Privatbanka, Volksbank, Sberbank) or SLSP / PSS /
+SZRB.
+
+**An entry the screen has no rule for no longer passes.** Part C is read for
+words that announce a right, a ban, a restriction, a note or proceedings; one
+that sits in no recognised entry makes the verdict ⚠ UNVERIFIED ("part C holds
+an entry the screen has no rule for — read it"). With an Anthropic key, Claude
+reads such a deed and its verdict stands, the entry shown as a soft flag.
+
+**A PASS is read again**: from the cadastre itself once it is
+`LV_PASS_RECHECK_DAYS` (30) old, and weekly (`LV_PASS_RECHECK_DEAL_DAYS`) for a
+deal in OFFER or later. The card shows when the deed was checked, with a ⚠ on
+a PASS over 30 days old. **📜 Read part C** on the card shows the stored deed's
+part C with the screen's reading marked.
 
 How a check runs:
 
@@ -613,9 +645,10 @@ Slovak IP — skgeodesy.sk geo-blocks many foreign ones.
 
 | | Personal (FO) | s.r.o. |
 |--|---------|--------|
-| Income Tax | 19% / 25% / 30% / 35% — bands to €43,983 / €60,349 / €75,010 (154.8× / 212.4× / 264× the životné minimum), applied on top of `OTHER_ANNUAL_INCOME` | 10% reduced (≤€100k rev) / 21% |
+| Income Tax | 19% / 25% / 30% / 35% — bands to €43,983 / €60,349 / €75,010 (154.8× / 212.4× / 264× the životné minimum), applied on top of `OTHER_ANNUAL_INCOME` | 10% reduced (≤€100k rev) / 21%, **at least the minimum tax** (€340 a year at income up to €50,000, also in a loss year) |
 | Health Levy | **0%** — passive §6(3) rental is exempt from zdravotné odvody | 0% |
-| Dividend tax on distribution | n/a | 10% (→ effective double taxation) |
+| Dividend tax on distribution | n/a | **7%** on profit from 2025 on (10% applied to 2024's only) |
+| Depreciation | not modelled | the flat over 40 years (group 6), up to the rent it earned that year; what was written off comes back as gain when the company sells. `SRO_DEPRECIATION=0` leaves it out |
 | Loan | hypotéka 3.8% p.a., 80% LTV (70% for a 3rd+ flat) | company loan: rate + `SRO_RATE_PREMIUM_PP` (1 pp), at most `SRO_LTV_RATIO` (70%) |
 | Running cost | — | `SRO_ANNUAL_RUNNING_COST` €1,200/yr (bookkeeping, accounts, office), deductible |
 
@@ -819,9 +852,16 @@ were your only income, which understates the tax for most people who work.
 After each full run (the 06:00 run, or ▶ RUN EVERYTHING) the dashboard can
 send one Telegram message with what is new:
 
-- **new deals** — GREEN or YELLOW (`ALERT_CLASSES`), not rejected on the
-  title deed, and not cash-flow negative under the better structure
-  (`CASHFLOW_MIN_SURPLUS`); each flat once, whichever portals list it;
+- **new deals** — not rejected on the title deed, and fitting one of your
+  **alert rules** (the ALERTS tab: market, class, grade, district, size, max
+  price, least monthly surplus under the recommended structure); each flat
+  once, whichever portals list it. With no rule saved: GREEN or YELLOW
+  (`ALERT_CLASSES`), optionally a grade (`ALERT_GRADES=A,B`) and a least
+  surplus (`ALERT_MIN_SURPLUS=-150`). There is no break-even rule by default:
+  at ordinary financing a flat breaks even only about 50 % below its median,
+  where a price is taken for a misread — asking for it silenced the alerts;
+- **a deal you were told about** again when it turns GREEN, and when its
+  price is cut;
 - **price cuts on the deals you track** in DEAL PIPELINE (not CLOSED or
   PASSED), and whether the new price is inside max 🟡;
 - **problems** — a run that failed with no retry left, a portal gone quiet
@@ -888,7 +928,16 @@ docker compose start scheduler
 ```
 
 Restore goes through SQLite rather than copying the file over, so a leftover
-write-ahead log can't corrupt the restored database.
+write-ahead log can't corrupt the restored database. Each new copy is opened
+and checked (SQLite's quick_check) before it counts; `python -m modules.backup
+check <file>` checks any copy. A restore refuses a damaged file, and first
+saves the live database as `backups/pre-restore-<time>.db`: restoring the wrong
+copy is undone by restoring that one. The JSON export also lists each deal's
+checklist, its documents (their contents are in the .db copy) and your alert
+rules.
+
+The copies are on the same disk as the database. Copy `backups/` somewhere
+else too — a cloud-synced folder or a USB disk (see the audit's manual tasks).
 
 ---
 

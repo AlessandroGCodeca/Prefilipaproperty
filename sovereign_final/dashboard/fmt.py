@@ -249,6 +249,7 @@ CZ_LABELS = {
     "Income Tax": "Daň z příjmů", "Health Levy": "Zdravotní pojištění",
     "s.r.o. running cost": "Provoz s.r.o.", "TOTAL COSTS": "NÁKLADY CELKEM",
     "NET SURPLUS": "ČISTÝ PŘEBYTEK", "FINANCING STRESS (s.r.o.)": "STRESOVÝ TEST (s.r.o.)",
+    "FINANCING STRESS": "STRESOVÝ TEST",
     "Rate +2 pp": "Sazba +2 p. b.", "70% LTV (3rd+ flat)": "LTV 70 % (investiční)",
     "self-funding": "samofinancování", "cash in": "vlastní zdroje",
     "LOCATION IQ": "LOKALITA", "Transit": "MHD", "Amenities": "Vybavenost",

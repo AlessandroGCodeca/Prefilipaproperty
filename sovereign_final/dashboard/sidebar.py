@@ -35,6 +35,51 @@ def portal_label(market: str, name: str) -> str:
     return f"{_FLAG.get(market, market.upper())} {name}"
 
 
+STRUCTURES = {"Recommended": "best", "Personal": "personal", "s.r.o.": "sro"}
+
+
+def _situation_panel(busy: bool) -> bool:
+    """👤 YOUR SITUATION: the model inputs that are yours (modules/settings),
+    typed here instead of in .env. True when a change was saved — the stored
+    scores are then stale and the page re-scores."""
+    from modules import settings
+    now = settings.current()
+    typed = {}
+    with st.expander("👤 YOUR SITUATION", expanded=False):
+        st.markdown('<div class="muted">Your own figures, used by every score. Saved to '
+                    'data/settings.json; they outrank .env.</div>', unsafe_allow_html=True)
+        shown_cz = False
+        for f in settings.FIELDS:
+            if f.market == "cz" and not shown_cz:
+                st.markdown('<div class="muted" style="margin-top:8px">🇨🇿 Czechia</div>',
+                            unsafe_allow_html=True)
+                shown_cz = True
+            v = now[f.key]
+            if f.kind == "pct":
+                typed[f.key] = st.number_input(
+                    f.label, min_value=f.low * 100, max_value=f.high * 100,
+                    value=float(round(v * 100, 3)), step=0.05, format="%.2f", help=f.help) / 100
+            elif f.kind == "money":
+                typed[f.key] = float(st.number_input(
+                    f.label, min_value=int(f.low), max_value=int(f.high),
+                    value=int(round(v)), step=1000, help=f.help))
+            else:
+                typed[f.key] = int(st.number_input(
+                    f.label, min_value=int(f.low), max_value=int(f.high),
+                    value=int(v), step=1, help=f.help))
+        if st.button("💾 SAVE AND RE-SCORE", width="stretch", disabled=busy,
+                     help="Saves what changed and re-scores every listing with it "
+                          "(the same job as ♻️ RESCORE ALL)."):
+            changed = {k: v for k, v in typed.items() if abs(float(v) - float(now[k])) > 1e-9}
+            if not changed:
+                st.caption("Nothing changed.")
+                return False
+            settings.save(changed)
+            st.caption("Saved: " + ", ".join(changed) + ". Re-scoring…")
+            return True
+    return False
+
+
 def render() -> SimpleNamespace:
     """Draw the sidebar: the pipeline status and buttons, the filters and
     the scoring settings. Returns what the rest of the page reads from it:
@@ -186,6 +231,9 @@ def render() -> SimpleNamespace:
                                    help="Send a test message to your Telegram chat "
                                         "(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env).")
 
+        # Your own figures; a change re-scores like ♻️ RESCORE ALL.
+        do_rescore = _situation_panel(_busy) or do_rescore
+
         st.markdown("---")
         st.markdown("#### FILTERS")
         max_price  = st.slider("Max Price €",  10_000, 600_000, 300_000, 5_000)
@@ -256,7 +304,12 @@ def render() -> SimpleNamespace:
                  "are linked from its card). It picks among the copies the other "
                  "filters let through, so a flat stays while any copy matches them.",
         )
-        show_sro   = st.toggle("Show s.r.o. figures", value=True)
+        structure  = STRUCTURES[st.radio(
+            "Figures shown", list(STRUCTURES), horizontal=True, key="structure",
+            help="Which ownership structure's surplus, costs, IRR and stress test the "
+                 "page shows. Recommended: for each flat, the structure the engine "
+                 "recommends for it (personal for most). The cash-flow flag, the "
+                 "cash-flow filter and the Telegram alerts follow the same choice.")]
         show_demo  = st.toggle("Demo data (no DB)",   value=False)
 
         from engine.financial import default_ltv as _default_ltv
@@ -338,6 +391,6 @@ def render() -> SimpleNamespace:
         req_furnished=req_furnished,
         req_parking=req_parking,
         show_demo=show_demo,
-        show_sro=show_sro,
+        structure=structure,
         sources=sources,
     )

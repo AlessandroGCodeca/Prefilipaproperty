@@ -112,7 +112,7 @@ def test_empty_database_renders_the_demo_view(db):
 
 PAGE_TABS = ["TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER", "WHAT-IF / TAX", "COMPARE",
              "RENT COMPS", "TAX RATES", "DEAL PIPELINE", "LV TO-DO", "REJECTED",
-             "ONE-CLICK CLOSE"]
+             "ONE-CLICK CLOSE", "ALERTS"]
 GROUP_TABS = ["🎯 DEALS", "📊 ANALYSIS", "🗂 WORKFLOW"]
 
 
@@ -133,13 +133,16 @@ def test_the_tabs_are_grouped(populated_db):
     # Each group's own tabs follow it.
     assert labels == ["🎯 DEALS", "TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER",
                       "📊 ANALYSIS", "WHAT-IF / TAX", "COMPARE", "RENT COMPS", "TAX RATES",
-                      "🗂 WORKFLOW", "DEAL PIPELINE", "LV TO-DO", "REJECTED", "ONE-CLICK CLOSE"]
+                      "🗂 WORKFLOW", "DEAL PIPELINE", "LV TO-DO", "REJECTED", "ONE-CLICK CLOSE",
+                      "ALERTS"]
 
 
 def test_the_sidebar_buttons_are_grouped_and_named_in_full(populated_db):
     at = run_app()
     groups = {e.label: [b.label for b in e.button] for e in at.sidebar.expander}
-    assert list(groups) == ["📅 DAILY RUN — step by step", "🔧 REPAIR DATA", "🩺 DIAGNOSTICS"]
+    assert list(groups) == ["📅 DAILY RUN — step by step", "🔧 REPAIR DATA", "🩺 DIAGNOSTICS",
+                            "👤 YOUR SITUATION"]
+    assert groups["👤 YOUR SITUATION"] == ["💾 SAVE AND RE-SCORE"]
     daily = groups["📅 DAILY RUN — step by step"]
     assert daily[:3] == ["🇸🇰 Nehnutelnosti.sk", "🇸🇰 Bazos.sk", "🇸🇰 Topreality.sk"]
     assert "🇨🇿 Bazos.cz" in daily and "🇨🇿 Bezrealitky.cz" in daily

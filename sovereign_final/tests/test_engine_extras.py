@@ -147,11 +147,31 @@ class TestProjectIrr:
                           appreciation=0.05)
         assert res.exit_tax > 0
 
-    def test_no_gain_no_exit_tax_under_the_revenue_limit(self):
+    def test_no_gain_no_exit_tax_under_the_revenue_limit(self, monkeypatch):
         # €60k sale + a year's rent stays under the €100k reduced-rate limit.
+        # Without depreciation there is no gain to tax; what the sale costs is
+        # only the step to the next minimum-tax band (income over €50,000:
+        # €960 instead of €340), less the dividend tax it saves.
+        from engine import financial
+        monkeypatch.setattr(financial, "SRO_DEPRECIATION", False)
+        res = project_irr(60_000, 40, "Nitra", structure="SRO", hold_years=10,
+                          appreciation=0.0)
+        assert 0 < res.exit_tax <= 960 - 340
+        no_minimum = {**financial.tax_rules(), "sro_minimum_tax": ()}
+        monkeypatch.setattr(financial, "tax_rules", lambda year=None: no_minimum)
         res = project_irr(60_000, 40, "Nitra", structure="SRO", hold_years=10,
                           appreciation=0.0)
         assert res.exit_tax == pytest.approx(0, abs=0.01)
+
+    def test_what_the_company_wrote_off_comes_back_at_the_sale(self):
+        # The company deducted price / 40 a year for ten years: sold at the
+        # price it paid, it has a gain of that much, taxed in the exit year.
+        res = project_irr(60_000, 40, "Nitra", structure="SRO", hold_years=10,
+                          appreciation=0.0, exit_cost_rate=0.0)
+        assert res.exit_tax > 0
+        person = project_irr(60_000, 40, "Nitra", structure="PERSONAL", hold_years=10,
+                             appreciation=0.0, exit_cost_rate=0.0)
+        assert person.exit_tax == 0          # a person depreciates nothing here
 
     def test_a_sale_past_the_revenue_limit_loses_the_reduced_rate(self):
         # No gain on a €120k sale, but the sale is revenue: the company leaves

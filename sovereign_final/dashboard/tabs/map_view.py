@@ -120,7 +120,6 @@ def render(v) -> None:
     data = v.data
     hidden_note = v.hidden_note
     n_hidden = v.n_hidden
-    show_sro = v.show_sro
     mapped = [l for l in data if l.get("lat") and l.get("lng")]
     if not data and n_hidden:
         st.info(hidden_note())
@@ -162,7 +161,7 @@ def render(v) -> None:
     pts = []
     for l in mapped:
         cls = (l.get("cf_class") or l.get("classification") or "PENDING").upper()
-        surplus = l.get("surplus_sro") if show_sro else l.get("surplus_personal")
+        surplus = v.surplus(l)
         surplus_eur = markets.to_eur(surplus, l.get("_cur") or "EUR")
         km = km_between(point[0], point[1], l["lat"], l["lng"]) if point else None
         if km is not None and km > radius_km:

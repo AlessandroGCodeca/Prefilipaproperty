@@ -121,6 +121,7 @@ def get_all_active(rejected: bool = False, market: str | None = None):
                    c.mortgage_rate_used,   c.ltv_used, c.loan_term_years,
                    c.max_price_green,      c.max_price_yellow,
                    c.stress_surplus_sro,   c.stress_ratio_sro,
+                   c.stress_surplus_personal, c.stress_ratio_personal,
                    c.irr_sro,              c.irr_personal, c.rent_source,
                    c.sro_rate_used,        c.sro_ltv_used,
                    c.mortgage_monthly_sro, c.total_cash_invested_sro,
@@ -188,7 +189,8 @@ def mark_duplicates(market: str | None = None) -> int:
         only, params = _market_sql(conn, market)
         rows = [dict(r) for r in conn.execute(f"""
             SELECT id, url, source, district, size_m2, price_eur, rooms, floor,
-                   scraped_at, lv_status, market
+                   scraped_at, lv_status, market, lat, lng, coords_source,
+                   address_raw, primary_image_url
             FROM listings
             WHERE is_active = 1
               AND price_eur > 0 AND size_m2 > 0

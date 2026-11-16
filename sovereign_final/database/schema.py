@@ -399,6 +399,8 @@ _CASHFLOW_NEW_COLUMNS = {
     "max_price_green":           "REAL",
     "max_price_yellow":          "REAL",
     "stress_surplus_sro":        "REAL",
+    "stress_surplus_personal":   "REAL",
+    "stress_ratio_personal":     "REAL",
     "stress_ratio_sro":          "REAL",
     "irr_sro":                   "REAL",
     "irr_personal":              "REAL",

@@ -18,9 +18,20 @@ Two listings are the same flat when all of these hold:
   - the asking prices are within PRICE_TOLERANCE_PCT (portals lag each other
     on price cuts, so exact equality would miss real copies);
   - the room counts agree whenever both listings state one;
-  - the floors agree whenever both listings state one.
-It is deliberately strict: two identical flats in one new building are the
-one realistic false match, and dev projects are hidden by default anyway.
+  - the floors agree whenever both listings state one;
+  - nothing else says they differ: map pins more than PIN_SAME_M apart, or
+    two different streets;
+  - and something says they are one: map pins within PIN_SAME_M, the same
+    street, the same first photo — or, with none of these to go by, floor
+    areas within EXACT_SIZE_M2 (two portals' rounding of one figure).
+A panel-built district is full of flats of the same floor area at near the
+same price; without the last two rules three of them on floors 2, 7 and
+"unknown" came out as one flat (audit of 12 Nov 2026, finding 6).
+
+Copies are grouped transitively — portals lag each other on price cuts, so
+A ~ B and B ~ C group all three — but never through a member that
+contradicts another: a flat on floor 7 and one on floor 2 are never in one
+group, whatever sits between them.
 
 The group's primary listing — the one the dashboard shows — is the copy
 whose title deed was verified (LV PASS), then the cheapest (a buyer wants the
@@ -36,6 +47,11 @@ import unicodedata
 SIZE_TOLERANCE_M2   = 1.0
 SIZE_TOLERANCE_PCT  = 0.015
 PRICE_TOLERANCE_PCT = 0.03
+# Map pins of one building lie within this of each other (a portal's pin may
+# be on the entrance, another's on the roof's centre).
+PIN_SAME_M          = 150.0
+# With no pin, street or photo to go by, the floor areas must agree to this.
+EXACT_SIZE_M2       = 0.5
 
 
 def _fold(text: str) -> str:
@@ -59,6 +75,76 @@ def _agree(a, b) -> bool:
         return int(a) == int(b)
     except (TypeError, ValueError):
         return True
+
+
+def _pin(row):
+    """The portal's own map pin (lat, lng), or None — a geocoded point says
+    only where the district is."""
+    if row.get("coords_source") != "listing":
+        return None
+    lat, lng = row.get("lat"), row.get("lng")
+    return (lat, lng) if lat is not None and lng is not None else None
+
+
+def _metres(p, q) -> float:
+    import math
+    dy = (p[0] - q[0]) * 111_000
+    dx = (p[1] - q[1]) * 111_000 * math.cos(math.radians((p[0] + q[0]) / 2))
+    return math.hypot(dx, dy)
+
+
+# A street and its house number: "Hálova 12", "Námestie SNP 3/A", "ul. 1. mája 7".
+_STREET_RE = re.compile(r"((?:[^\W\d_][\w.]*\s+){0,3}?[^\W\d_][\w.]{2,})\s+\d+[a-z]?(?:/\d+[a-z]?)?(?!\w)")
+_NOT_A_STREET = {"byt", "izba", "izbovy", "izbovy byt", "poschodie", "podlazie", "m2", "okres",
+                 "bratislava", "kosice", "praha", "brno", "cast", "psc"}
+
+
+def _street(row) -> str | None:
+    """The street named in the listing's address, folded ("halova"); None
+    when it names none."""
+    addr = _fold(row.get("address_raw") or "")
+    addr = re.sub(r"(?<!\w)(?:ul\.|ulica|ulice|nam\.)\s*", "", addr)
+    for m in _STREET_RE.finditer(addr):
+        name = re.sub(r"\s+", " ", m.group(1)).strip(" .")
+        if name and name.split()[-1] not in _NOT_A_STREET and name not in _NOT_A_STREET:
+            return name
+    return None
+
+
+def _photo(row) -> str:
+    """The first photo's address without its size or cache parameters."""
+    url = (row.get("primary_image_url") or "").strip()
+    return url.split("?", 1)[0].lower()
+
+
+def contradict(a: dict, b: dict) -> bool:
+    """Something says these are two flats: a different room count, floor or
+    floor area, pins far apart, or two streets."""
+    if not (_agree(a.get("rooms"), b.get("rooms")) and _agree(a.get("floor"), b.get("floor"))):
+        return True
+    if not _same_size(a["size_m2"], b["size_m2"]):
+        return True
+    pa, pb = _pin(a), _pin(b)
+    if pa and pb and _metres(pa, pb) > PIN_SAME_M:
+        return True
+    sa, sb = _street(a), _street(b)
+    return bool(sa and sb and sa != sb)
+
+
+def evidence(a: dict, b: dict) -> bool:
+    """Something says these are one flat: pins close together, the same
+    street, the same first photo, or — with none of these to go by — the
+    same floor area to within EXACT_SIZE_M2."""
+    pa, pb = _pin(a), _pin(b)
+    if pa and pb and _metres(pa, pb) <= PIN_SAME_M:
+        return True
+    sa, sb = _street(a), _street(b)
+    if sa and sb and sa == sb:
+        return True
+    fa, fb = _photo(a), _photo(b)
+    if fa and fb and fa == fb:
+        return True
+    return abs(a["size_m2"] - b["size_m2"]) < EXACT_SIZE_M2
 
 
 # Portals name a Bratislava flat either by city part ("Ružinov") or by
@@ -108,10 +194,8 @@ def is_same_flat(a: dict, b: dict) -> bool:
     loc = _location_key(a)
     if not loc or loc != _location_key(b):
         return False
-    return (_same_size(a["size_m2"], b["size_m2"])
-            and _same_price(a["price_eur"], b["price_eur"])
-            and _agree(a.get("rooms"), b.get("rooms"))
-            and _agree(a.get("floor"), b.get("floor")))
+    return (_same_price(a["price_eur"], b["price_eur"])
+            and not contradict(a, b) and evidence(a, b))
 
 
 def _primary_rank(row: dict) -> int:
@@ -131,6 +215,7 @@ def group_duplicates(rows: list[dict]) -> dict[str, str]:
     """
     rows = [r for r in rows if (r.get("price_eur") or 0) > 0 and (r.get("size_m2") or 0) > 0]
     parent = {r["id"]: r["id"] for r in rows}
+    members = {r["id"]: [r] for r in rows}        # each root's group
 
     def find(x: str) -> str:
         while parent[x] != x:
@@ -152,8 +237,11 @@ def group_duplicates(rows: list[dict]) -> dict[str, str]:
                     break                       # sorted by size: no more matches
                 if is_same_flat(a, b):
                     ra, rb = find(a["id"]), find(b["id"])
-                    if ra != rb:
+                    # Never through a member that contradicts another.
+                    if ra != rb and not any(contradict(x, y) for x in members[ra]
+                                            for y in members[rb]):
                         parent[rb] = ra
+                        members[ra] += members.pop(rb)
 
     groups: dict[str, list[dict]] = {}
     for r in rows:

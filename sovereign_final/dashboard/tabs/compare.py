@@ -58,7 +58,9 @@ def comparison_rows(l) -> dict:
         "IRR 10y — s.r.o.":     _pct_or_dash(l.get("irr_sro")),
         "Cash in — personal":   amt(l, l.get("total_cash_invested")) if l.get("total_cash_invested")
                                 else "—",
-        "At rate +2 pp (s.r.o.)": sgn(l, l.get("stress_surplus_sro")),
+        f"At rate +2 pp ({best})": sgn(l, l.get(
+            "stress_surplus_sro" if best == "s.r.o." or l.get("stress_surplus_personal") is None
+            else "stress_surplus_personal")),
         "Title deed (LV)":      _lv_state(l)[0],
         "LV soft flags":        (l.get("lv_soft_flags") or "—")[:160],
         "Location":             (f"{l.get('location_tier')} · {l.get('location_score'):.0f}/100"

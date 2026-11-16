@@ -126,9 +126,12 @@ class TestBratislavaPartsOutsideBratislava:
     caution engine/regional_prices takes with its BA sub-district medians."""
 
     def test_kosice_stare_mesto_not_at_bratislava_rate(self):
-        # The slug parser writes "Staré Mesto, Košice" for Košice's old town.
+        # The slug parser writes "Staré Mesto, Košice" for Košice's old town:
+        # Košice I's rent (its okres), not Bratislava's Staré Mesto's.
         assert get_rent_estimate("Staré Mesto, Košice", 1) == \
-            pytest.approx(get_rent_estimate("Košice II", 1))
+            pytest.approx(get_rent_estimate("Košice I", 1))
+        assert get_rent_estimate("Staré Mesto, Košice", 1) != \
+            pytest.approx(get_rent_estimate("Bratislava - Staré Mesto", 1))
 
     def test_zilina_stare_mesto_at_zilina_rate(self):
         assert get_rent_estimate("Žilina - Staré Mesto", 1) == \

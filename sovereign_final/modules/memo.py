@@ -273,6 +273,9 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
     pdf.ln(1)
     # Cash-on-cash, net yield and paydown are the recommended structure's.
     best = "s.r.o." if (l.get("optimal_structure") or "").upper() == "SRO" else "personal"
+    # The stress test of that structure (a score from before both were stored
+    # has the s.r.o.'s only).
+    sk = "sro" if best == "s.r.o." or l.get("stress_surplus_personal") is None else "personal"
     pdf.kv([
         ("Cap rate (unlevered)", _pct(l.get("cap_rate"), 2)),
         (f"Cash-on-cash ({best})", _pct(l.get("cash_on_cash"), 2)),
@@ -292,8 +295,8 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
                                     f"{_pct(l.get('sro_rate_used'), 2)}"),
         ("s.r.o. cash in", money(l.get("total_cash_invested_sro"))),
         (f"Principal paydown ({best})", f"{money(l.get('principal_paydown_monthly'))}/mo"),
-        ("At rate +2 pp: surplus", f"{money(l.get('stress_surplus_sro'), True)}/mo"),
-        ("At rate +2 pp: self-funding", _pct(l.get("stress_ratio_sro"))),
+        (f"At rate +2 pp ({best}): surplus", f"{money(l.get(f'stress_surplus_{sk}'), True)}/mo"),
+        (f"At rate +2 pp ({best}): self-funding", _pct(l.get(f"stress_ratio_{sk}"))),
     ])
 
     if price and size and l.get("estimated_rent_eur"):

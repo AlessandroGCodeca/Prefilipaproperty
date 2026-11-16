@@ -33,6 +33,7 @@ from config import (
     GREEN_DISCOUNT, YELLOW_DISCOUNT, NEAR_FLOOR_DISCOUNT, SRO_SETUP_COST,
     SRO_ANNUAL_RUNNING_COST, SRO_RATE_PREMIUM_PP, SRO_LTV_RATIO,
     CASHFLOW_MIN_SURPLUS, OTHER_ANNUAL_INCOME, PERSONAL_INTEREST_DEDUCTIBLE,
+    SRO_DEPRECIATION,
     RENT_PER_M2, INDUSTRIAL_ZONES, INDUSTRIAL_RENT_PREMIUM,
     PARKING_RENT_PREMIUM, FURNISHED_RENT_PREMIUM, SEMI_FURNISHED_PREMIUM,
     BALCONY_RENT_PREMIUM,
@@ -69,7 +70,10 @@ def _need(value, what: str, market, where: str = "markets.py"):
 # the room-adjusted benchmark, the rent fallbacks). A stored score from an
 # older model is redone on the next scoring run
 # (database.requeue_scores_from_older_model).
-SCORING_MODEL_VERSION = 7   # 7: 2026 Slovak tax bands, rental taxed on top of OTHER_ANNUAL_INCOME (audit 2)
+SCORING_MODEL_VERSION = 8   # 8: s.r.o. tax — 7 % dividend, the minimum tax, depreciation; the
+#      +2 pp stress stored for both structures; the cash-flow flag follows
+#      the recommended structure (audit of 12 Nov 2026, findings 4 and 5)
+#   7: 2026 Slovak tax bands, rental taxed on top of OTHER_ANNUAL_INCOME (audit 2)
 #   6: Czech costs and rents checked against sources (docs/M1_VERIFICATION.md)
 
 
@@ -149,10 +153,12 @@ class FinancialResult:
 
     @property
     def cashflow_negative(self) -> bool:
-        """True when neither structure clears CASHFLOW_MIN_SURPLUS a month —
-        the class says the price is cheap, not that the flat pays for itself."""
-        return is_cashflow_negative(max(self.surplus_personal, self.surplus_sro),
-                                    market=self.market)
+        """True when the recommended structure doesn't clear
+        CASHFLOW_MIN_SURPLUS a month — the class says the price is cheap, not
+        that the flat pays for itself."""
+        return is_cashflow_negative(
+            self.surplus_sro if self.optimal_structure == "SRO" else self.surplus_personal,
+            market=self.market)
 
 
 def cashflow_min_surplus(market: str = "sk") -> float:
@@ -165,6 +171,24 @@ def is_cashflow_negative(surplus, market: str = "sk") -> bool:
     """A stored monthly surplus below CASHFLOW_MIN_SURPLUS. None (not scored)
     is not negative: there is nothing to say yet."""
     return surplus is not None and surplus < cashflow_min_surplus(market)
+
+
+def shows_sro(row, structure: str = "best") -> bool:
+    """Whether a scored row's figures are shown as the s.r.o.'s: always for
+    structure "sro", never for "personal", and for "best" (the default) when
+    the s.r.o. is the structure recommended for it. One rule for the
+    dashboard's figures, its cash-flow flag and filter, and the alerts."""
+    if structure == "sro":
+        return True
+    if structure == "personal":
+        return False
+    return (row.get("optimal_structure") or "").upper() == "SRO"
+
+
+def shown_surplus(row, structure: str = "best"):
+    """The monthly surplus of the structure shown for a scored row
+    (shows_sro); None when it isn't scored."""
+    return row.get("surplus_sro") if shows_sro(row, structure) else row.get("surplus_personal")
 
 
 def sro_financing(ltv: float, rate: float, sro_ltv: float | None = None,
@@ -338,16 +362,42 @@ def sro_corporate_rate(annual_revenue: float, rules: dict | None = None) -> floa
             else t["sro_rate"])
 
 
+def sro_minimum_tax(annual_revenue: float, rules: dict | None = None) -> float:
+    """The least a company pays for the year, whatever its profit (Slovakia's
+    minimum tax, § 46b ZDP, by taxable income). 0 for a tax table without
+    one (Czechia's)."""
+    t = rules or tax_rules()
+    for upper, tax in t.get("sro_minimum_tax") or ():
+        if upper is None or annual_revenue <= upper:
+            return float(tax)
+    return 0.0
+
+
+def sro_depreciation(price: float, annual_rent: float, rules: dict | None = None) -> float:
+    """What a company may deduct for the flat's wear in a year: the price
+    over the tax table's sro_depreciation_years (Slovakia: 40, group 6), and
+    never more than the rent the flat earned that year. 0 without the figure
+    in the table, or with config.SRO_DEPRECIATION off."""
+    t = rules or tax_rules()
+    years = t.get("sro_depreciation_years") or 0
+    if not years or not SRO_DEPRECIATION or price <= 0:
+        return 0.0
+    return min(price / years, max(annual_rent, 0.0))
+
+
 def calc_tax_sro(annual_taxable: float, annual_revenue: float,
                  rules: dict | None = None) -> float:
-    """Combined s.r.o. tax on rental profit: corporate income tax PLUS dividend
-    withholding tax on the distributed remainder (the double-taxation that makes
-    s.r.o. less of a slam-dunk than a flat corporate rate suggests)."""
+    """Combined s.r.o. tax on rental profit: corporate income tax — at least
+    the year's minimum tax, also on no profit at all — PLUS dividend
+    withholding tax on the distributed remainder (the double-taxation that
+    makes s.r.o. less of a slam-dunk than a flat corporate rate suggests).
+    `annual_taxable` is the profit after everything deductible, depreciation
+    included (sro_depreciation)."""
     t = rules or tax_rules()
-    if annual_taxable <= 0:
-        return 0.0
-    corp = annual_taxable * sro_corporate_rate(annual_revenue, t)
-    dividend = max(annual_taxable - corp, 0) * t["dividend_tax"]
+    profit = max(annual_taxable, 0.0)
+    corp = max(profit * sro_corporate_rate(annual_revenue, t),
+               sro_minimum_tax(annual_revenue, t))
+    dividend = max(profit - corp, 0) * t["dividend_tax"]
     return corp + dividend
 
 
@@ -527,7 +577,14 @@ def match_rent_key(district: str, market: str = "sk") -> str:
     if folded in _KEYS_BY_FOLDED:
         return _KEYS_BY_FOLDED[folded]
 
-    # 2. A known district name appears in the address string as whole words.
+    # 2. A city part of Košice: its okres's rent ("Košická Nová Ves" is
+    #    Košice III; "Staré Mesto, Košice" Košice I, not Bratislava's).
+    from engine.regional_prices import kosice_part
+    part = kosice_part(key)
+    if part:
+        return f"košice {part[1].lower()}"
+
+    # 2b. A known district name appears in the address string as whole words.
     # Iterate longest-first so "petržalka" beats "ružinov" when both are
     # subsumed; suburbs/specific districts are preferred over bare city
     # names ("bratislava", "košice"), which are reserved as final fallbacks.
@@ -768,7 +825,11 @@ def analyse(
     mortgage_s_mo   = calc_mortgage(loan_s, sro_rate, term_years)
     interest_s_mo, principal_s_mo = first_year_amortization(loan_s, sro_rate, term_years)
     running_mo      = running_annual / 12
-    taxable_s       = max(noi_annual - interest_s_mo * 12 - running_annual, 0)
+    # The company also deducts the flat's depreciation, up to the rent it
+    # actually received.
+    depreciation_s  = sro_depreciation(price_eur, (rent - vacancy_mo) * 12, rules)
+    taxable_s       = max(noi_annual - interest_s_mo * 12 - running_annual
+                          - depreciation_s, 0)
     tax_s_annual    = calc_tax_sro(taxable_s, annual_rent, rules)
     tax_s_mo        = tax_s_annual / 12
     levy_s_mo       = 0.0
@@ -831,10 +892,10 @@ def analyse(
         elif round(discount, 4) >= NEAR_FLOOR_DISCOUNT:
             parts.append("⚠️ Close to the sanity floor — confirm the price is this "
                          "flat's own, not a deposit, an 'od €X' price or another listing's.")
-    best = max(surplus_p, surplus_s)
+    best = surplus_s if optimal == "SRO" else surplus_p
     if is_cashflow_negative(best, **_mkw(mkt)):
-        parts.append(f"⛔ Cash-flow negative: {_money(best, mkt, plus=True)}/mo under the better "
-                     f"structure — the class is price vs market, not income.")
+        parts.append(f"⛔ Cash-flow negative: {_money(best, mkt, plus=True)}/mo under the "
+                     f"recommended structure — the class is price vs market, not income.")
     parts.append(f"Self-funding at {ltv*100:.0f}% LTV: {ratio_p*100:.0f}% personal, "
                  f"{ratio_s*100:.0f}% s.r.o. ({sro_ltv_used*100:.0f}% LTV at "
                  f"{sro_rate*100:.2f}%).")
@@ -1067,6 +1128,37 @@ def amortization_schedule(principal: float, rate: float = MORTGAGE_RATE_PA,
     return out
 
 
+def loan_schedule(principal: float, rate: float, years: int,
+                  fixation_years: int | None = None,
+                  reset_rate: float | None = None) -> list[tuple[float, float, float, float]]:
+    """Per loan year: (interest, principal repaid, balance at year end, paid).
+
+    With `fixation_years` and `reset_rate`, the rate is fixed for that many
+    years and then reset: the bank recomputes the annuity on the balance
+    left, over the term left, at the new rate — how Slovak and Czech
+    mortgages reprice when a fixation ends. Without them, one annuity at
+    `rate` for the whole term (amortization_schedule)."""
+    if principal <= 0:
+        return [(0.0, 0.0, 0.0, 0.0)] * years
+    out, bal, r = [], principal, rate / 12
+    payment = calc_mortgage(principal, rate, years)
+    for year in range(1, years + 1):
+        if (fixation_years and reset_rate is not None and year == fixation_years + 1
+                and bal > 0):
+            r = reset_rate / 12
+            payment = calc_mortgage(bal, reset_rate, years - fixation_years)
+        interest_y = principal_y = paid = 0.0
+        for _ in range(12):
+            i = bal * r
+            p = min(payment - i, bal)
+            bal -= p
+            interest_y += i
+            principal_y += p
+            paid += i + p
+        out.append((interest_y, principal_y, max(bal, 0.0), paid))
+    return out
+
+
 def irr(cash_flows: list[float]) -> float | None:
     """Annual internal rate of return of yearly cash flows (t=0 first), by
     bisection. None when there is no sign change to solve for."""
@@ -1121,8 +1213,17 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
                 sro_ltv: float | None = None,
                 sro_rate_premium: float | None = None,
                 sro_running_cost: float | None = None,
-                market: str = "sk") -> IrrResult:
+                market: str = "sk",
+                fixation_years: int | None = None,
+                reset_rate: float | None = None,
+                loan_fees: float = 0.0,
+                monthly_loan_costs: float = 0.0) -> IrrResult:
     """Buy, hold `hold_years`, sell — and the IRR of the equity cash flows.
+
+    A bank's offer: `fixation_years` and `reset_rate` reset the rate when the
+    fixation ends (loan_schedule); `loan_fees` (one-off: processing, valuation)
+    are paid at the start, and `monthly_loan_costs` (account, insurance the
+    bank requires) every month — deductible for the s.r.o. only.
 
     Year 0 is the cash put in (deposit + acquisition costs). Each year after
     is that year's after-tax cashflow on the same cost model as analyse(),
@@ -1177,9 +1278,9 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
 
     loan = price_eur * ltv
     acquisition = acquisition_costs(price_eur, **_mkw(mkt))
-    equity_in = price_eur * (1 - ltv) + acquisition + setup
-    payment_y = calc_mortgage(loan, rate, term_years) * 12
-    schedule = amortization_schedule(loan, rate, term_years)
+    equity_in = price_eur * (1 - ltv) + acquisition + setup + (loan_fees or 0.0)
+    schedule = loan_schedule(loan, rate, term_years, fixation_years, reset_rate)
+    loan_costs_y = (monthly_loan_costs or 0.0) * 12
     prop_tax_y = property_tax_annual(price_eur, size_m2, district, **_mkw(mkt))
     hoa_mo = calc_hoa(size_m2, **_mkw(mkt))
     var_cost_rate = VACANCY_RATE + OWNER_RESERVE_RATE + PROPERTY_MGMT_RATE
@@ -1190,14 +1291,15 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
 
     flows = [-equity_in]
     sale_price = exit_costs = balance = exit_tax = 0.0
+    depreciated = 0.0       # what the company has written off the flat so far
     for t in range(1, hold_years + 1):
         rent_y = rent * 12 * (1 + rent_growth) ** (t - 1)
         hoa_y = hoa_mo * 12 * (1 + cost_inflation) ** (t - 1)
         noi = (rent_y - hoa_y - prop_tax_y - rent_y * var_cost_rate
                - running * (1 + cost_inflation) ** (t - 1))
         if t <= term_years:
-            interest, _, balance = schedule[t - 1]
-            debt = payment_y
+            interest, _, balance, debt = schedule[t - 1]
+            debt += loan_costs_y
         else:
             interest, debt, balance = 0.0, 0.0, 0.0
 
@@ -1206,7 +1308,12 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
             expenses_annual=(hoa_y + prop_tax_y
                              + rent_y * (OWNER_RESERVE_RATE + PROPERTY_MGMT_RATE)),
             interest_annual=interest)
-        op_taxable_s = max(noi - interest, 0.0)
+        # The company's write-off for the year: never past the price in all.
+        dep = (min(sro_depreciation(price_eur, rent_y * (1 - VACANCY_RATE), rules),
+                   max(price_eur - depreciated, 0.0))
+               if structure == "SRO" else 0.0)
+        depreciated += dep
+        op_taxable_s = max(noi - interest - dep - (loan_costs_y if t <= term_years else 0.0), 0.0)
         if t < hold_years:
             tax = (calc_tax_sro(op_taxable_s, rent_y, rules) if structure == "SRO"
                    else personal_tax(op_taxable_p))
@@ -1218,8 +1325,11 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
         exit_costs = sale_price * exit_cost_rate
         gain = max(sale_price - exit_costs - price_eur - acquisition, 0.0)
         if structure == "SRO":
+            # The company sells at its written-down value: what it deducted
+            # over the years comes back as gain.
+            gain_s = max(sale_price - exit_costs - (price_eur + acquisition - depreciated), 0.0)
             op_tax = calc_tax_sro(op_taxable_s, rent_y, rules)
-            all_tax = calc_tax_sro(op_taxable_s + gain, rent_y + sale_price, rules)
+            all_tax = calc_tax_sro(op_taxable_s + gain_s, rent_y + sale_price, rules)
         else:
             op_tax = personal_tax(op_taxable_p)
             exempt_after = rules["personal_cgt_exempt_years"]
@@ -1264,11 +1374,79 @@ def deal_extras(r: FinancialResult) -> dict:
         "max_price_yellow":   max_offer_price(r.size_m2, r.district, "YELLOW", rooms=r.rooms, **mk),
         "stress_surplus_sro": shocked.surplus_sro,
         "stress_ratio_sro":   shocked.ratio_sro,
+        "stress_surplus_personal": shocked.surplus_personal,
+        "stress_ratio_personal":   shocked.ratio_personal,
         "irr_sro":            project_irr(r.price_eur, r.size_m2, r.district,
                                           structure="SRO", **kw).irr,
         "irr_personal":       project_irr(r.price_eur, r.size_m2, r.district,
                                           structure="PERSONAL", **kw).irr,
     }
+
+
+def deal_score_parts(row: dict) -> list[dict]:
+    """The deal grade's parts, in the order they count: [{"part", "points",
+    "max", "why"}] — the same arithmetic compute_deal_score() adds up, so the
+    card's "Why this grade?" can never disagree with the grade. [] when the
+    row has no financial data (no grade at all).
+
+    Components & weights:
+      Financial (50): cap rate (25) + discount to the regional median (25)
+      Location  (30): location_score / 100
+      Energy    (10): A→10, B→7, C→4, else partial
+      Condition (10): new→10, renovated→8, good→5, original→2, poor→0
+                      (parsed from the listing description; skipped when unknown)
+      Risk      (10): clean LV / no construction / no noise / not in Q100 flood area
+    A component with no data is left out of the maximum — except the
+    discount, whose 25 always count (no benchmark earns none of them)."""
+    cap = row.get("cap_rate")
+    discount = row.get("market_discount")
+    if cap is None and discount is None:
+        return []
+    parts = []
+    # The self-funding ratio used to be the second half. It sits at 0.60–0.75
+    # for flats at the median price everywhere (see config.py), so its
+    # 0.80 → 1.15 scale gave nearly every listing zero points.
+    if cap is not None:
+        parts.append({"part": "Cap rate", "points": max(0.0, min(cap / 0.06, 1.0)) * 25,
+                      "max": 25, "why": f"{cap * 100:.1f} % — 6 % or more earns all 25"})
+    # The discount's 25 always count. With no regional median (WHITE "no
+    # benchmark") it earns none of them: leaving it out of the maximum graded
+    # the flat on cap rate alone, above one that is cheap against its median.
+    parts.append({"part": "Below market", "max": 25,
+                  "points": max(0.0, min(discount / 0.30, 1.0)) * 25 if discount is not None else 0.0,
+                  "why": (f"{discount * 100:.0f} % below the regional median — 30 % or more "
+                          f"earns all 25" if discount is not None and discount >= 0 else
+                          f"{-discount * 100:.0f} % above the regional median"
+                          if discount is not None else "no regional median: none of the 25")})
+    loc = row.get("location_score")
+    if loc is not None:
+        parts.append({"part": "Location", "points": max(0.0, min(loc / 100.0, 1.0)) * 30,
+                      "max": 30, "why": f"location score {loc:.0f}/100 (transit, amenities, noise, "
+                                        f"construction)"})
+    energy = (row.get("energy_class") or "").upper()
+    if energy and energy != "UNKNOWN":
+        pts = {"A0": 10, "A1": 10, "A": 10, "B": 7, "C": 4, "D": 2, "E": 1, "F": 0, "G": 0}.get(energy, 0)
+        parts.append({"part": "Energy class", "points": pts, "max": 10, "why": f"class {energy}"})
+    # Mirrors the energy component: only counted when a real condition is known,
+    # so listings without a parsed description aren't penalised or rescaled.
+    condition = (row.get("condition") or "").lower()
+    cond_pts = {"new": 10, "renovated": 8, "good": 5, "original": 2, "poor": 0}
+    if condition in cond_pts:
+        parts.append({"part": "Condition", "points": cond_pts[condition], "max": 10,
+                      "why": f"{condition} (from the ad's text)"})
+    # Flags come from modules/risk_data; NULL (unknown) costs nothing. The
+    # site flags share 8 points and the LV has its own 2, so a flat with every
+    # site flag still loses points for an unverified title deed. Each flag
+    # costs 4; the total is clamped at 0 instead of each part.
+    flags = [n for k, n in (("construction_risk", "construction nearby"),
+                            ("noise_flag", "a noise source"), ("flood_zone", "flood area Q100"))
+             if row.get(k)]
+    lv_ok = row.get("lv_status") in ("PASS", "CLEAN", None)
+    parts.append({"part": "Risk", "points": 8 - 4 * len(flags) + (2 if lv_ok else 0), "max": 10,
+                  "why": (", ".join(flags) if flags else "no site risk found")
+                         + ("" if lv_ok else f"; title deed {(row.get('lv_status') or '').lower()}"
+                            f" — 2 points off")})
+    return parts
 
 
 def compute_deal_score(row: dict) -> tuple[int, str]:
@@ -1279,85 +1457,20 @@ def compute_deal_score(row: dict) -> tuple[int, str]:
     Each component contributes points out of its own max; only components with
     data are counted, and the score is rescaled to 100 over the available maxima
     so a missing location score (no Google API) doesn't unfairly sink the grade.
-    The discount to the regional median is the exception: a listing with no
-    benchmark earns 0 of its 25 rather than being graded without it.
-
-    Components & weights:
-      Financial (50): cap rate (25) + discount to the regional median (25)
-      Location  (30): location_score / 100
-      Energy    (10): A→10, B→7, C→4, else partial
-      Condition (10): new→10, renovated→8, good→5, original→2, poor→0
-                      (parsed from the listing description; skipped when unknown)
-      Risk      (10): clean LV / no construction / no noise / not in Q100 flood area
+    The parts and weights: deal_score_parts().
 
     Returns (score 0–100, grade in {A,B,C,D}). Returns (0, "—") when there's no
     financial data to score at all.
     """
-    points = 0.0
-    max_pts = 0.0
     # A price below the sanity floor is a misread, not a bargain (classify()
     # makes it WHITE): it earns no score, never the top of the ranking.
     if below_sanity_floor(row.get("market_discount")):
         return 0, "—"
-
-    # ── Financial (yield + discount) ──
-    # The self-funding ratio used to be the second half. It sits at 0.60–0.75
-    # for flats at the median price everywhere (see config.py), so its
-    # 0.80 → 1.15 scale gave nearly every listing zero points.
-    cap = row.get("cap_rate")
-    discount = row.get("market_discount")
-    if cap is not None or discount is not None:
-        if cap is not None:
-            points += max(0.0, min(cap / 0.06, 1.0)) * 25   # 6%+ cap = full marks
-            max_pts += 25
-        # The discount's 25 always count. With no regional median (WHITE "no
-        # benchmark" — every Czech listing until a sale-price CSV fills the
-        # medians) it earns none of them: leaving it out of the maximum graded
-        # the flat on cap rate alone, above one that is cheap against its median.
-        max_pts += 25
-        if discount is not None:
-            # At or above the median → 0 pts, 30%+ below → full 25
-            points += max(0.0, min(discount / 0.30, 1.0)) * 25
-    else:
+    parts = deal_score_parts(row)
+    if not parts:
         return 0, "—"
-
-    # ── Location ──
-    loc = row.get("location_score")
-    if loc is not None:
-        points += max(0.0, min(loc / 100.0, 1.0)) * 30
-        max_pts += 30
-
-    # ── Energy class ──
-    energy = (row.get("energy_class") or "").upper()
-    if energy and energy != "UNKNOWN":
-        energy_pts = {"A0": 10, "A1": 10, "A": 10, "B": 7, "C": 4,
-                      "D": 2, "E": 1, "F": 0, "G": 0}.get(energy, 0)
-        points += energy_pts
-        max_pts += 10
-
-    # ── Condition (renovation state parsed from the description) ──
-    # Mirrors the energy component: only counted when a real condition is known,
-    # so listings without a parsed description aren't penalised or rescaled.
-    condition = (row.get("condition") or "").lower()
-    cond_pts = {"new": 10, "renovated": 8, "good": 5, "original": 2, "poor": 0}
-    if condition in cond_pts:
-        points += cond_pts[condition]
-        max_pts += 10
-
-    # ── Risk (LV / construction / noise / flood) ──
-    # Flags come from modules/risk_data; NULL (unknown) costs nothing. The
-    # site flags share 8 points and the LV has its own 2, so a flat with every
-    # site flag still loses points for an unverified title deed (one pool of
-    # 10 hit 0 at three flags, and the LV deduction then counted for nothing).
-    # Each flag costs 4, so three go 4 below zero: floored at 0, the third
-    # flag was free. The total is clamped at 0 instead.
-    site_flags = sum(bool(row.get(k))
-                     for k in ("construction_risk", "noise_flag", "flood_zone"))
-    points += 8 - 4 * site_flags
-    if row.get("lv_status") in ("PASS", "CLEAN", None):
-        points += 2
-    max_pts += 10
-
+    points = sum(p["points"] for p in parts)
+    max_pts = sum(p["max"] for p in parts)
     score = max(0, round(points / max_pts * 100)) if max_pts else 0
     grade = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D"
     return score, grade

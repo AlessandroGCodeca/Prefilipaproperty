@@ -9,20 +9,50 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+# ── Settings saved from the dashboard ("Your situation", modules/settings) ────
+# A small JSON file beside the database, shared by the dashboard and the
+# scheduler. A value in it outranks the same key in .env: it is what you last
+# typed. Only the keys modules/settings.FIELDS lists are ever written to it.
+SETTINGS_PATH = (os.getenv("SOVEREIGN_SETTINGS_PATH")
+                 or os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "settings.json"))
+
+
+def saved_settings() -> dict:
+    """What the dashboard's panel saved ({} when nothing, or unreadable)."""
+    import json
+    try:
+        with open(SETTINGS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+_SAVED = saved_settings()
+
+
+def _setting(name: str) -> str:
+    """A setting's raw text: the dashboard's saved value, else the
+    environment / .env, else ""."""
+    saved = _SAVED.get(name)
+    return str(saved).strip() if saved is not None else (os.getenv(name) or "").strip()
+
+
 def _env_float(name: str, default: float) -> float:
-    """A numeric setting from the environment / .env. A key left blank
-    ("KEY=", which load_dotenv and docker-compose's env_file both pass on as
-    an empty string) means the default, exactly as an unset key does — it
-    used to mean 0 for some settings. Any other value is read as it is (an
-    explicit 0 stays 0); a value that is not a number still stops the app."""
-    raw = (os.getenv(name) or "").strip()
+    """A numeric setting from the dashboard's saved settings or the
+    environment / .env. A key left blank ("KEY=", which load_dotenv and
+    docker-compose's env_file both pass on as an empty string) means the
+    default, exactly as an unset key does — it used to mean 0 for some
+    settings. Any other value is read as it is (an explicit 0 stays 0); a
+    value that is not a number still stops the app."""
+    raw = _setting(name)
     return float(raw) if raw else float(default)
 
 
 def _env_int(name: str, default: int) -> int:
     """_env_float for a whole-number setting."""
-    raw = (os.getenv(name) or "").strip()
-    return int(raw) if raw else int(default)
+    raw = _setting(name)
+    return int(float(raw)) if raw else int(default)
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
@@ -33,9 +63,11 @@ def _env_int(name: str, default: int) -> int:
 # Mortgage: NBS new-housing-loan average sat ~3.5% in 2026, bank offers ~3.4–4.0%
 # (sources: NBS avg lending rates; financnykompas.sk; finsider.sk). 3.8% is a
 # representative mid-market figure for a well-qualified borrower at ≤80% LTV.
-MORTGAGE_RATE_PA       = 0.038   # 3.8% per annum — NBS-consistent 2026 average
-LOAN_TERM_YEARS        = 25      # conservative; 30y is the more common max (NBS cap)
-LTV_RATIO              = 0.80    # 80% standard NBS cap for owner-occupied/1st-2nd
+# Your own bank's offer goes in .env (MORTGAGE_RATE_PA=0.041, LOAN_TERM_YEARS=30,
+# LTV_RATIO=0.8) or the dashboard's "Your situation" panel; then ♻️ RESCORE ALL.
+MORTGAGE_RATE_PA       = _env_float("MORTGAGE_RATE_PA", 0.038)  # 3.8% — NBS-consistent 2026 average
+LOAN_TERM_YEARS        = _env_int("LOAN_TERM_YEARS", 25)   # conservative; 30y is the more common max (NBS cap)
+LTV_RATIO              = _env_float("LTV_RATIO", 0.80)     # 80% standard NBS cap for owner-occupied/1st-2nd
 # From 1 Oct 2026 NBS tightens the LTV cap to 70% for a 3rd-and-subsequent
 # residential property (i.e. most pure investors). Use this when modelling an
 # investor who already owns ≥2 properties.
@@ -131,15 +163,31 @@ TAX_YEAR_RULES = {
         "sro_rate_reduced":    0.10,
         "sro_reduced_revenue_limit": 100_000,
         # Withholding tax on dividends paid out to the owner — the second half
-        # of s.r.o. double taxation (corporate tax + dividend tax).
-        "dividend_tax":        0.10,
+        # of s.r.o. double taxation (corporate tax + dividend tax). 7 % on
+        # the profit of tax periods from 1 January 2025; the 10 % in between
+        # applied to 2024's profit only.
+        "dividend_tax":        0.07,
+        # Minimum tax (§ 46b ZDP, the "daňová licencia" back since 2024): the
+        # least a company pays for a year, whatever its profit — a loss year
+        # too — by its taxable income: (income up to, tax). A one-flat s.r.o.
+        # is in the first band.
+        "sro_minimum_tax": ((50_000, 340), (250_000, 960), (500_000, 1_920),
+                            (5_000_000, 3_840), (None, 11_520)),
+        # Depreciation: a flat is in group 6 (40 years, straight-line), and
+        # the depreciation of a let asset counts only up to the rent it
+        # earned that year (§ 19 ods. 3 písm. a). The whole price is
+        # depreciated here; the land's share (not depreciable) is small for a
+        # flat. SRO_DEPRECIATION=0 in .env leaves it out.
+        "sro_depreciation_years": 40,
         "source": ("Zákon 595/2003 (ZDP) after the 2026 consolidation package. "
                    "Personal bands 2026 (154.8× / 212.4× / 264× the životné minimum "
                    "of €284.13) from PwC Worldwide Tax Summaries, Forvis Mazars CEE "
-                   "tax guide 2026 and Slovak tax advisers' 2026 tables — have an "
-                   "účtovník confirm them against the act; the rest as entered in "
-                   "May 2026"),
-        "checked": "2026-11-11",
+                   "tax guide 2026 and Slovak tax advisers' 2026 tables. s.r.o.: 7 % "
+                   "dividend tax, the minimum tax and group-6 depreciation from "
+                   "podnikajte.sk's 2025–2026 guides and Finančná správa's pages on "
+                   "the minimum tax (read 12 Nov 2026). Have an účtovník confirm all "
+                   "of it against the act; the rest as entered in May 2026"),
+        "checked": "2026-11-16",
     },
 }
 # The tax year scoring uses. Defaults to the calendar year; set TAX_YEAR in .env
@@ -288,10 +336,19 @@ DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
 # alerts"). Keep the token in .env only: it lets anyone post as your bot.
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-# Which classes count as a deal worth a message. A deal must also not be
-# cash-flow negative (CASHFLOW_MIN_SURPLUS) under its better structure.
+# What counts as a deal worth a message, until you save your own rules in the
+# dashboard's ALERTS tab (they replace these): its class, and optionally its
+# grade and the least monthly surplus (€, under the recommended structure)
+# it must reach. No surplus rule by default: at ordinary financing a flat
+# breaks even only about 50 % below the median, where a price is taken for a
+# misread — so asking for break-even silenced the alerts altogether.
+# ALERT_MIN_SURPLUS=-150 would ask for a flat that costs at most €150 a month.
 ALERT_CLASSES = [c.strip().upper() for c in
                  (os.getenv("ALERT_CLASSES") or "GREEN,YELLOW").split(",") if c.strip()]
+ALERT_GRADES = [g.strip().upper() for g in (os.getenv("ALERT_GRADES") or "").split(",")
+                if g.strip()]
+ALERT_MIN_SURPLUS = (float(os.getenv("ALERT_MIN_SURPLUS").strip())
+                     if (os.getenv("ALERT_MIN_SURPLUS") or "").strip() else None)
 # Also message a run that failed for good, and a portal gone quiet.
 ALERT_FAILURES = (os.getenv("ALERT_FAILURES") or "1").strip().lower() in ("1", "true", "yes")
 
@@ -540,6 +597,9 @@ SRO_ANNUAL_RUNNING_COST = _env_float("SRO_ANNUAL_RUNNING_COST", 1200)
 # premium, and at most this LTV. Estimates — replace both with a bank's quote.
 SRO_RATE_PREMIUM_PP = _env_float("SRO_RATE_PREMIUM_PP", 0.01)
 SRO_LTV_RATIO       = _env_float("SRO_LTV_RATIO", 0.70)
+# Whether the company depreciates the flat (the tax table's
+# sro_depreciation_years). On by default: a company that lets a flat does.
+SRO_DEPRECIATION = (os.getenv("SRO_DEPRECIATION") or "1").strip().lower() in ("1", "true", "yes")
 
 # ── Cash-flow flag ────────────────────────────────────────────────────────────
 # The class (GREEN / YELLOW / WHITE) is price against the regional median, not

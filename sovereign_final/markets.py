@@ -195,8 +195,11 @@ SK = Market(
 # profile, says UNVERIFIED and can be set in .env.
 
 def _env_float(name: str, default: float) -> float:
+    """A Czech figure from the dashboard's saved settings or .env
+    (config._setting), else the default; a value that is no number is
+    ignored."""
     try:
-        return float(os.getenv(name, "") or default)
+        return float(config._setting(name) or default)
     except ValueError:
         return default
 

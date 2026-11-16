@@ -428,11 +428,17 @@ def test_ambiguous_city_parts_still_need_bratislava():
     assert fin.analyse(210_000, 70, "Vrakuňa", rooms=3).classification != "GREEN"
 
 
-@pytest.mark.parametrize("district", ["Kráľovičove Kračany", "Modrany", "Modra nad Cirochou",
-                                      "Nitra nad Ipľom", "Trnava pri Laborci"])
-def test_a_village_is_not_the_town_inside_its_name(district):
-    assert rp.median_source(district) == (None, "")
-    assert rp.kraj_for_district(district) is None
+@pytest.mark.parametrize("district,kraj", [
+    ("Kráľovičove Kračany", "TT"), ("Modrany", "NR"), ("Modra nad Cirochou", "PO"),
+    ("Nitra nad Ipľom", "BB"), ("Trnava pri Laborci", "KE")])
+def test_a_village_is_not_the_town_inside_its_name(district, kraj):
+    # Each is a village of its own okres — priced at its own kraj's median
+    # since the municipality list (audit of 12 Nov 2026, finding 10), never
+    # as Rača, Modra, Nitra or Trnava.
+    median, where = rp.median_source(district)
+    assert rp.kraj_for_district(district) == kraj
+    assert median == rp.REGIONAL_MEDIAN_PRICE_PER_M2[kraj]
+    assert where.startswith(rp.KRAJ_NAMES[kraj])
 
 
 def test_a_price_below_the_sanity_floor_scores_nothing():

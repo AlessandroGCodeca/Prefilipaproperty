@@ -718,9 +718,16 @@ def _unknown_at(text: str, low: str, v: Vocabulary) -> tuple[int | None, list[in
     zones, before = [], []
     for _label, _kind, rx in v.rules:
         for m in rx.finditer(low, start):
+            # The words just before a rule's own may label its entry — never
+            # past the start of that entry (a register number, an ordinal and
+            # a capital, a new section).
             a = max(start, m.start() - _EXPLAINED_BEFORE)
             for n in v.entry_no_re.finditer(low, a, m.start()):
                 a = n.end()
+            opens = [h.start() for rx_h, src in ((_SK_ENTRY_HEAD_RE, low), (_SECTION_RE, low),
+                                                  (_ORDINAL_ENTRY_RE, text))
+                     for h in rx_h.finditer(src, a, m.end()) if h.start() <= m.start()]
+            a = max(opens, default=a)
             before.append((a, m.start()))
             a = m.start()
             b = min(len(low), m.end() + _EXPLAINED_AFTER)
@@ -754,7 +761,7 @@ def unrecognised_entries(lv_text, vocabulary: Vocabulary | None = None) -> list[
     that case itself)."""
     text = str(lv_text or "")
     start, found = _unknown_at(text, fold(text), vocabulary or SK_VOCABULARY)
-    return [re.sub(r"\s+", " ", text[max(start, at - 30):at + _UNKNOWN_SPAN]).strip(" .:-–")
+    return [re.sub(r"\s+", " ", text[at:at + _UNKNOWN_SPAN]).strip(" .:-–")
             for at in found]
 
 

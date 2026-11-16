@@ -33,7 +33,7 @@ def render(v) -> None:
     n_hidden = v.n_hidden
     n_loaded = v.n_loaded
     n_scored_loaded = v.n_scored_loaded
-    show_sro = v.show_sro
+    view = v            # the loop below reuses the name v for a money helper
     unscored_note = v.unscored_note
     view_market = v.market
     whites = v.whites
@@ -56,7 +56,11 @@ def render(v) -> None:
         triage_rows = []
         for l in scored:
             cls = (l.get("cf_class") or l.get("classification") or "PENDING").upper()
+            show_sro = view.sro(l)
             surplus = l.get("surplus_sro") if show_sro else l.get("surplus_personal")
+            stress = l.get("stress_surplus_sro" if show_sro
+                           or l.get("stress_surplus_personal") is None
+                           else "stress_surplus_personal")
             score, grade = compute_deal_score(l)
             price = l.get("price_eur") or 0
             my = l.get("max_price_yellow")
@@ -86,7 +90,7 @@ def render(v) -> None:
                 "Rent":     v(l.get("estimated_rent_eur")   or 0),
                 "Surplus":  v(surplus if surplus is not None else 0),
                 "CF":       "⛔" if _cf_negative(l) else ("✅" if surplus is not None else ""),
-                "+2pp":     v(l.get("stress_surplus_sro")),
+                "+2pp":     v(stress),
                 "Gross%":   (l.get("gross_yield")         or 0) * 100,
                 "Cap%":     (l.get("cap_rate")            or 0) * 100,
                 "IRR%":     irr_v * 100 if irr_v is not None else None,

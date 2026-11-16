@@ -72,7 +72,12 @@ class TestRegistry:
 # Liptovský Mikuláš's at its own 0.50 €/m² since November 2026, not the 1.35
 # fallback; and the s.r.o. charged for the extra cash its lower LTV needs —
 # audit finding 5, November 2026 — which moved its break-even months and
-# turned Ružinov's recommendation from s.r.o. to personal)
+# turned Ružinov's recommendation from s.r.o. to personal; and the s.r.o.'s
+# tax as of the 12 Nov 2026 audit, finding 4 — 7 % dividend tax, the €340
+# minimum tax and depreciation — which moved its tax, surplus, stress test
+# and IRR and nothing else; and, from the same audit's finding 10, every
+# municipality's okres: Šurany now has Nitriansky kraj's median and rent
+# instead of none, and "Staré Mesto, Košice" Košice I's rent, not Košice II's)
 def _golden():
     with open(os.path.join(HERE, "fixtures", "sk_golden.json"), encoding="utf-8") as f:
         return json.load(f)

@@ -173,7 +173,7 @@ class TestAggregate:
 class TestEngineUsesLiveRates:
     @pytest.mark.parametrize("district,key", [
         ("Bratislava - Rača", "rača"), ("okres Žilina", "žilina"),
-        ("Staré Mesto, Košice", "košice ii"),   # not Bratislava's Staré Mesto ("", "default"),
+        ("Staré Mesto, Košice", "košice i"),    # Košice I's, not Bratislava's Staré Mesto ("", "default"),
         ("Kysucké Nové Mesto", "kysucké nové mesto"), ("Atlantis", "default"),
     ])
     def test_match_rent_key(self, district, key):

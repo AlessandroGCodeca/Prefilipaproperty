@@ -16,7 +16,7 @@ def render_white_table(whites, v) -> None:
     import pandas as pd
     rows = []
     for l in whites:
-        surplus = l.get("surplus_sro") if v.show_sro else l.get("surplus_personal")
+        surplus = v.surplus(l)
         disc = l.get("market_discount")
         rows.append({
             "Title":    (l.get("title") or l.get("district") or "—")[:60],
