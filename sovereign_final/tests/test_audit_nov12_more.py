@@ -150,6 +150,16 @@ def test_a_damaged_file_is_never_restored(backup_dirs):
         if (backup_dirs / "backups").exists() else True
 
 
+def test_an_empty_live_database_leaves_no_pre_restore_copy(tmp_path, monkeypatch):
+    # The database the app uses is asked, not config.SQLITE_PATH on disk.
+    from modules import backup
+    monkeypatch.setattr(backup, "BACKUP_DIR", str(tmp_path / "backups"))
+    empty = str(tmp_path / "empty.db")
+    monkeypatch.setattr(backup.database, "get_conn", lambda: sqlite3.connect(empty))
+    assert backup.save_live_copy() is None
+    assert not (tmp_path / "backups").exists()
+
+
 # ── S3: due-diligence checklist and documents ────────────────────────────────
 def test_the_checklist_and_documents_are_kept_and_exported(full_db, tmp_path, monkeypatch):
     import json

@@ -178,15 +178,17 @@ def run_backup(day: date | None = None) -> str:
 
 def save_live_copy() -> str | None:
     """Copy the live database to backups/pre-restore-<time>.db (SQLite's
-    online backup) and return its path; None when there is no database yet."""
-    from config import SQLITE_PATH
-    if not os.path.isfile(SQLITE_PATH):
-        return None
-    os.makedirs(BACKUP_DIR, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S")
-    target = os.path.join(BACKUP_DIR, f"{PRE_RESTORE_PREFIX}{stamp}.db")
+    online backup) and return its path; None when it holds nothing yet.
+
+    It asks the database the app uses (database.get_conn) rather than looking
+    for config.SQLITE_PATH on disk: that is the one the restore overwrites."""
     src = database.get_conn()
     try:
+        if not src.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone():
+            return None
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S")
+        target = os.path.join(BACKUP_DIR, f"{PRE_RESTORE_PREFIX}{stamp}.db")
         dst = sqlite3.connect(target + ".part")
         try:
             src.backup(dst)
