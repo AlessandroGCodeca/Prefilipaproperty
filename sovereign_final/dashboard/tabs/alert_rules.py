@@ -24,7 +24,9 @@ def rules_frame(rules: list[dict]):
              "market": r.get("market") or _ANY,
              "classes": (r.get("classes") or "").replace(",", ", "),
              "grades": (r.get("grades") or "").replace(",", ", ")} for r in rules]
-    return pd.DataFrame(rows, columns=_COLUMNS).astype({"enabled": bool})
+    # Numbers as floats: a blank one is then NaN, shown empty (None read "None").
+    return pd.DataFrame(rows, columns=_COLUMNS).astype(
+        {"enabled": bool, "min_size": float, "max_price_eur": float, "min_surplus": float})
 
 
 def rows_from_editor(frame) -> list[dict]:
