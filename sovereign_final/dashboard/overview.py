@@ -156,15 +156,39 @@ def render(v, sb) -> None:
         if _lvl == "error" and (view_market in (None, _m)):
             st.error(f"{_m.upper()} — {_txt}")
 
-    # A portal that has gone quiet: nothing new from it, and its listings are
-    # kept rather than retired (database/portal_runs.py).
+    # The page's notes (portals gone quiet, an old exchange rate, how the
+    # markets split, Czech listings waiting for a rent, what the filters hide)
+    # are one line with "details", not a stack of boxes above the tabs.
+    notes: list[tuple[str, str, str]] = []      # (short, kind, full html/text)
     if not using_demo:
         from dashboard.listing_cache import quiet_portals
         for _q in quiet_portals():
             if view_market in (None, _q["market"]):
-                st.warning(quiet_portal_note(_q))
+                notes.append(("a portal is quiet", "warning", quiet_portal_note(_q)))
+    _per_market = {m: sum(1 for l in data if l.get("_market") == m) for m in markets.MARKET_CODES}
+    if _per_market.get("cz"):
+        from modules import fx_rate as _fx
+        _fx_warn = _fx.stale_warning()
+        if _fx_warn:
+            notes.append(("old EUR/CZK rate", "warning", f"⚠ {_fx_warn}"))
+    if view_market is None and sum(1 for n in _per_market.values() if n) > 1:
+        notes.append((" · ".join(f'{m.upper()} {n}' for m, n in _per_market.items()), "muted",
+                      " · ".join(f'{"🇸🇰" if m == "sk" else "🇨🇿"} {m.upper()} {n}'
+                                 for m, n in _per_market.items())
+                      + f" · tables compare in EUR at {esc(markets.fx_note())}; each card "
+                        f"keeps its own currency"))
+    if not using_demo and view_market in (None, "cz"):
+        from dashboard.listing_cache import waiting_for_rent
+        _waiting = waiting_for_rent("cz")
+        if _waiting:
+            notes.append((f"{sum(_waiting.values())} CZ waiting for a rent", "muted",
+                           waiting_note(_waiting)))
+    if n_hidden:
+        notes.append((f"{n_hidden} hidden by filters", "muted",
+                      f"Showing {len(data)} of {n_loaded} listings · {n_hidden} hidden by "
+                      f"the sidebar filters"))
 
-    # ── Stats bar ─────────────────────────────────────────────────────────────────
+    # ── Stats bar and portal health, side by side ─────────────────────────────────
     # The tiles count the listings the page shows, so they move with the sidebar
     # filters: Total = Green + Yellow + White + Pending. Rejected listings are
     # never shown in the lists; their tile counts the ones the same filters
@@ -177,7 +201,7 @@ def render(v, sb) -> None:
         "rejected": sum(1 for l in rejected_rows if passes_filters(l, by_class=False)),
         "pending":  len(pending),
     }
-    st.markdown(f"""
+    tiles = f"""
 <div class="sg">
   <div class="sc b"><div class="sn">{shown['total']}</div><div class="sl">Total</div></div>
   <div class="sc g"><div class="sn">{shown['green']}</div><div class="sl">Green</div></div>
@@ -186,38 +210,30 @@ def render(v, sb) -> None:
   <div class="sc r"><div class="sn">{shown['rejected']}</div><div class="sl">Rejected</div></div>
   <div class="sc a"><div class="sn">{shown['pending']}</div><div class="sl">Pending</div></div>
 </div>
-""", unsafe_allow_html=True)
+"""
     # Portal health: what each portal's latest run returned, its week, when.
+    _strip = ""
     if not using_demo:
         from dashboard.listing_cache import portal_health
         _strip = portal_strip(portal_health(), view_market)
-        if _strip:
+    if _strip:
+        t_col, s_col = st.columns([3, 2], gap="small")
+        with t_col:
+            st.markdown(tiles, unsafe_allow_html=True)
+        with s_col:
             st.markdown(_strip, unsafe_allow_html=True)
-    # With both markets on the page, how the tiles split between them.
-    _per_market = {m: sum(1 for l in data if l.get("_market") == m) for m in markets.MARKET_CODES}
-    if _per_market.get("cz"):
-        from modules import fx_rate as _fx
-        _fx_warn = _fx.stale_warning()
-        if _fx_warn:
-            st.warning(f"⚠ {_fx_warn}")
-    if view_market is None and sum(1 for n in _per_market.values() if n) > 1:
-        st.markdown('<div class="muted" style="margin:-10px 0 14px">'
-                    + " · ".join(f'{"🇸🇰" if m == "sk" else "🇨🇿"} {m.upper()} {n}'
-                                 for m, n in _per_market.items())
-                    + f" · tables compare in EUR at {esc(markets.fx_note())}; each card "
-                      f"keeps its own currency</div>", unsafe_allow_html=True)
-    # Czech listings the scorer passes over: their town has no rent figure yet
-    # (engine/rent_cz) and too few rental comps for a live one.
-    if not using_demo and view_market in (None, "cz"):
-        from dashboard.listing_cache import waiting_for_rent
-        _waiting = waiting_for_rent("cz")
-        if _waiting:
-            st.markdown(f'<div class="muted" style="margin:-10px 0 14px">'
-                        f'{waiting_note(_waiting)}</div>', unsafe_allow_html=True)
-    if n_hidden:
-        st.markdown(f'<div class="muted" style="margin:-10px 0 14px">Showing {len(data)} of '
-                    f'{n_loaded} listings · {n_hidden} hidden by the sidebar filters</div>',
-                    unsafe_allow_html=True)
+    else:
+        st.markdown(tiles, unsafe_allow_html=True)
+    if notes:
+        warn = any(kind == "warning" for _s, kind, _f in notes)
+        with st.expander(("⚠ " if warn else "ℹ️ ") + " · ".join(short for short, _k, _f in notes)
+                         + " — details"):
+            for _short, kind, full in notes:
+                if kind == "warning":
+                    st.warning(full)
+                else:
+                    st.markdown(f'<div class="muted" style="margin:2px 0 6px">{full}</div>',
+                                unsafe_allow_html=True)
 
     # ── Price-cut alerts ──────────────────────────────────────────────────────────
     _drops = [] if using_demo else [_tag_market(d) for d in price_drops(days=14)

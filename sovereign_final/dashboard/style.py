@@ -34,16 +34,18 @@ section[data-testid="stSidebar"] {
 }
 
 /* Stat grid */
-.sg { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:6px; margin-bottom:18px; }
+.sg { display:grid; grid-template-columns:repeat(auto-fit,minmax(78px,1fr)); gap:6px; margin-bottom:8px; }
 .sc {
     background:#0b0d14; border:1px solid #151924; border-radius:3px;
-    padding:12px 14px; position:relative; overflow:hidden;
+    padding:8px 10px; position:relative; overflow:hidden;
 }
+/* Less empty space over the page: the tabs start higher (finding 21). */
+[data-testid="stMainBlockContainer"], section.main .block-container { padding-top:2.2rem; }
 .sc::before { content:''; position:absolute; top:0;left:0;right:0; height:2px; }
 .sc.g::before { background:#00e676; } .sc.y::before { background:#ffd740; }
 .sc.w::before { background:#37474f; } .sc.r::before { background:#ff5252; }
 .sc.b::before { background:#448aff; } .sc.a::before { background:#ff9100; }
-.sn { font-family:var(--mono); font-size:1.9rem; font-weight:700; color:#e4eaf5; line-height:1; }
+.sn { font-family:var(--mono); font-size:1.45rem; font-weight:700; color:#e4eaf5; line-height:1; }
 .sc.g .sn { color:#00e676; } .sc.y .sn { color:#ffd740; }
 .sc.r .sn { color:#ff5252; } .sc.b .sn { color:#448aff; }
 .sl { font-size:0.6rem; text-transform:uppercase; letter-spacing:1.5px; color:#7a89a8; margin-top:5px; }
@@ -70,7 +72,7 @@ section[data-testid="stSidebar"] {
 .brow.pos .v { color:#00e676; } .brow.neg .v { color:#ff5252; }
 
 /* Portal health strip: one chip per portal */
-.ph { display:flex; flex-wrap:wrap; gap:6px; margin:-8px 0 14px; }
+.ph { display:flex; flex-wrap:wrap; gap:4px; margin:0 0 8px; }
 .phc { font-family:var(--mono); font-size:0.66rem; color:#8a98b5; white-space:nowrap;
        padding:3px 8px; border:1px solid #151924; border-radius:3px; background:#0b0d14; }
 .phc b { color:#e4eaf5; }

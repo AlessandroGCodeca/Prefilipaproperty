@@ -21,7 +21,7 @@ class TestUrlMarkers:
 
 class TestTitleMarkers:
     @pytest.mark.parametrize("title", [
-        "Novostavba 2-izbový byt centrum",
+        "Novostavba - posledné voľné byty, centrum",
         "Predaj bytov od €145 900",
         "ZELENÉ ZÁLUHY 2. fáza",
         "Nový projekt v Petržalke",
@@ -61,9 +61,9 @@ class TestEdgeCases:
 
     def test_case_insensitive(self):
         # Markers should match regardless of source casing
-        assert detect_dev_project("", "NOVOSTAVBA Centrum") == 1
-        assert detect_dev_project("", "novostavba centrum") == 1
-        assert detect_dev_project("", "Novostavba Centrum") == 1
+        assert detect_dev_project("", "NOVOSTAVBA BYTOV Centrum") == 1
+        assert detect_dev_project("", "novostavba bytov centrum") == 1
+        assert detect_dev_project("", "Novostavba Bytov Centrum") == 1
 
     def test_od_eur_needs_leading_space(self):
         # " od €" pattern must NOT match arbitrary " od " or "€" — must be

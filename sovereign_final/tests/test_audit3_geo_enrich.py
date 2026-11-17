@@ -29,16 +29,26 @@ class _Resp:
         return self._payload
 
 
+def _new_api(result):
+    """A legacy-shaped fixture as Places API (New) answers it."""
+    try:
+        loc = result["geometry"]["location"]
+        return {"location": {"latitude": loc["lat"], "longitude": loc["lng"]}}
+    except (KeyError, TypeError):
+        return {"displayName": {"text": result.get("name", "")}}
+
+
 def _stub_places(monkeypatch, results, calls=None):
     """Replace location_iq's requests with one that answers Nearby Search
-    with `results`, in the order given (Google's prominence order)."""
-    def get(url, params=None, timeout=None, **kw):
+    (Places API (New)) with `results`, in the order given (Google's
+    prominence order)."""
+    def post(url, json=None, headers=None, timeout=None, **kw):
         if calls is not None:
-            calls.append((url, dict(params or {})))
+            calls.append((url, dict(json or {}), dict(headers or {})))
         assert url == liq.PLACES_URL, f"unexpected request to {url}"
-        return _Resp({"results": results})
+        return _Resp({"places": [_new_api(r) for r in results]})
     monkeypatch.setattr(liq, "GOOGLE_API_KEY", "test-key")
-    monkeypatch.setattr(liq, "requests", SimpleNamespace(get=get))
+    monkeypatch.setattr(liq, "requests", SimpleNamespace(post=post))
 
 
 def _dist(point):
@@ -82,7 +92,7 @@ class TestGoogleNearestTransit:
         def boom(*a, **k):
             raise ConnectionError("offline")
         monkeypatch.setattr(liq, "GOOGLE_API_KEY", "test-key")
-        monkeypatch.setattr(liq, "requests", SimpleNamespace(get=boom))
+        monkeypatch.setattr(liq, "requests", SimpleNamespace(post=boom))
         assert liq.nearest_transit(*FLAT) == 9999.0
 
     def test_request_itself_is_unchanged(self, monkeypatch):
@@ -90,10 +100,26 @@ class TestGoogleNearestTransit:
         _stub_places(monkeypatch, [NEAR_STOP], calls)
         liq.nearest_transit(*FLAT)
         assert len(calls) == 1
-        url, params = calls[0]
-        assert url == liq.PLACES_URL
-        assert params["radius"] == 2000 and params["type"] == "transit_station"
-        assert params["location"] == f"{FLAT[0]},{FLAT[1]}"
+        url, body, headers = calls[0]
+        assert url == liq.PLACES_URL == "https://places.googleapis.com/v1/places:searchNearby"
+        circle = body["locationRestriction"]["circle"]
+        assert circle["radius"] == 2000 and body["includedTypes"] == ["transit_station"]
+        assert circle["center"] == {"latitude": FLAT[0], "longitude": FLAT[1]}
+        assert headers["X-Goog-Api-Key"] == "test-key"
+        assert headers["X-Goog-FieldMask"] == "places.location"
+
+    def test_a_refused_key_falls_back_to_openstreetmap(self, monkeypatch):
+        # A key for a project where Places API (New) isn't enabled.
+        def post(url, **kw):
+            return _Resp({"error": {"message": "Places API (New) has not been used"}}, 403)
+        monkeypatch.setattr(liq, "GOOGLE_API_KEY", "test-key")
+        monkeypatch.setattr(liq, "requests", SimpleNamespace(post=post))
+        monkeypatch.setattr(liq, "_osm_counts", lambda lat, lng: {
+            "nearest_transit_m": 240.0, "grocery_count": 2, "pharmacy_count": 1,
+            "school_count": 1})
+        assert liq.nearest_transit(*FLAT) == 240.0
+        assert liq.count_amenities(*FLAT) == {"grocery_count": 2, "pharmacy_count": 1,
+                                              "school_count": 1}
 
     def test_scoring_run_stores_the_nearest_stop_and_its_points(self, monkeypatch):
         """End to end with a Google key: the stop at the door earns the

@@ -114,10 +114,29 @@ DRAW_ORDER = (triage, snag_list, map_view, what_if, deal_pipeline, rejected, lv_
               rent_comps, tax_rates, satellite, close, compare, alert_rules, auctions, portfolio,
               backtest)
 
+# The tab you were on comes back after a reload (and in a bookmark): kept in
+# the address as ?group=…&tab=….
+def _remember(param: str, key: str) -> None:
+    value = st.session_state.get(key)
+    if value:
+        st.query_params[param] = value
+
+
+_groups = [g for g, _ in TAB_GROUPS]
+_qp_group = st.query_params.get("group")
 _page_tab = {}
-for group, (_label, pages) in zip(st.tabs([g for g, _ in TAB_GROUPS]), TAB_GROUPS):
+for group, (_label, pages) in zip(
+        st.tabs(_groups, key="tab_group", default=_qp_group if _qp_group in _groups else None,
+                on_change=_remember, args=("group", "tab_group")),
+        TAB_GROUPS):
     with group:
-        for tab, (_name, page) in zip(st.tabs([n for n, _ in pages]), pages):
+        _names = [n for n, _ in pages]
+        _qp_tab = st.query_params.get("tab")
+        _key = f"tab_in_{_names[0]}"
+        for tab, (_name, page) in zip(
+                st.tabs(_names, key=_key, default=_qp_tab if _qp_tab in _names else None,
+                        on_change=_remember, args=("tab", _key)),
+                pages):
             _page_tab[page] = tab
 for page in DRAW_ORDER:
     with _page_tab[page]:

@@ -336,7 +336,21 @@ def upsert_location(data: dict):
         # MAPS buttons) reads l["lat"]/l["lng"] via get_all_active's l.*, and
         # location_scores' lat/lng are not part of that select. A portal's own pin
         # is never overwritten by a geocode.
+        # The same check as a scraped pin: a geocode outside the listing's
+        # country (a namesake village abroad) is not put on its row.
         if data.get("lat") is not None and data.get("lng") is not None:
+            import sqlite3
+
+            from scraper.geo import as_pin
+            try:
+                row = conn.execute("SELECT market FROM listings WHERE id=?",
+                                   (data["listing_id"],)).fetchone()
+            except sqlite3.OperationalError:     # a database from before markets
+                row = None
+            market = (row[0] if row and row[0] else "sk")
+            if not as_pin(data["lat"], data["lng"], market):
+                conn.commit()
+                return
             _ensure_enrichment_columns(conn)
             conn.execute(
                 "UPDATE listings SET lat=:lat, lng=:lng, coords_source='geocode' "
