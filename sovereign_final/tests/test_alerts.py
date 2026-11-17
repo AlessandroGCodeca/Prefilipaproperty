@@ -49,6 +49,8 @@ def tg(monkeypatch):
     monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", TOKEN)
     monkeypatch.setattr(config, "TELEGRAM_CHAT_ID", "42")
     monkeypatch.setattr(config, "ALERT_CLASSES", ["GREEN", "YELLOW"])
+    monkeypatch.setattr(config, "ALERT_GRADES", [])
+    monkeypatch.setattr(config, "ALERT_MIN_SURPLUS", None)
     monkeypatch.setattr(config, "ALERT_FAILURES", True)
     return Fake
 
@@ -100,17 +102,98 @@ def test_the_first_run_counts_the_deals_then_only_new_ones_are_sent(db, tg, ever
     assert alerts.run() == "nothing new"         # each deal once
 
 
-def test_only_green_and_yellow_deals_that_pay_are_alerted(db, tg, monkeypatch):
+def test_the_built_in_rule_is_green_and_yellow_whatever_the_cash_flow(db, tg, monkeypatch):
+    # Audit of 12 Nov 2026, finding 2: asking for break-even silenced the
+    # alerts, since at ordinary financing almost no GREEN flat breaks even.
     from engine import financial
     from modules import alerts
     alerts.run()                                 # baseline on an empty database
     _add(db, "white", ratio=1.0)                 # at market: WHITE
-    monkeypatch.setattr(financial, "CASHFLOW_MIN_SURPLUS", 1e9)   # nothing pays
+    monkeypatch.setattr(financial, "CASHFLOW_MIN_SURPLUS", 1e9)   # nothing "pays"
     _add(db, "green_loses")
-    assert alerts.run() == "nothing new"
-    monkeypatch.setattr(financial, "CASHFLOW_MIN_SURPLUS", -1e9)  # everything pays
     assert alerts.run().startswith("sent: 1 deal")
     assert "green_loses" in tg.sent[-1] and "white" not in tg.sent[-1]
+
+
+def test_a_least_surplus_from_env_keeps_out_what_costs_more(db, tg, monkeypatch):
+    from modules import alerts
+    alerts.run()
+    _add(db, "g1")
+    surplus = alerts.qualifying_deals()[0]["_best"]
+    monkeypatch.setattr(config, "ALERT_MIN_SURPLUS", surplus + 1)
+    assert alerts.run() == "nothing new"
+    monkeypatch.setattr(config, "ALERT_MIN_SURPLUS", surplus - 1)
+    assert alerts.run().startswith("sent: 1 deal")
+
+
+def test_saved_rules_replace_the_built_in_one(db, tg):
+    from modules import alerts
+    alerts.run()
+    _add(db, "zilina")
+    _add(db, "nitra", district="Nitra", address_raw="Nitra")
+    db.save_alert_rules([{"name": "Nitra watch", "district": "nitra", "classes": "GREEN, yellow"},
+                         {"name": "off", "enabled": False, "classes": "GREEN"},
+                         {"name": "", "classes": "GREEN"}])          # no name: dropped
+    assert [r["name"] for r in db.get_alert_rules()] == ["Nitra watch", "off"]
+    assert alerts.run().startswith("sent: 1 deal")
+    msg = tg.sent[-1]
+    assert "nitra" in msg and "zilina" not in msg and "🔎 Nitra watch" in msg
+
+
+def test_a_rule_reads_grade_size_price_and_market(db):
+    from modules import alerts
+    row = {"id": "x", "cf_class": "GREEN", "district": "Bratislava - Petržalka", "size_m2": 55,
+           "price_eur": 150_000, "currency": "EUR", "market": "sk", "optimal_structure": "PERSONAL",
+           "surplus_personal": -120, "surplus_sro": 50, "cap_rate": 0.05, "market_discount": 0.25}
+    rule = alerts.builtin_rule()
+    assert alerts.matches(row, rule)
+    assert not alerts.matches(row, {**rule, "market": "cz"})
+    assert not alerts.matches(row, {**rule, "min_size": 60})
+    assert not alerts.matches(row, {**rule, "max_price_eur": 140_000})
+    assert alerts.matches(row, {**rule, "district": "petrzalka"})          # without diacritics
+    # The surplus is the recommended structure's (personal here), not the better one.
+    assert not alerts.matches(row, {**rule, "min_surplus": -100})
+    assert alerts.matches(row, {**rule, "min_surplus": -150})
+    assert alerts.matches(row, {**rule, "grades": "A,B"}, grade="A")
+    assert not alerts.matches(row, {**rule, "grades": "A,B"}, grade="C")
+
+
+def test_a_deal_you_were_told_about_comes_back_when_it_turns_green_or_is_cut(db, tg):
+    from modules import alerts
+    alerts.run()
+    _add(db, "y1", ratio=0.86)                   # YELLOW
+    assert alerts.run().startswith("sent: 1 deal")
+    assert alerts.run() == "nothing new"
+    # Cut to GREEN: one message saying both.
+    from engine.regional_prices import regional_median_price
+    db.upsert_listing(make_listing("y1", price_eur=float(round(regional_median_price("Žilina")
+                                                               * 55 * 0.7)),
+                                   size_m2=55.0, scraped_at=_now(5), last_seen_at=_now()))
+    from modules.cashflow_runner import run_scoring
+    run_scoring()
+    out = alerts.run()
+    assert "1 now GREEN" in out and "1 cut again" in out
+    assert "Now GREEN" in tg.sent[-1] and "Cut since you were told" in tg.sent[-1]
+    assert alerts.run() == "nothing new"          # each once
+
+
+def test_saving_rules_can_note_what_fits_now(db, tg):
+    from modules import alerts
+    alerts.run()
+    _add(db, "g1")
+    db.save_alert_rules([{"name": "all", "classes": "GREEN,YELLOW"}])
+    assert alerts.note_existing() == 1
+    assert alerts.run() == "nothing new"
+
+
+def test_a_message_never_passes_telegrams_limit(db):
+    from modules import alerts
+    issues = [(f"k{i}", "⚠ " + "x" * 300) for i in range(40)]
+    cuts = [{"title": "t" * 60, "url": "https://e.sk", "_stage": "OFFER", "price_eur": 1,
+             "_cut": -0.1, "currency": "EUR"} for _ in range(40)]
+    msg = alerts.build_message([], cuts, issues)
+    assert len(msg) <= alerts.MESSAGE_MAX
+    assert "more on the dashboard" in msg
 
 
 def test_a_rejected_flat_is_never_alerted(db, tg, every_deal_pays):
@@ -141,7 +224,7 @@ def test_a_price_cut_on_a_tracked_deal_is_alerted_once(db, tg):
     db.set_deal_stage("t1", "VIEWING", "")
     db.upsert_listing(make_listing("t1", price_eur=141_000.0, scraped_at=_now(20),
                                    last_seen_at=_now(1)))
-    assert alerts.run().startswith("sent: 0 deal(s), 1 cut")
+    assert alerts.run().endswith("1 tracked cut(s), 0 issue(s)")
     assert "−6.0%" in tg.sent[-1] or "-6.0%" in tg.sent[-1]
     assert "[VIEWING]" in tg.sent[-1]
     assert alerts.run() == "nothing new"

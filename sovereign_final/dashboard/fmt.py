@@ -114,6 +114,29 @@ def last_seen_label(l, cz: bool = False) -> str:
 
 
 STALE_WARN_DAYS = 7
+# A PASS this old may have been overtaken by a new entry on the deed.
+LV_OLD_DAYS = 30
+
+
+def lv_checked_label(l, cz: bool = False) -> str:
+    """"checked 3 Nov (9 days ago)" for a listing whose title deed was
+    checked — with a ⚠ on a PASS older than LV_OLD_DAYS, which says the deed
+    was clean then, not now. "" when no check is on record."""
+    from datetime import datetime
+    stamp = l.get("lv_checked_at")
+    days = days_since(stamp)
+    if days is None:
+        return ""
+    when = datetime.fromisoformat(stamp.strip())
+    ago = ("today" if days == 0 else "yesterday" if days == 1 else f"{days} days ago")
+    if cz:
+        ago = ("dnes" if days == 0 else "včera" if days == 1 else f"před {days} dny")
+    old = (l.get("lv_status") or "").upper() in ("PASS", "CLEAN") and days > LV_OLD_DAYS
+    text = f"{'ověřeno' if cz else 'checked'} {when.day}. {when.month}. {when.year} ({ago})"
+    if old:
+        text += (" ⚠ starý výsledek — ověřte znovu" if cz
+                 else " ⚠ an old result — re-verify before relying on it")
+    return text
 
 
 def badge(cls, text):
@@ -226,6 +249,7 @@ CZ_LABELS = {
     "Income Tax": "Daň z příjmů", "Health Levy": "Zdravotní pojištění",
     "s.r.o. running cost": "Provoz s.r.o.", "TOTAL COSTS": "NÁKLADY CELKEM",
     "NET SURPLUS": "ČISTÝ PŘEBYTEK", "FINANCING STRESS (s.r.o.)": "STRESOVÝ TEST (s.r.o.)",
+    "FINANCING STRESS": "STRESOVÝ TEST",
     "Rate +2 pp": "Sazba +2 p. b.", "70% LTV (3rd+ flat)": "LTV 70 % (investiční)",
     "self-funding": "samofinancování", "cash in": "vlastní zdroje",
     "LOCATION IQ": "LOKALITA", "Transit": "MHD", "Amenities": "Vybavenost",

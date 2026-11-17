@@ -399,6 +399,8 @@ _CASHFLOW_NEW_COLUMNS = {
     "max_price_green":           "REAL",
     "max_price_yellow":          "REAL",
     "stress_surplus_sro":        "REAL",
+    "stress_surplus_personal":   "REAL",
+    "stress_ratio_personal":     "REAL",
     "stress_ratio_sro":          "REAL",
     "irr_sro":                   "REAL",
     "irr_personal":              "REAL",
@@ -686,7 +688,10 @@ def _rescreen_lv_passes(conn) -> int:
     - version 2 added transfer bans, which the screen used to pass as clean:
       every PASS is checked again;
     - version 3 made the owners' statutory lien (§ 15 of Act 182/1993) a soft
-      flag: every flat rejected on a lien is checked again."""
+      flag: every flat rejected on a lien is checked again;
+    - version 4 added twelve kinds of entry and stopped passing a part C
+      entry no rule names (every PASS again), and recognises one-word bank
+      names such as Privatbanka and SLSP (every lien rejection again)."""
     from modules.lv_screen import RULES_VERSION
     conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)")
     row = conn.execute("SELECT value FROM app_state WHERE key = 'lv_rules_sk'").fetchone()
@@ -694,17 +699,20 @@ def _rescreen_lv_passes(conn) -> int:
     if stored >= RULES_VERSION:
         return 0
     n = 0
-    if stored < 2:
+    # Every version so far changes what a PASS means (2, 4) or which liens
+    # reject (3, 4), so both groups go back whenever the rules are newer.
+    if stored < 4:
         n += conn.execute(
             "UPDATE listings SET lv_status = 'PENDING', "
-            "lv_detail = 'Checked again under updated LV rules (transfer bans).' "
+            "lv_detail = 'Checked again under updated LV rules (more kinds of entry "
+            "are read; an entry the screen has no rule for no longer passes).' "
             "WHERE lv_status IN ('PASS', 'CLEAN') AND COALESCE(market, 'sk') = 'sk'"
         ).rowcount
-    if stored < 3 and _has_table(conn, "rejections_log"):
+    if stored < 4 and _has_table(conn, "rejections_log"):
         n += conn.execute(
             "UPDATE listings SET lv_status = 'PENDING', "
             "lv_detail = 'Checked again under updated LV rules (the owners'' statutory "
-            "lien no longer rejects).' "
+            "lien and more banks'' names no longer reject).' "
             "WHERE lv_status = 'REJECTED' AND COALESCE(market, 'sk') = 'sk' "
             "AND id IN (SELECT listing_id FROM rejections_log WHERE reason = 'záložné právo')"
         ).rowcount

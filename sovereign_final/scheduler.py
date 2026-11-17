@@ -576,6 +576,13 @@ def run_all_markets(trigger: str = "06:00", holder: str | None = None,
 
     def run_them():
         _refresh_fx()
+        # Your own figures, when the dashboard's panel changed them since
+        # this process started (modules/settings).
+        try:
+            from modules import settings
+            settings.sync()
+        except Exception as e:
+            log.warning(f"Settings not re-read: {type(e).__name__}: {e}")
         offset = 0
         for m in todo:
             # The scheduler's run (owed_at: the time it found m owed) may have

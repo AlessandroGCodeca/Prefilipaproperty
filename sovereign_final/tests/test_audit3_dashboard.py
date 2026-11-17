@@ -470,10 +470,9 @@ def test_a_slovak_place_without_a_median_is_no_longer_graded_on_cap_rate_alone()
         row = {**_golden_row(c), "lv_status": "PENDING"}
         assert row["market_discount"] is None
         assert compute_deal_score(row) == compute_deal_score({**row, "market_discount": 0.0})
-    # Šurany has a cap rate and no median: it graded A on cap rate alone.
-    row = {**_golden_row(next(c for c in no_median if c["district"] == "Šurany")),
-           "lv_status": "PENDING"}
-    assert row["cap_rate"]
+    # A place with a cap rate and no median graded A on cap rate alone (it was
+    # Šurany, which has its kraj's median since the municipality list).
+    row = {**_golden_row(no_median[0]), "lv_status": "PENDING", "cap_rate": 0.07}
     assert _grade_before_the_fix(row)[1] == "A"
     assert compute_deal_score(row)[0] < _grade_before_the_fix(row)[0]
     assert compute_deal_score(row)[1] != "A"

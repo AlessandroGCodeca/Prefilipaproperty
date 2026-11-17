@@ -25,7 +25,7 @@ class View:
     market: str | None          # the market picked at the top; None = all of them
     cur: str                    # the currency money columns and totals are shown in
     using_demo: bool            # the demo rows, not the database
-    show_sro: bool              # the s.r.o. toggle: which structure's figures show
+    structure: str              # whose figures show: "best" (recommended), "personal", "sro"
     busy: bool                  # a pipeline job is running
     data: list                  # the listings the filters let through, this market's
     rejected_rows: list         # LV-rejected listings, this market's
@@ -41,6 +41,8 @@ class View:
     in_view: Callable           # (row) → it belongs to the market picked
     in_view_cur: Callable       # (row, amount) → the amount in `cur`
     money_col: Callable         # (name, help=None, pinned=None) → a money column in `cur`
+    sro: Callable               # (row) → the figures shown for it are the s.r.o.'s
+    surplus: Callable           # (row) → the monthly surplus of the structure shown
     cf_negative: Callable       # (row) → the structure shown loses money monthly
     passes_filters: Callable    # (row, by_class=True) → the sidebar filters let it through
     hidden_note: Callable       # (what="listings") → the "filters hid it" line
@@ -77,7 +79,7 @@ def build(sb, view_market) -> View:
     req_furnished = sb.req_furnished
     req_parking = sb.req_parking
     show_demo = sb.show_demo
-    show_sro = sb.show_sro
+    structure = sb.structure
     sources = sb.sources
     # The currency money columns and totals are shown in: the market's own when
     # one is picked, EUR for all of them together.
@@ -156,11 +158,16 @@ def build(sb, view_market) -> View:
     for l in rejected_rows:
         l["_ph"]      = price_hist.get(l.get("id"))
 
-    from engine.financial import is_cashflow_negative
+    from engine.financial import is_cashflow_negative, shown_surplus, shows_sro
+
+    def _sro(l) -> bool:
+        """The figures shown for this listing are the s.r.o.'s (the sidebar's
+        "Figures shown": the recommended structure unless one is picked)."""
+        return shows_sro(l, structure)
 
     def _shown_surplus(l):
-        """The monthly surplus of the structure on screen (the s.r.o. toggle)."""
-        return l.get("surplus_sro") if show_sro else l.get("surplus_personal")
+        """The monthly surplus of the structure on screen."""
+        return shown_surplus(l, structure)
 
     def _cf_negative(l) -> bool:
         return is_cashflow_negative(_shown_surplus(l), **mkw(l))
@@ -242,7 +249,8 @@ def build(sb, view_market) -> View:
                 f"🔎 FILL MISSING DETAILS looks them up.")
 
     return View(
-        market=view_market, cur=VIEW_CUR, using_demo=using_demo, show_sro=show_sro,
+        market=view_market, cur=VIEW_CUR, using_demo=using_demo, structure=structure,
+        sro=_sro, surplus=_shown_surplus,
         busy=_busy, data=data, rejected_rows=rejected_rows, greens=greens,
         yellows=yellows, whites=whites, pending=pending, n_loaded=n_loaded,
         n_scored_loaded=n_scored_loaded, n_hidden=n_hidden, stages=stages,

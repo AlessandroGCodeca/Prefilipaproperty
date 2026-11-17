@@ -88,22 +88,41 @@ def set_lv_analysis(listing_id: str, risk_level: str, summary: str = ""):
 _LV_ROW_COLUMNS = """
     id, address_raw, district, lat, lng, coords_source,
     cadastral_area, cadastral_number, cadastral_unit_code,
-    plot_lv_number, lv_number, market
+    plot_lv_number, lv_number, market, lv_status
 """
+# The stages from which a tracked deal's PASS is read again weekly.
+_LATE_STAGES = ("OFFER", "NEGOTIATING", "DUE DILIGENCE", "NOTARY")
 
 
-def get_pending_lv(recheck_days: int = 7, market: str | None = None):
+def get_pending_lv(recheck_days: int = 7, market: str | None = None,
+                   pass_days: int = 0, deal_days: int = 0):
     """Listings the LV debt filter should (re)check: every PENDING one, and an
     UNVERIFIED one that has something new to check with — a portal map pin or
     a flat LV number — once its last check is `recheck_days` old (a portal
     outage or a pin off the building shouldn't park it forever). `market`
-    keeps one market's; None returns all, each row carrying its market."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=recheck_days)).isoformat()
+    keeps one market's; None returns all, each row carrying its market.
+
+    A PASS is read again too, once its check is `pass_days` old — or
+    `deal_days` old for a deal tracked in OFFER or later — so a lien or an
+    exekúcia entered since doesn't sit behind an old tick (0: never; the row's
+    lv_status says it is a re-read)."""
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=recheck_days)).isoformat()
     conn = _db.get_conn()
     try:
         _ensure_enrichment_columns(conn)
         _ensure_market_columns(conn)
         only, params = _market_sql(conn, market)
+        again, again_params = "", ()
+        if pass_days and pass_days > 0:
+            again += ("OR (lv_status IN ('PASS', 'CLEAN') AND COALESCE(lv_number, '') != '' "
+                      "AND lv_checked_at < ?) ")
+            again_params += ((now - timedelta(days=pass_days)).isoformat(),)
+        if deal_days and deal_days > 0 and _has_table(conn, "deal_stages"):
+            again += ("OR (lv_status IN ('PASS', 'CLEAN') AND COALESCE(lv_number, '') != '' "
+                      "AND lv_checked_at < ? AND id IN (SELECT listing_id FROM deal_stages "
+                      f"WHERE stage IN ({','.join('?' * len(_LATE_STAGES))}))) ")
+            again_params += ((now - timedelta(days=deal_days)).isoformat(), *_LATE_STAGES)
         rows = conn.execute(f"""
             SELECT {_LV_ROW_COLUMNS}
             FROM listings
@@ -112,8 +131,9 @@ def get_pending_lv(recheck_days: int = 7, market: str | None = None):
                 OR (lv_status='UNVERIFIED'
                     AND (coords_source='listing' OR COALESCE(lv_number, '') != '')
                     AND (lv_checked_at IS NULL OR lv_checked_at < ?))
+                {again}
             ){only}
-        """, (cutoff, *params)).fetchall()
+        """, (cutoff, *again_params, *params)).fetchall()
     finally:
         conn.close()
     return [dict(r) for r in rows]

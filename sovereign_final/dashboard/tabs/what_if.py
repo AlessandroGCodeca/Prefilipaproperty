@@ -180,7 +180,8 @@ def render(v) -> None:
     # The class is price vs market; the delta is what it earns a month under
     # the better structure (red and pointing down when it costs money).
     k1.metric("Class", r.classification,
-              delta=f"{sgn(cur, max(r.surplus_personal, r.surplus_sro), '')} cash flow",
+              delta=f"{sgn(cur, r.surplus_sro if best_sro else r.surplus_personal, '')} cash flow "
+                    f"({best_tag})",
               help=(f"{abs(r.market_discount):.0%} "
                     f"{'below' if r.market_discount >= 0 else 'above'} the regional median "
                     f"{sym}/m² ({benchmark_note(wi_district, wi_rooms or None, **mk)}) · s.r.o. "
@@ -248,10 +249,16 @@ def render(v) -> None:
                          if _fin.PERSONAL_INTEREST_DEDUCTIBLE else
                          "interest not deducted (PERSONAL_INTEREST_DEDUCTIBLE=1 in .env "
                          "deducts it — ask your účtovník first)")
+            _rules = _fin.tax_rules(r.tax_year)
+            _dep = ("the flat depreciated over 40 years up to its rent"
+                    if _fin.SRO_DEPRECIATION else "no depreciation (SRO_DEPRECIATION=0)")
             st.caption(f"Tax rules {r.tax_year}. Personal: §6(3) passive rental, €500 exempt, no "
                        f"health levy, {_interest}; sale exempt after 5 years. s.r.o.: "
-                       "company loan on its own terms, interest and running cost deductible, "
-                       "corporate + 10% dividend tax; the sale is taxed whenever it happens. "
+                       f"company loan on its own terms, interest, running cost and {_dep} "
+                       f"deductible, corporate tax (at least the €"
+                       f"{_fin.sro_minimum_tax(r.estimated_rent * 12, _rules):,.0f} minimum tax) + "
+                       f"{_rules['dividend_tax']:.0%} dividend tax; the sale is taxed whenever it "
+                       f"happens, depreciation coming back as gain. "
                        "s.r.o. is recommended only when it nets more than personal and repays "
                        "its setup cost within the hold. Confirm with an účtovník.")
         else:
@@ -276,3 +283,118 @@ def render(v) -> None:
         flows = (irr_s if best_sro else irr_p).cash_flows
         st.bar_chart(pd.DataFrame({"Year": list(range(len(flows))),
                                    sym: flows}).set_index("Year"), height=180)
+
+    render_offers(v, dict(price=wi_price, size=wi_size, district=wi_district, sym=sym, cur=cur,
+                          sk=sk, mk=mk, structure="SRO" if best_sro else "PERSONAL",
+                          base=dict(ltv=wi_ltv, rate=wi_rate, term=wi_term), irr_kw=irr_kw))
+
+
+# ── Comparing banks' offers (audit of 12 Nov 2026, S6) ────────────────────────
+OFFER_COLUMNS = ["Bank", "Rate %", "Fixed for (years)", "Rate after %", "Term (years)",
+                 "LTV %", "Fees once", "Monthly costs"]
+
+
+def offers_default(base: dict) -> "pd.DataFrame":
+    """Two example lines from the what-if's own financing: the same rate
+    fixed for 3 and for 5 years, each resetting 1.5 pp higher."""
+    rate, term, ltv = base["rate"] * 100, base["term"], base["ltv"] * 100
+    return pd.DataFrame([
+        {"Bank": "Offer A", "Rate %": round(rate, 2), "Fixed for (years)": 3,
+         "Rate after %": round(rate + 1.5, 2), "Term (years)": term, "LTV %": ltv,
+         "Fees once": 0.0, "Monthly costs": 0.0},
+        {"Bank": "Offer B", "Rate %": round(rate + 0.2, 2), "Fixed for (years)": 5,
+         "Rate after %": round(rate + 1.5, 2), "Term (years)": term, "LTV %": ltv,
+         "Fees once": 0.0, "Monthly costs": 0.0},
+    ], columns=OFFER_COLUMNS)
+
+
+def compare_offers(ctx: dict, offers) -> list[dict]:
+    """Each offer worked through the hold: the monthly payment before and
+    after its fixation ends, the cash flow in year 1 and in the year after
+    the reset, the cash put in and the IRR — for the structure recommended."""
+    from engine.financial import calc_mortgage, loan_schedule, project_irr
+    out = []
+    for row in offers:
+        try:
+            rate = float(row["Rate %"]) / 100
+            term = int(row["Term (years)"])
+            ltv = float(row["LTV %"]) / 100
+            fix = int(row["Fixed for (years)"] or 0) or None
+            after = row.get("Rate after %")
+            after = float(after) / 100 if after is not None and after == after else None
+            fees = float(row.get("Fees once") or 0)
+            monthly = float(row.get("Monthly costs") or 0)
+        except (TypeError, ValueError, KeyError):
+            continue
+        if not (0 <= rate < 0.5 and 1 <= term <= 40 and 0 <= ltv <= 1):
+            continue
+        loan = ctx["price"] * ltv
+        sched = loan_schedule(loan, rate, term, fix, after)
+        kw = {**ctx["irr_kw"], "ltv": ltv, "rate": rate, "term_years": term}
+        res = project_irr(ctx["price"], ctx["size"], ctx["district"], structure=ctx["structure"],
+                          fixation_years=fix, reset_rate=after, loan_fees=fees,
+                          monthly_loan_costs=monthly, **kw)
+        flows, hold = res.cash_flows, res.hold_years
+        reset_year = (fix + 1) if fix and after is not None and fix < term else None
+        out.append({
+            "Bank": str(row.get("Bank") or "—"),
+            "Payment": calc_mortgage(loan, rate, term) + monthly,
+            "Payment after fixation": (sched[reset_year - 1][3] / 12 + monthly
+                                       if reset_year and reset_year <= term else None),
+            "Cash flow year 1 /mo": flows[1] / 12 if hold > 1 else None,
+            "Cash flow after reset /mo": (flows[reset_year] / 12
+                                          if reset_year and reset_year < hold else None),
+            "Cash in": -flows[0],
+            "IRR %": res.irr * 100 if res.irr is not None else None,
+            "Profit": res.total_profit,
+        })
+    return out
+
+
+def render_offers(v, ctx: dict) -> None:
+    """🏦 COMPARE MORTGAGE OFFERS: a line per bank's offer, worked through
+    the hold with the rate reset when its fixation ends."""
+    st.markdown('<hr class="div">', unsafe_allow_html=True)
+    if not st.toggle("🏦 Compare mortgage offers (fixation and the rate after it)",
+                     key="wi_offers_on",
+                     help="Type in two or three banks' offers: the rate, how long it is fixed, "
+                          "what you expect after that, fees. Each is worked through the hold "
+                          "with the bank recomputing the payment when the fixation ends — how "
+                          "Slovak and Czech mortgages reprice."):
+        return
+    sym = ctx["sym"]
+    st.markdown(f'<div class="muted">For the structure recommended ({ctx["structure"].lower()}), '
+                f'over the hold above. “Rate after” is your guess at the market rate when the '
+                f'fixation ends; leave it blank to keep the rate. Fees once (processing, valuation) '
+                f'are paid at the start; monthly costs (account, insurance the bank requires) every '
+                f'month. Amounts in {sym}.</div>', unsafe_allow_html=True)
+    edited = st.data_editor(
+        offers_default(ctx["base"]), num_rows="dynamic", hide_index=True, width="stretch",
+        key=f"wi_offers_{ctx['price']}_{ctx['size']}",
+        column_config={
+            "Rate %": st.column_config.NumberColumn(min_value=0.0, max_value=20.0, step=0.01),
+            "Fixed for (years)": st.column_config.NumberColumn(min_value=0, max_value=30, step=1),
+            "Rate after %": st.column_config.NumberColumn(min_value=0.0, max_value=20.0, step=0.01),
+            "Term (years)": st.column_config.NumberColumn(min_value=1, max_value=40, step=1),
+            "LTV %": st.column_config.NumberColumn(min_value=0, max_value=100, step=5),
+            "Fees once": st.column_config.NumberColumn(min_value=0, step=50),
+            "Monthly costs": st.column_config.NumberColumn(min_value=0, step=1),
+        })
+    results = compare_offers(ctx, edited.to_dict("records"))
+    if not results:
+        st.info("Enter at least one offer with a rate, a term and an LTV.")
+        return
+    money_cfg = (st.column_config.NumberColumn(format="euro", step=1) if ctx["sk"]
+                 else st.column_config.NumberColumn(format="localized", step=1))
+    st.dataframe(pd.DataFrame(results), hide_index=True, width="stretch",
+                 column_config={c: money_cfg for c in ("Payment", "Payment after fixation",
+                                                       "Cash flow year 1 /mo",
+                                                       "Cash flow after reset /mo", "Cash in",
+                                                       "Profit")}
+                 | {"IRR %": st.column_config.NumberColumn(format="%.2f")})
+    best = max((r for r in results if r["IRR %"] is not None), key=lambda r: r["IRR %"],
+               default=None)
+    if best:
+        st.caption(f"Best over the hold: {best['Bank']} (IRR {best['IRR %']:.2f} %). A lower "
+                   f"rate fixed for a short time can lose to a dearer one fixed longer once "
+                   f"the rate after it is higher.")

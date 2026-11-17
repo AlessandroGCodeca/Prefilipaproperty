@@ -1,0 +1,8534 @@
+{
+"source": "Wikidata: Q6784672 'municipality of Slovakia', its Slovak label and P131 (okres), read 2026-11-16 (scraper.property_tax_rates.municipalities)",
+"okres_kraj": {
+"BA": [
+"Bratislava I",
+"Bratislava II",
+"Bratislava III",
+"Bratislava IV",
+"Bratislava V",
+"Malacky",
+"Pezinok",
+"Senec"
+],
+"TT": [
+"Dunajská Streda",
+"Galanta",
+"Hlohovec",
+"Piešťany",
+"Senica",
+"Skalica",
+"Trnava"
+],
+"TN": [
+"Bánovce nad Bebravou",
+"Ilava",
+"Myjava",
+"Nové Mesto nad Váhom",
+"Partizánske",
+"Považská Bystrica",
+"Prievidza",
+"Púchov",
+"Trenčín"
+],
+"NR": [
+"Komárno",
+"Levice",
+"Nitra",
+"Nové Zámky",
+"Šaľa",
+"Topoľčany",
+"Zlaté Moravce"
+],
+"ZA": [
+"Bytča",
+"Čadca",
+"Dolný Kubín",
+"Kysucké Nové Mesto",
+"Liptovský Mikuláš",
+"Martin",
+"Námestovo",
+"Ružomberok",
+"Turčianske Teplice",
+"Tvrdošín",
+"Žilina"
+],
+"BB": [
+"Banská Bystrica",
+"Banská Štiavnica",
+"Brezno",
+"Detva",
+"Krupina",
+"Lučenec",
+"Poltár",
+"Revúca",
+"Rimavská Sobota",
+"Veľký Krtíš",
+"Zvolen",
+"Žarnovica",
+"Žiar nad Hronom"
+],
+"PO": [
+"Bardejov",
+"Humenné",
+"Kežmarok",
+"Levoča",
+"Medzilaborce",
+"Poprad",
+"Prešov",
+"Sabinov",
+"Snina",
+"Stará Ľubovňa",
+"Stropkov",
+"Svidník",
+"Vranov nad Topľou"
+],
+"KE": [
+"Gelnica",
+"Košice I",
+"Košice II",
+"Košice III",
+"Košice IV",
+"Košice-okolie",
+"Michalovce",
+"Rožňava",
+"Sobrance",
+"Spišská Nová Ves",
+"Trebišov"
+]
+},
+"municipalities": {
+"Abovce": [
+"Rimavská Sobota"
+],
+"Abrahám": [
+"Galanta"
+],
+"Abrahámovce": [
+"Bardejov",
+"Kežmarok"
+],
+"Abramová": [
+"Turčianske Teplice"
+],
+"Abranovce": [
+"Prešov"
+],
+"Adamovské Kochanovce": [
+"Trenčín"
+],
+"Adidovce": [
+"Humenné"
+],
+"Alekšince": [
+"Nitra"
+],
+"Andovce": [
+"Nové Zámky"
+],
+"Andrejová": [
+"Bardejov"
+],
+"Ardanovce": [
+"Topoľčany"
+],
+"Ardovo": [
+"Rožňava"
+],
+"Arnutovce": [
+"Spišská Nová Ves"
+],
+"Babie": [
+"Vranov nad Topľou"
+],
+"Babindol": [
+"Nitra"
+],
+"Babinec": [
+"Rimavská Sobota"
+],
+"Babiná": [
+"Zvolen"
+],
+"Babín": [
+"Námestovo"
+],
+"Bacúch": [
+"Brezno"
+],
+"Bacúrov": [
+"Zvolen"
+],
+"Badín": [
+"Banská Bystrica"
+],
+"Bajany": [
+"Michalovce"
+],
+"Bajerov": [
+"Prešov"
+],
+"Bajerovce": [
+"Sabinov"
+],
+"Bajka": [
+"Levice"
+],
+"Bajtava": [
+"Nové Zámky"
+],
+"Bajč": [
+"Komárno"
+],
+"Baka": [
+"Dunajská Streda"
+],
+"Baldovce": [
+"Levoča"
+],
+"Balog nad Ipľom": [
+"Veľký Krtíš"
+],
+"Baloň": [
+"Dunajská Streda"
+],
+"Baláže": [
+"Banská Bystrica"
+],
+"Banka": [
+"Piešťany"
+],
+"Banská Belá": [
+"Banská Štiavnica"
+],
+"Banská Bystrica": [
+"Banská Bystrica"
+],
+"Banská Štiavnica": [
+"Banská Štiavnica"
+],
+"Banské": [
+"Vranov nad Topľou"
+],
+"Banský Studenec": [
+"Banská Štiavnica"
+],
+"Bara": [
+"Trebišov"
+],
+"Barca": [
+"Rimavská Sobota"
+],
+"Bardejov": [
+"Bardejov"
+],
+"Bardejovská Nová Ves": [
+"Bardejov"
+],
+"Bardoňovo": [
+"Nové Zámky"
+],
+"Bartošova Lehôtka": [
+"Žiar nad Hronom"
+],
+"Bartošovce": [
+"Bardejov"
+],
+"Batizovce": [
+"Poprad"
+],
+"Bačka": [
+"Trebišov"
+],
+"Bačkov": [
+"Trebišov"
+],
+"Bačkovík": [
+"Košice-okolie"
+],
+"Baďan": [
+"Banská Štiavnica"
+],
+"Baňa": [
+"Stropkov"
+],
+"Baška": [
+"Košice-okolie"
+],
+"Baškovce": [
+"Humenné",
+"Sobrance"
+],
+"Bašovce": [
+"Piešťany"
+],
+"Becherov": [
+"Bardejov"
+],
+"Beckov": [
+"Nové Mesto nad Váhom"
+],
+"Beharovce": [
+"Levoča"
+],
+"Beladice": [
+"Zlaté Moravce"
+],
+"Belejovce": [
+"Svidník"
+],
+"Belina": [
+"Lučenec"
+],
+"Belince": [
+"Topoľčany"
+],
+"Bellova Ves": [
+"Dunajská Streda"
+],
+"Beloveža": [
+"Bardejov"
+],
+"Beluj": [
+"Banská Štiavnica"
+],
+"Beluša": [
+"Púchov"
+],
+"Belá": [
+"Nové Zámky",
+"Žilina"
+],
+"Belá nad Cirochou": [
+"Snina"
+],
+"Belá-Dulice": [
+"Martin"
+],
+"Belín": [
+"Rimavská Sobota"
+],
+"Belža": [
+"Košice-okolie"
+],
+"Beniakovce": [
+"Košice-okolie"
+],
+"Benice": [
+"Martin"
+],
+"Benkovce": [
+"Vranov nad Topľou"
+],
+"Bernolákovo": [
+"Senec"
+],
+"Bertotovce": [
+"Prešov"
+],
+"Betlanovce": [
+"Spišská Nová Ves"
+],
+"Betliar": [
+"Rožňava"
+],
+"Beňadikovce": [
+"Svidník"
+],
+"Beňadiková": [
+"Liptovský Mikuláš"
+],
+"Beňadovo": [
+"Námestovo"
+],
+"Beňatina": [
+"Sobrance"
+],
+"Beňuš": [
+"Brezno"
+],
+"Beša": [
+"Levice",
+"Michalovce"
+],
+"Bešeňov": [
+"Nové Zámky"
+],
+"Bešeňová": [
+"Ružomberok"
+],
+"Bežovce": [
+"Sobrance"
+],
+"Bidovce": [
+"Košice-okolie"
+],
+"Biel": [
+"Trebišov"
+],
+"Bielovce": [
+"Levice"
+],
+"Biely Kostol": [
+"Trnava"
+],
+"Bijacovce": [
+"Levoča"
+],
+"Biskupice": [
+"Lučenec"
+],
+"Biskupová": [
+"Topoľčany"
+],
+"Bitarová": [
+"Žilina"
+],
+"Blahová": [
+"Dunajská Streda"
+],
+"Blatnica": [
+"Martin"
+],
+"Blatná Polianka": [
+"Sobrance"
+],
+"Blatná na Ostrove": [
+"Dunajská Streda"
+],
+"Blatné": [
+"Senec"
+],
+"Blatné Remety": [
+"Sobrance"
+],
+"Blatné Revištia": [
+"Sobrance"
+],
+"Blažice": [
+"Košice-okolie"
+],
+"Blažovce": [
+"Turčianske Teplice"
+],
+"Blesovce": [
+"Topoľčany"
+],
+"Blhovce": [
+"Rimavská Sobota"
+],
+"Bobot": [
+"Trenčín"
+],
+"Bobrov": [
+"Námestovo"
+],
+"Bobrovec": [
+"Liptovský Mikuláš"
+],
+"Bobrovník": [
+"Liptovský Mikuláš"
+],
+"Bobrovček": [
+"Liptovský Mikuláš"
+],
+"Bodiná": [
+"Považská Bystrica"
+],
+"Bodorová": [
+"Turčianske Teplice"
+],
+"Bodovce": [
+"Sabinov"
+],
+"Bodružal": [
+"Svidník"
+],
+"Bodza": [
+"Komárno"
+],
+"Bodzianske Lúky": [
+"Komárno"
+],
+"Bodíky": [
+"Dunajská Streda"
+],
+"Bogliarka": [
+"Bardejov"
+],
+"Bohdanovce": [
+"Košice-okolie"
+],
+"Bohdanovce nad Trnavou": [
+"Trnava"
+],
+"Boheľov": [
+"Dunajská Streda"
+],
+"Bohunice": [
+"Ilava",
+"Levice"
+],
+"Bohúňovo": [
+"Rožňava"
+],
+"Bojničky": [
+"Hlohovec"
+],
+"Bojná": [
+"Topoľčany"
+],
+"Boldog": [
+"Senec"
+],
+"Boleráz": [
+"Trnava"
+],
+"Bolešov": [
+"Ilava"
+],
+"Boliarov": [
+"Košice-okolie"
+],
+"Borcová": [
+"Turčianske Teplice"
+],
+"Borinka": [
+"Malacky"
+],
+"Borovce": [
+"Piešťany"
+],
+"Borová": [
+"Trnava"
+],
+"Borský Mikuláš": [
+"Senica"
+],
+"Borský Svätý Jur": [
+"Senica"
+],
+"Bory": [
+"Levice"
+],
+"Borčany": [
+"Bánovce nad Bebravou"
+],
+"Borčice": [
+"Ilava"
+],
+"Borša": [
+"Trebišov"
+],
+"Bottovo": [
+"Rimavská Sobota"
+],
+"Bočiar": [
+"Košice-okolie"
+],
+"Boľ": [
+"Trebišov"
+],
+"Boľkovce": [
+"Lučenec"
+],
+"Bošany": [
+"Partizánske"
+],
+"Bošáca": [
+"Nové Mesto nad Váhom"
+],
+"Boťany": [
+"Trebišov"
+],
+"Bracovce": [
+"Michalovce"
+],
+"Branovo": [
+"Nové Zámky"
+],
+"Branč": [
+"Nitra"
+],
+"Braväcovo": [
+"Brezno"
+],
+"Brdárka": [
+"Rožňava"
+],
+"Brehov": [
+"Trebišov"
+],
+"Brehy": [
+"Žarnovica"
+],
+"Brekov": [
+"Humenné"
+],
+"Brestov": [
+"Humenné",
+"Prešov"
+],
+"Brestov nad Laborcom": [
+"Medzilaborce"
+],
+"Brestovany": [
+"Trnava"
+],
+"Brestovec": [
+"Komárno",
+"Myjava"
+],
+"Bretejovce": [
+"Prešov"
+],
+"Bretka": [
+"Rožňava"
+],
+"Breza": [
+"Námestovo"
+],
+"Brezany": [
+"Žilina"
+],
+"Brezina": [
+"Trebišov"
+],
+"Breziny": [
+"Zvolen"
+],
+"Breznica": [
+"Stropkov"
+],
+"Breznička": [
+"Poltár",
+"Stropkov"
+],
+"Brezno": [
+"Brezno"
+],
+"Brezolupy": [
+"Bánovce nad Bebravou"
+],
+"Brezov": [
+"Bardejov"
+],
+"Brezovec": [
+"Snina"
+],
+"Brezovica": [
+"Sabinov",
+"Tvrdošín"
+],
+"Brezovička": [
+"Sabinov"
+],
+"Brezovka": [
+"Bardejov"
+],
+"Brezová pod Bradlom": [
+"Myjava"
+],
+"Brežany": [
+"Prešov"
+],
+"Brhlovce": [
+"Levice"
+],
+"Brieštie": [
+"Turčianske Teplice"
+],
+"Brodské": [
+"Skalica"
+],
+"Brodzany": [
+"Partizánske"
+],
+"Brunovce": [
+"Nové Mesto nad Váhom"
+],
+"Brusnica": [
+"Stropkov"
+],
+"Brusno": [
+"Banská Bystrica"
+],
+"Brusník": [
+"Veľký Krtíš"
+],
+"Brutovce": [
+"Levoča"
+],
+"Bruty": [
+"Nové Zámky"
+],
+"Brvnište": [
+"Považská Bystrica"
+],
+"Brzotín": [
+"Rožňava"
+],
+"Buclovany": [
+"Bardejov"
+],
+"Budikovany": [
+"Rimavská Sobota"
+],
+"Budimír": [
+"Košice-okolie"
+],
+"Budince": [
+"Michalovce"
+],
+"Budiná": [
+"Lučenec"
+],
+"Budiš": [
+"Turčianske Teplice"
+],
+"Budkovce": [
+"Michalovce"
+],
+"Budmerice": [
+"Pezinok"
+],
+"Budča": [
+"Zvolen"
+],
+"Buglovce": [
+"Levoča"
+],
+"Bukovce": [
+"Stropkov"
+],
+"Bukovec": [
+"Košice-okolie",
+"Myjava"
+],
+"Bukovina": [
+"Liptovský Mikuláš"
+],
+"Buková": [
+"Trnava"
+],
+"Bulhary": [
+"Lučenec"
+],
+"Bunetice": [
+"Košice-okolie"
+],
+"Bunkovce": [
+"Sobrance"
+],
+"Buzica": [
+"Košice-okolie"
+],
+"Buzitka": [
+"Lučenec"
+],
+"Bučany": [
+"Trnava"
+],
+"Bušince": [
+"Veľký Krtíš"
+],
+"Bušovce": [
+"Kežmarok"
+],
+"Bystrany": [
+"Spišská Nová Ves"
+],
+"Bystričany": [
+"Prievidza"
+],
+"Bystrička": [
+"Martin"
+],
+"Bystrá": [
+"Brezno",
+"Stropkov"
+],
+"Bystré": [
+"Vranov nad Topľou"
+],
+"Bytča": [
+"Bytča"
+],
+"Byšta": [
+"Trebišov"
+],
+"Bzenica": [
+"Žiar nad Hronom"
+],
+"Bzenov": [
+"Prešov"
+],
+"Bzince pod Javorinou": [
+"Nové Mesto nad Váhom"
+],
+"Bziny": [
+"Dolný Kubín"
+],
+"Bzovská Lehôtka": [
+"Zvolen"
+],
+"Bzovík": [
+"Krupina"
+],
+"Báb": [
+"Nitra"
+],
+"Bádice": [
+"Nitra"
+],
+"Báhoň": [
+"Pezinok"
+],
+"Bánov": [
+"Nové Zámky"
+],
+"Bánovce nad Bebravou": [
+"Bánovce nad Bebravou"
+],
+"Bánovce nad Ondavou": [
+"Michalovce"
+],
+"Bátka": [
+"Rimavská Sobota"
+],
+"Bátorove Kosihy": [
+"Komárno"
+],
+"Bátorová": [
+"Veľký Krtíš"
+],
+"Bátovce": [
+"Levice"
+],
+"Báč": [
+"Dunajská Streda"
+],
+"Bílkove Humence": [
+"Senica"
+],
+"Bíňa": [
+"Nové Zámky"
+],
+"Bíňovce": [
+"Trnava"
+],
+"Bôrka": [
+"Rožňava"
+],
+"Búč": [
+"Komárno"
+],
+"Bžany": [
+"Stropkov"
+],
+"Cabaj-Čápor": [
+"Nitra"
+],
+"Cabov": [
+"Vranov nad Topľou"
+],
+"Cakov": [
+"Rimavská Sobota"
+],
+"Cejkov": [
+"Trebišov"
+],
+"Cernina": [
+"Svidník"
+],
+"Cerovo": [
+"Krupina"
+],
+"Cerová": [
+"Senica"
+],
+"Cestice": [
+"Košice-okolie"
+],
+"Chanava": [
+"Rimavská Sobota"
+],
+"Chlebnice": [
+"Dolný Kubín"
+],
+"Chlmec": [
+"Humenné"
+],
+"Chmeľnica": [
+"Stará Ľubovňa"
+],
+"Chmeľov": [
+"Prešov"
+],
+"Chmeľovec": [
+"Prešov"
+],
+"Chmeľová": [
+"Bardejov"
+],
+"Chminianska Nová Ves": [
+"Prešov"
+],
+"Chminianske Jakubovany": [
+"Prešov"
+],
+"Chmiňany": [
+"Prešov"
+],
+"Chocholná-Velčice": [
+"Trenčín"
+],
+"Chorvátsky Grob": [
+"Senec"
+],
+"Chorváty": [
+"Košice-okolie"
+],
+"Chotín": [
+"Komárno"
+],
+"Chotča": [
+"Stropkov"
+],
+"Choča": [
+"Zlaté Moravce"
+],
+"Choňkovce": [
+"Sobrance"
+],
+"Chrabrany": [
+"Topoľčany"
+],
+"Chrastince": [
+"Veľký Krtíš"
+],
+"Chrastné": [
+"Košice-okolie"
+],
+"Chrasť nad Hornádom": [
+"Spišská Nová Ves"
+],
+"Chrenovec-Brusno": [
+"Prievidza"
+],
+"Chropov": [
+"Skalica"
+],
+"Chrámec": [
+"Rimavská Sobota"
+],
+"Chrťany": [
+"Veľký Krtíš"
+],
+"Chtelnica": [
+"Piešťany"
+],
+"Chudá Lehota": [
+"Bánovce nad Bebravou"
+],
+"Chvalová": [
+"Revúca"
+],
+"Chvojnica": [
+"Myjava",
+"Prievidza"
+],
+"Chynorany": [
+"Partizánske"
+],
+"Chyžné": [
+"Revúca"
+],
+"Chľaba": [
+"Nové Zámky"
+],
+"Cigeľ": [
+"Prievidza"
+],
+"Cigeľka": [
+"Bardejov"
+],
+"Cigla": [
+"Svidník"
+],
+"Cimenná": [
+"Bánovce nad Bebravou"
+],
+"Cinobaňa": [
+"Poltár"
+],
+"Cífer": [
+"Trnava"
+],
+"Daletice": [
+"Sabinov"
+],
+"Danišovce": [
+"Spišská Nová Ves"
+],
+"Dargov": [
+"Trebišov"
+],
+"Davidov": [
+"Vranov nad Topľou"
+],
+"Dačov Lom": [
+"Veľký Krtíš"
+],
+"Debraď": [
+"Košice-okolie"
+],
+"Dechtice": [
+"Trnava"
+],
+"Dedačov": [
+"Humenné"
+],
+"Dedina Mládeže": [
+"Komárno"
+],
+"Dedinka": [
+"Nové Zámky"
+],
+"Dedinky": [
+"Rožňava"
+],
+"Dekýš": [
+"Banská Štiavnica"
+],
+"Demandice": [
+"Levice"
+],
+"Demjata": [
+"Prešov"
+],
+"Demänovská Dolina": [
+"Liptovský Mikuláš"
+],
+"Detrík": [
+"Vranov nad Topľou"
+],
+"Detva": [
+"Detva"
+],
+"Detvianska Huta": [
+"Detva"
+],
+"Devičany": [
+"Levice"
+],
+"Devičie": [
+"Krupina"
+],
+"Dežerice": [
+"Bánovce nad Bebravou"
+],
+"Diakovce": [
+"Šaľa"
+],
+"Diaková": [
+"Martin"
+],
+"Diviacka Nová Ves": [
+"Prievidza"
+],
+"Diviaky nad Nitricou": [
+"Prievidza"
+],
+"Divina": [
+"Žilina"
+],
+"Divinka": [
+"Žilina"
+],
+"Divín": [
+"Lučenec"
+],
+"Dlhoňa": [
+"Svidník"
+],
+"Dlhá": [
+"Trnava"
+],
+"Dlhá Ves": [
+"Rožňava"
+],
+"Dlhá nad Kysucou": [
+"Čadca"
+],
+"Dlhá nad Oravou": [
+"Dolný Kubín"
+],
+"Dlhá nad Váhom": [
+"Šaľa"
+],
+"Dlhé Klčovo": [
+"Vranov nad Topľou"
+],
+"Dlhé Pole": [
+"Žilina"
+],
+"Dlhé Stráže": [
+"Levoča"
+],
+"Dlhé nad Cirochou": [
+"Snina"
+],
+"Dlžín": [
+"Prievidza"
+],
+"Dobrohošť": [
+"Dunajská Streda"
+],
+"Dobroslava": [
+"Svidník"
+],
+"Dobroč": [
+"Lučenec"
+],
+"Dobrá": [
+"Trebišov"
+],
+"Dobrá Niva": [
+"Zvolen"
+],
+"Dobrá Voda": [
+"Trnava"
+],
+"Dobšiná": [
+"Rožňava"
+],
+"Dohňany": [
+"Púchov"
+],
+"Dojč": [
+"Senica"
+],
+"Dolinka": [
+"Veľký Krtíš"
+],
+"Dolná Breznica": [
+"Púchov"
+],
+"Dolná Krupá": [
+"Trnava"
+],
+"Dolná Lehota": [
+"Brezno"
+],
+"Dolná Mariková": [
+"Považská Bystrica"
+],
+"Dolná Mičiná": [
+"Banská Bystrica"
+],
+"Dolná Poruba": [
+"Trenčín"
+],
+"Dolná Seč": [
+"Levice"
+],
+"Dolná Streda": [
+"Galanta"
+],
+"Dolná Strehová": [
+"Veľký Krtíš"
+],
+"Dolná Súča": [
+"Trenčín"
+],
+"Dolná Tižina": [
+"Žilina"
+],
+"Dolná Trnávka": [
+"Žiar nad Hronom"
+],
+"Dolná Ves": [
+"Žiar nad Hronom"
+],
+"Dolná Ždaňa": [
+"Žiar nad Hronom"
+],
+"Dolné Dubové": [
+"Trnava"
+],
+"Dolné Kočkovce": [
+"Púchov"
+],
+"Dolné Lefantovce": [
+"Nitra"
+],
+"Dolné Lovčice": [
+"Trnava"
+],
+"Dolné Mladonice": [
+"Krupina"
+],
+"Dolné Naštice": [
+"Bánovce nad Bebravou"
+],
+"Dolné Obdokovce": [
+"Nitra"
+],
+"Dolné Orešany": [
+"Trnava"
+],
+"Dolné Otrokovce": [
+"Hlohovec"
+],
+"Dolné Plachtince": [
+"Veľký Krtíš"
+],
+"Dolné Saliby": [
+"Galanta"
+],
+"Dolné Semerovce": [
+"Levice"
+],
+"Dolné Srnie": [
+"Nové Mesto nad Váhom"
+],
+"Dolné Strháre": [
+"Veľký Krtíš"
+],
+"Dolné Trhovište": [
+"Hlohovec"
+],
+"Dolné Vestenice": [
+"Prievidza"
+],
+"Dolné Zahorany": [
+"Rimavská Sobota"
+],
+"Dolné Zelenice": [
+"Hlohovec"
+],
+"Dolný Badín": [
+"Krupina"
+],
+"Dolný Bar": [
+"Dunajská Streda"
+],
+"Dolný Chotár": [
+"Galanta"
+],
+"Dolný Harmanec": [
+"Banská Bystrica"
+],
+"Dolný Hričov": [
+"Žilina"
+],
+"Dolný Kalník": [
+"Martin"
+],
+"Dolný Kubín": [
+"Dolný Kubín"
+],
+"Dolný Lieskov": [
+"Považská Bystrica"
+],
+"Dolný Lopašov": [
+"Piešťany"
+],
+"Dolný Ohaj": [
+"Nové Zámky"
+],
+"Dolný Pial": [
+"Levice"
+],
+"Dolný Vadičov": [
+"Kysucké Nové Mesto"
+],
+"Dolný Štál": [
+"Dunajská Streda"
+],
+"Domadice": [
+"Levice"
+],
+"Domaniža": [
+"Považská Bystrica"
+],
+"Domaníky": [
+"Krupina"
+],
+"Domaňovce": [
+"Levoča"
+],
+"Donovaly": [
+"Banská Bystrica"
+],
+"Doľany": [
+"Levoča",
+"Pezinok"
+],
+"Drahovce": [
+"Piešťany"
+],
+"Drahňov": [
+"Michalovce"
+],
+"Dravce": [
+"Levoča"
+],
+"Dražice": [
+"Rimavská Sobota"
+],
+"Dražkovce": [
+"Martin"
+],
+"Drienica": [
+"Sabinov"
+],
+"Drienov": [
+"Prešov"
+],
+"Drienovec": [
+"Košice-okolie"
+],
+"Drienovo": [
+"Krupina"
+],
+"Drienovská Nová Ves": [
+"Prešov"
+],
+"Drienčany": [
+"Rimavská Sobota"
+],
+"Drietoma": [
+"Trenčín"
+],
+"Drnava": [
+"Rožňava"
+],
+"Družstevná pri Hornáde": [
+"Košice-okolie"
+],
+"Drábsko": [
+"Brezno"
+],
+"Drážovce": [
+"Krupina"
+],
+"Drňa": [
+"Rimavská Sobota"
+],
+"Drženice": [
+"Levice"
+],
+"Držkovce": [
+"Revúca"
+],
+"Dubinné": [
+"Bardejov"
+],
+"Dubnica nad Váhom": [
+"Ilava"
+],
+"Dubnička": [
+"Bánovce nad Bebravou"
+],
+"Dubno": [
+"Rimavská Sobota"
+],
+"Dubník": [
+"Nové Zámky"
+],
+"Dubodiel": [
+"Trenčín"
+],
+"Dubovany": [
+"Piešťany"
+],
+"Dubovce": [
+"Skalica"
+],
+"Dubovec": [
+"Rimavská Sobota"
+],
+"Dubovica": [
+"Sabinov"
+],
+"Dubová": [
+"Pezinok",
+"Svidník"
+],
+"Dubové": [
+"Turčianske Teplice",
+"Zvolen"
+],
+"Ducové": [
+"Piešťany"
+],
+"Dukovce": [
+"Svidník"
+],
+"Dulov": [
+"Ilava"
+],
+"Dulova Ves": [
+"Prešov"
+],
+"Dulovce": [
+"Komárno"
+],
+"Dulovo": [
+"Rimavská Sobota"
+],
+"Dunajov": [
+"Čadca"
+],
+"Dunajská Lužná": [
+"Senec"
+],
+"Dunajská Streda": [
+"Dunajská Streda"
+],
+"Dunajský Klátov": [
+"Dunajská Streda"
+],
+"Duplín": [
+"Stropkov"
+],
+"Dvorany nad Nitrou": [
+"Topoľčany"
+],
+"Dvorec": [
+"Bánovce nad Bebravou"
+],
+"Dvorianky": [
+"Trebišov"
+],
+"Dvorníky": [
+"Hlohovec"
+],
+"Dvorníky-Včeláre": [
+"Košice-okolie"
+],
+"Dvory nad Žitavou": [
+"Nové Zámky"
+],
+"Dúbrava": [
+"Levoča",
+"Liptovský Mikuláš",
+"Snina"
+],
+"Dúbravica": [
+"Banská Bystrica"
+],
+"Dúbravka": [
+"Michalovce"
+],
+"Dúbravy": [
+"Detva"
+],
+"Egreš": [
+"Trebišov"
+],
+"Falkušovce": [
+"Michalovce"
+],
+"Farná": [
+"Levice"
+],
+"Fačkov": [
+"Žilina"
+],
+"Fekišovce": [
+"Sobrance"
+],
+"Figa": [
+"Rimavská Sobota"
+],
+"Fijaš": [
+"Svidník"
+],
+"Fintice": [
+"Prešov"
+],
+"Fiľakovo": [
+"Lučenec"
+],
+"Fiľakovské Kováče": [
+"Lučenec"
+],
+"Folkušová": [
+"Martin"
+],
+"Forbasy": [
+"Stará Ľubovňa"
+],
+"Frička": [
+"Bardejov"
+],
+"Fričkovce": [
+"Bardejov"
+],
+"Fričovce": [
+"Prešov"
+],
+"Fulianka": [
+"Prešov"
+],
+"Gaboltov": [
+"Bardejov"
+],
+"Gabčíkovo": [
+"Dunajská Streda"
+],
+"Gajary": [
+"Malacky"
+],
+"Galanta": [
+"Galanta"
+],
+"Galovany": [
+"Liptovský Mikuláš"
+],
+"Gbelce": [
+"Nové Zámky"
+],
+"Gbely": [
+"Skalica"
+],
+"Gbeľany": [
+"Žilina"
+],
+"Gelnica": [
+"Gelnica"
+],
+"Gemer": [
+"Revúca"
+],
+"Gemerská Hôrka": [
+"Rožňava"
+],
+"Gemerská Panica": [
+"Rožňava"
+],
+"Gemerská Poloma": [
+"Rožňava"
+],
+"Gemerská Ves": [
+"Revúca"
+],
+"Gemerské Dechtáre": [
+"Rimavská Sobota"
+],
+"Gemerské Michalovce": [
+"Rimavská Sobota"
+],
+"Gemerské Teplice": [
+"Revúca"
+],
+"Gemerský Jablonec": [
+"Rimavská Sobota"
+],
+"Gemerský Sad": [
+"Revúca"
+],
+"Gemerček": [
+"Rimavská Sobota"
+],
+"Geraltov": [
+"Prešov"
+],
+"Gerlachov": [
+"Bardejov",
+"Poprad"
+],
+"Geča": [
+"Košice-okolie"
+],
+"Giglovce": [
+"Vranov nad Topľou"
+],
+"Giraltovce": [
+"Svidník"
+],
+"Girovce": [
+"Vranov nad Topľou"
+],
+"Glabušovce": [
+"Veľký Krtíš"
+],
+"Golianovo": [
+"Nitra"
+],
+"Gortva": [
+"Rimavská Sobota"
+],
+"Gočaltovo": [
+"Rožňava"
+],
+"Gočovo": [
+"Rožňava"
+],
+"Granč-Petrovce": [
+"Levoča"
+],
+"Gregorova Vieska": [
+"Lučenec"
+],
+"Gregorovce": [
+"Prešov"
+],
+"Gribov": [
+"Stropkov"
+],
+"Gruzovce": [
+"Humenné"
+],
+"Gyňov": [
+"Košice-okolie"
+],
+"Gánovce": [
+"Poprad"
+],
+"Gáň": [
+"Galanta"
+],
+"Gôtovany": [
+"Liptovský Mikuláš"
+],
+"Habovka": [
+"Tvrdošín"
+],
+"Habura": [
+"Medzilaborce"
+],
+"Hajná Nová Ves": [
+"Topoľčany"
+],
+"Hajnáčka": [
+"Rimavská Sobota"
+],
+"Hajtovka": [
+"Stará Ľubovňa"
+],
+"Haligovce": [
+"Stará Ľubovňa"
+],
+"Halič": [
+"Lučenec"
+],
+"Haluzice": [
+"Nové Mesto nad Váhom"
+],
+"Haláčovce": [
+"Bánovce nad Bebravou"
+],
+"Hamuliakovo": [
+"Senec"
+],
+"Handlová": [
+"Prievidza"
+],
+"Hanigovce": [
+"Sabinov"
+],
+"Haniska": [
+"Košice-okolie",
+"Prešov"
+],
+"Hankovce": [
+"Bardejov",
+"Humenné"
+],
+"Hanková": [
+"Rožňava"
+],
+"Hanušovce nad Topľou": [
+"Vranov nad Topľou"
+],
+"Harakovce": [
+"Levoča"
+],
+"Harhaj": [
+"Bardejov"
+],
+"Harichovce": [
+"Spišská Nová Ves"
+],
+"Harmanec": [
+"Banská Bystrica"
+],
+"Hatalov": [
+"Michalovce"
+],
+"Hatné": [
+"Považská Bystrica"
+],
+"Havaj": [
+"Stropkov"
+],
+"Havka": [
+"Kežmarok"
+],
+"Havranec": [
+"Svidník"
+],
+"Hačava": [
+"Košice-okolie"
+],
+"Hažlín": [
+"Bardejov"
+],
+"Hažín": [
+"Michalovce"
+],
+"Hažín nad Cirochou": [
+"Humenné"
+],
+"Helcmanovce": [
+"Gelnica"
+],
+"Henckovce": [
+"Rožňava"
+],
+"Henclová": [
+"Gelnica"
+],
+"Hencovce": [
+"Vranov nad Topľou"
+],
+"Hendrichovce": [
+"Prešov"
+],
+"Hermanovce": [
+"Prešov"
+],
+"Hermanovce nad Topľou": [
+"Vranov nad Topľou"
+],
+"Hertník": [
+"Bardejov"
+],
+"Hervartov": [
+"Bardejov"
+],
+"Herľany": [
+"Košice-okolie"
+],
+"Heľpa": [
+"Brezno"
+],
+"Hiadeľ": [
+"Banská Bystrica"
+],
+"Hincovce": [
+"Spišská Nová Ves"
+],
+"Hladovka": [
+"Tvrdošín"
+],
+"Hlboké": [
+"Senica"
+],
+"Hlboké nad Váhom": [
+"Bytča"
+],
+"Hlinné": [
+"Vranov nad Topľou"
+],
+"Hliník nad Hronom": [
+"Žiar nad Hronom"
+],
+"Hlivištia": [
+"Sobrance"
+],
+"Hlohovec": [
+"Hlohovec"
+],
+"Hniezdne": [
+"Stará Ľubovňa"
+],
+"Hnilec": [
+"Spišská Nová Ves"
+],
+"Hnilčík": [
+"Spišská Nová Ves"
+],
+"Hnojné": [
+"Michalovce"
+],
+"Hnúšťa": [
+"Rimavská Sobota"
+],
+"Hodejov": [
+"Rimavská Sobota"
+],
+"Hodejovec": [
+"Rimavská Sobota"
+],
+"Hodkovce": [
+"Košice-okolie"
+],
+"Hodruša-Hámre": [
+"Žarnovica"
+],
+"Hokovce": [
+"Levice"
+],
+"Holiare": [
+"Komárno"
+],
+"Holice": [
+"Dunajská Streda"
+],
+"Holiša": [
+"Lučenec"
+],
+"Holumnica": [
+"Kežmarok"
+],
+"Holíč": [
+"Skalica"
+],
+"Holčíkovce": [
+"Vranov nad Topľou"
+],
+"Honce": [
+"Rožňava"
+],
+"Hontianska Vrbica": [
+"Levice"
+],
+"Hontianske Moravce": [
+"Krupina"
+],
+"Hontianske Nemce": [
+"Krupina"
+],
+"Hontianske Tesáre": [
+"Krupina"
+],
+"Hontianske Trsťany": [
+"Levice"
+],
+"Horná Breznica": [
+"Púchov"
+],
+"Horná Krupá": [
+"Trnava"
+],
+"Horná Kráľová": [
+"Šaľa"
+],
+"Horná Lehota": [
+"Brezno",
+"Dolný Kubín"
+],
+"Horná Mariková": [
+"Považská Bystrica"
+],
+"Horná Mičiná": [
+"Banská Bystrica"
+],
+"Horná Poruba": [
+"Ilava"
+],
+"Horná Potôň": [
+"Dunajská Streda"
+],
+"Horná Seč": [
+"Levice"
+],
+"Horná Streda": [
+"Nové Mesto nad Váhom"
+],
+"Horná Strehová": [
+"Veľký Krtíš"
+],
+"Horná Súča": [
+"Trenčín"
+],
+"Horná Ves": [
+"Prievidza",
+"Žiar nad Hronom"
+],
+"Horná Štubňa": [
+"Turčianske Teplice"
+],
+"Horná Ždaňa": [
+"Žiar nad Hronom"
+],
+"Horné Chlebany": [
+"Topoľčany"
+],
+"Horné Dubové": [
+"Trnava"
+],
+"Horné Hámre": [
+"Žarnovica"
+],
+"Horné Lefantovce": [
+"Nitra"
+],
+"Horné Mladonice": [
+"Krupina"
+],
+"Horné Mýto": [
+"Dunajská Streda"
+],
+"Horné Naštice": [
+"Bánovce nad Bebravou"
+],
+"Horné Obdokovce": [
+"Topoľčany"
+],
+"Horné Orešany": [
+"Trnava"
+],
+"Horné Otrokovce": [
+"Hlohovec"
+],
+"Horné Plachtince": [
+"Veľký Krtíš"
+],
+"Horné Pršany": [
+"Banská Bystrica"
+],
+"Horné Saliby": [
+"Galanta"
+],
+"Horné Semerovce": [
+"Levice"
+],
+"Horné Srnie": [
+"Trenčín"
+],
+"Horné Strháre": [
+"Veľký Krtíš"
+],
+"Horné Trhovište": [
+"Hlohovec"
+],
+"Horné Turovce": [
+"Levice"
+],
+"Horné Vestenice": [
+"Prievidza"
+],
+"Horné Zahorany": [
+"Rimavská Sobota"
+],
+"Horné Zelenice": [
+"Hlohovec"
+],
+"Horné Štitáre": [
+"Topoľčany"
+],
+"Horný Badín": [
+"Krupina"
+],
+"Horný Bar": [
+"Dunajská Streda"
+],
+"Horný Hričov": [
+"Žilina"
+],
+"Horný Kalník": [
+"Martin"
+],
+"Horný Lieskov": [
+"Považská Bystrica"
+],
+"Horný Pial": [
+"Levice"
+],
+"Horný Tisovník": [
+"Detva"
+],
+"Horný Vadičov": [
+"Kysucké Nové Mesto"
+],
+"Horovce": [
+"Michalovce",
+"Púchov"
+],
+"Horňa": [
+"Sobrance"
+],
+"Horňany": [
+"Trenčín"
+],
+"Hoste": [
+"Galanta"
+],
+"Hostice": [
+"Rimavská Sobota"
+],
+"Hostie": [
+"Zlaté Moravce"
+],
+"Hostišovce": [
+"Rimavská Sobota"
+],
+"Hostovice": [
+"Snina"
+],
+"Hosťovce": [
+"Košice-okolie",
+"Zlaté Moravce"
+],
+"Hosťová": [
+"Nitra"
+],
+"Hozelec": [
+"Poprad"
+],
+"Hrabičov": [
+"Žarnovica"
+],
+"Hrabkov": [
+"Prešov"
+],
+"Hrabovec": [
+"Bardejov"
+],
+"Hrabovec nad Laborcom": [
+"Humenné"
+],
+"Hrabovka": [
+"Trenčín"
+],
+"Hrabová Roztoka": [
+"Snina"
+],
+"Hrabovčík": [
+"Svidník"
+],
+"Hrabské": [
+"Bardejov"
+],
+"Hrabušice": [
+"Spišská Nová Ves"
+],
+"Hrachovište": [
+"Nové Mesto nad Váhom"
+],
+"Hrachovo": [
+"Rimavská Sobota"
+],
+"Hradisko": [
+"Kežmarok"
+],
+"Hradište": [
+"Partizánske",
+"Poltár"
+],
+"Hradište pod Vrátnom": [
+"Senica"
+],
+"Hraničné": [
+"Stará Ľubovňa"
+],
+"Hranovnica": [
+"Poprad"
+],
+"Hraň": [
+"Trebišov"
+],
+"Hrašné": [
+"Myjava"
+],
+"Hrašovík": [
+"Košice-okolie"
+],
+"Hrhov": [
+"Rožňava"
+],
+"Hriadky": [
+"Trebišov"
+],
+"Hričovské Podhradie": [
+"Žilina"
+],
+"Hriňová": [
+"Detva"
+],
+"Hrišovce": [
+"Gelnica"
+],
+"Hrkovce": [
+"Levice"
+],
+"Hrlica": [
+"Revúca"
+],
+"Hrnčiarovce nad Parnou": [
+"Trnava"
+],
+"Hrnčiarska Ves": [
+"Poltár"
+],
+"Hrnčiarske Zalužany": [
+"Poltár"
+],
+"Hrochoť": [
+"Banská Bystrica"
+],
+"Hromoš": [
+"Stará Ľubovňa"
+],
+"Hronec": [
+"Brezno"
+],
+"Hronovce": [
+"Levice"
+],
+"Hronsek": [
+"Banská Bystrica"
+],
+"Hronská Breznica": [
+"Zvolen"
+],
+"Hronská Dúbrava": [
+"Žiar nad Hronom"
+],
+"Hronské Kosihy": [
+"Levice"
+],
+"Hronské Kľačany": [
+"Levice"
+],
+"Hronský Beňadik": [
+"Žarnovica"
+],
+"Hrubov": [
+"Humenné"
+],
+"Hruboňovo": [
+"Nitra"
+],
+"Hrubá Borša": [
+"Senec"
+],
+"Hrubý Šúr": [
+"Senec"
+],
+"Hrušov": [
+"Rožňava",
+"Veľký Krtíš"
+],
+"Hrušovany": [
+"Topoľčany"
+],
+"Hrušovo": [
+"Rimavská Sobota"
+],
+"Hruštín": [
+"Námestovo"
+],
+"Hrádok": [
+"Nové Mesto nad Váhom"
+],
+"Hrčeľ": [
+"Trebišov"
+],
+"Hubice": [
+"Dunajská Streda"
+],
+"Hubina": [
+"Piešťany"
+],
+"Hubovo": [
+"Rimavská Sobota"
+],
+"Hubová": [
+"Ružomberok"
+],
+"Hubošovce": [
+"Sabinov"
+],
+"Hucín": [
+"Revúca"
+],
+"Hudcovce": [
+"Humenné"
+],
+"Hul": [
+"Nové Zámky"
+],
+"Humenné": [
+"Humenné"
+],
+"Huncovce": [
+"Kežmarok"
+],
+"Hunkovce": [
+"Svidník"
+],
+"Hurbanova Ves": [
+"Senec"
+],
+"Hurbanovo": [
+"Komárno"
+],
+"Husiná": [
+"Rimavská Sobota"
+],
+"Husák": [
+"Sobrance"
+],
+"Hutka": [
+"Bardejov"
+],
+"Huty": [
+"Liptovský Mikuláš"
+],
+"Hviezdoslavov": [
+"Dunajská Streda"
+],
+"Hvozdnica": [
+"Bytča"
+],
+"Hybe": [
+"Liptovský Mikuláš"
+],
+"Háj": [
+"Košice-okolie",
+"Turčianske Teplice"
+],
+"Hájske": [
+"Šaľa"
+],
+"Hôrka": [
+"Poprad"
+],
+"Hôrka nad Váhom": [
+"Nové Mesto nad Váhom"
+],
+"Hôrky": [
+"Žilina"
+],
+"Hýľov": [
+"Košice-okolie"
+],
+"Igram": [
+"Senec"
+],
+"Ihráč": [
+"Žiar nad Hronom"
+],
+"Ihľany": [
+"Kežmarok"
+],
+"Ilava": [
+"Ilava"
+],
+"Iliašovce": [
+"Spišská Nová Ves"
+],
+"Ilija": [
+"Banská Štiavnica"
+],
+"Imeľ": [
+"Komárno"
+],
+"Inovce": [
+"Sobrance"
+],
+"Ipeľské Predmostie": [
+"Veľký Krtíš"
+],
+"Ipeľské Úľany": [
+"Levice"
+],
+"Ipeľský Sokolec": [
+"Levice"
+],
+"Istebné": [
+"Dolný Kubín"
+],
+"Ivachnová": [
+"Ružomberok"
+],
+"Ivanice": [
+"Rimavská Sobota"
+],
+"Ivanka pri Dunaji": [
+"Senec"
+],
+"Ivanka pri Nitre": [
+"Nitra"
+],
+"Ivanovce": [
+"Trenčín"
+],
+"Ivančiná": [
+"Turčianske Teplice"
+],
+"Iňa": [
+"Levice"
+],
+"Iňačovce": [
+"Michalovce"
+],
+"Iža": [
+"Komárno"
+],
+"Ižipovce": [
+"Liptovský Mikuláš"
+],
+"Ižkovce": [
+"Michalovce"
+],
+"Jablonec": [
+"Pezinok"
+],
+"Jablonica": [
+"Senica"
+],
+"Jablonka": [
+"Myjava"
+],
+"Jablonov": [
+"Levoča"
+],
+"Jablonov nad Turňou": [
+"Rožňava"
+],
+"Jablonové": [
+"Bytča",
+"Malacky"
+],
+"Jabloň": [
+"Humenné"
+],
+"Jabloňovce": [
+"Levice"
+],
+"Jacovce": [
+"Topoľčany"
+],
+"Jahodná": [
+"Dunajská Streda"
+],
+"Jaklovce": [
+"Gelnica"
+],
+"Jakovany": [
+"Sabinov"
+],
+"Jakubany": [
+"Stará Ľubovňa"
+],
+"Jakubov": [
+"Malacky"
+],
+"Jakubova Voľa": [
+"Sabinov"
+],
+"Jakubovany": [
+"Liptovský Mikuláš",
+"Sabinov"
+],
+"Jakušovce": [
+"Stropkov"
+],
+"Jalovec": [
+"Liptovský Mikuláš",
+"Prievidza"
+],
+"Jalová": [
+"Snina"
+],
+"Jalšové": [
+"Hlohovec"
+],
+"Jalšovík": [
+"Krupina"
+],
+"Jamník": [
+"Liptovský Mikuláš",
+"Spišská Nová Ves"
+],
+"Janice": [
+"Rimavská Sobota"
+],
+"Jankovce": [
+"Humenné"
+],
+"Janov": [
+"Prešov"
+],
+"Janova Lehota": [
+"Žiar nad Hronom"
+],
+"Janovce": [
+"Bardejov"
+],
+"Janovík": [
+"Prešov"
+],
+"Janík": [
+"Košice-okolie"
+],
+"Janíky": [
+"Dunajská Streda"
+],
+"Jarabina": [
+"Stará Ľubovňa"
+],
+"Jarabá": [
+"Brezno"
+],
+"Jarok": [
+"Nitra"
+],
+"Jarovnice": [
+"Sabinov"
+],
+"Jasenica": [
+"Považská Bystrica"
+],
+"Jasenie": [
+"Brezno"
+],
+"Jasenov": [
+"Humenné",
+"Sobrance"
+],
+"Jasenovce": [
+"Vranov nad Topľou"
+],
+"Jasenovo": [
+"Turčianske Teplice"
+],
+"Jasenová": [
+"Dolný Kubín"
+],
+"Jasenové": [
+"Žilina"
+],
+"Jaslovské Bohunice": [
+"Trnava"
+],
+"Jasov": [
+"Košice-okolie"
+],
+"Jasová": [
+"Nové Zámky"
+],
+"Jastrabie nad Topľou": [
+"Vranov nad Topľou"
+],
+"Jastrabie pri Michalovciach": [
+"Michalovce"
+],
+"Jastrabá": [
+"Žiar nad Hronom"
+],
+"Jatov": [
+"Nové Zámky"
+],
+"Jazernica": [
+"Turčianske Teplice"
+],
+"Jedlinka": [
+"Bardejov"
+],
+"Jedľové Kostoľany": [
+"Zlaté Moravce"
+],
+"Jelenec": [
+"Nitra"
+],
+"Jelka": [
+"Galanta"
+],
+"Jelšava": [
+"Revúca"
+],
+"Jelšovce": [
+"Nitra"
+],
+"Jelšovec": [
+"Lučenec"
+],
+"Jenkovce": [
+"Sobrance"
+],
+"Jesenské": [
+"Levice",
+"Rimavská Sobota"
+],
+"Jestice": [
+"Rimavská Sobota"
+],
+"Jezersko": [
+"Kežmarok"
+],
+"Ješkova Ves": [
+"Partizánske"
+],
+"Jovice": [
+"Rožňava"
+],
+"Jovsa": [
+"Michalovce"
+],
+"Jur nad Hronom": [
+"Levice"
+],
+"Jurkova Voľa": [
+"Svidník"
+],
+"Jurová": [
+"Dunajská Streda"
+],
+"Jurské": [
+"Kežmarok"
+],
+"Juskova Voľa": [
+"Vranov nad Topľou"
+],
+"Jánovce": [
+"Galanta",
+"Poprad"
+],
+"Kajal": [
+"Galanta"
+],
+"Kalameny": [
+"Ružomberok"
+],
+"Kalinkovo": [
+"Senec"
+],
+"Kalinov": [
+"Medzilaborce"
+],
+"Kalinovo": [
+"Poltár"
+],
+"Kalnište": [
+"Svidník"
+],
+"Kalná Roztoka": [
+"Snina"
+],
+"Kalná nad Hronom": [
+"Levice"
+],
+"Kalonda": [
+"Lučenec"
+],
+"Kaloša": [
+"Rimavská Sobota"
+],
+"Kaluža": [
+"Michalovce"
+],
+"Kalša": [
+"Košice-okolie"
+],
+"Kamanová": [
+"Topoľčany"
+],
+"Kamenec pod Vtáčnikom": [
+"Prievidza"
+],
+"Kamenica": [
+"Sabinov"
+],
+"Kamenica nad Cirochou": [
+"Humenné"
+],
+"Kamenica nad Hronom": [
+"Nové Zámky"
+],
+"Kameničany": [
+"Ilava"
+],
+"Kameničná": [
+"Komárno"
+],
+"Kamenná Poruba": [
+"Vranov nad Topľou",
+"Žilina"
+],
+"Kamenné Kosihy": [
+"Veľký Krtíš"
+],
+"Kamenný Most": [
+"Nové Zámky"
+],
+"Kamenín": [
+"Nové Zámky"
+],
+"Kameňany": [
+"Revúca"
+],
+"Kamienka": [
+"Humenné",
+"Stará Ľubovňa"
+],
+"Kanianka": [
+"Prievidza"
+],
+"Kapince": [
+"Nitra"
+],
+"Kapišová": [
+"Svidník"
+],
+"Kaplna": [
+"Senec"
+],
+"Kapušany": [
+"Prešov"
+],
+"Kapušianske Kľačany": [
+"Michalovce"
+],
+"Karlová": [
+"Martin"
+],
+"Karná": [
+"Humenné"
+],
+"Kazimír": [
+"Trebišov"
+],
+"Kačanov": [
+"Michalovce"
+],
+"Kaľamenová": [
+"Turčianske Teplice"
+],
+"Kaľava": [
+"Spišská Nová Ves"
+],
+"Kašov": [
+"Trebišov"
+],
+"Kecerovce": [
+"Košice-okolie"
+],
+"Kecerovský Lipovec": [
+"Košice-okolie"
+],
+"Kechnec": [
+"Košice-okolie"
+],
+"Kendice": [
+"Prešov"
+],
+"Kesovce": [
+"Rimavská Sobota"
+],
+"Kečkovce": [
+"Svidník"
+],
+"Kečovo": [
+"Rožňava"
+],
+"Keť": [
+"Levice"
+],
+"Kežmarok": [
+"Kežmarok"
+],
+"Kiarov": [
+"Veľký Krtíš"
+],
+"Kladzany": [
+"Vranov nad Topľou"
+],
+"Klasov": [
+"Nitra"
+],
+"Klenov": [
+"Prešov"
+],
+"Klenovec": [
+"Rimavská Sobota"
+],
+"Klenová": [
+"Snina"
+],
+"Kleňany": [
+"Veľký Krtíš"
+],
+"Klieština": [
+"Považská Bystrica"
+],
+"Klin": [
+"Námestovo"
+],
+"Klin nad Bodrogom": [
+"Trebišov"
+],
+"Klokoč": [
+"Detva"
+],
+"Klokočov": [
+"Michalovce",
+"Čadca"
+],
+"Klubina": [
+"Čadca"
+],
+"Kluknava": [
+"Gelnica"
+],
+"Klátova Nová Ves": [
+"Partizánske"
+],
+"Kláštor pod Znievom": [
+"Martin"
+],
+"Klížska Nemá": [
+"Komárno"
+],
+"Klčov": [
+"Levoča"
+],
+"Kmeťovo": [
+"Nové Zámky"
+],
+"Kobeliarovo": [
+"Rožňava"
+],
+"Kobylnice": [
+"Svidník"
+],
+"Kobyly": [
+"Bardejov"
+],
+"Koceľovce": [
+"Rožňava"
+],
+"Kochanovce": [
+"Bardejov",
+"Humenné"
+],
+"Kociha": [
+"Rimavská Sobota"
+],
+"Kocurany": [
+"Prievidza"
+],
+"Kojatice": [
+"Prešov"
+],
+"Kojšov": [
+"Gelnica"
+],
+"Kokava nad Rimavicou": [
+"Poltár"
+],
+"Kokošovce": [
+"Prešov"
+],
+"Kokšov-Bakša": [
+"Košice-okolie"
+],
+"Kolačkov": [
+"Stará Ľubovňa"
+],
+"Kolačno": [
+"Partizánske"
+],
+"Kolbasov": [
+"Snina"
+],
+"Kolbovce": [
+"Stropkov"
+],
+"Kolibabovce": [
+"Sobrance"
+],
+"Kolinovce": [
+"Spišská Nová Ves"
+],
+"Kolonica": [
+"Snina"
+],
+"Kolta": [
+"Nové Zámky"
+],
+"Koláre": [
+"Veľký Krtíš"
+],
+"Kolárovice": [
+"Bytča"
+],
+"Kolárovo": [
+"Komárno"
+],
+"Kolíňany": [
+"Nitra"
+],
+"Komjatice": [
+"Nové Zámky"
+],
+"Komjatná": [
+"Ružomberok"
+],
+"Komoča": [
+"Nové Zámky"
+],
+"Komárany": [
+"Vranov nad Topľou"
+],
+"Komárno": [
+"Komárno"
+],
+"Komárov": [
+"Bardejov"
+],
+"Komárovce": [
+"Košice-okolie"
+],
+"Koniarovce": [
+"Topoľčany"
+],
+"Konrádovce": [
+"Rimavská Sobota"
+],
+"Konská": [
+"Liptovský Mikuláš",
+"Žilina"
+],
+"Kopernica": [
+"Žiar nad Hronom"
+],
+"Koplotovce": [
+"Hlohovec"
+],
+"Koprivnica": [
+"Bardejov"
+],
+"Kopčany": [
+"Skalica"
+],
+"Kordíky": [
+"Banská Bystrica"
+],
+"Korejovce": [
+"Svidník"
+],
+"Koromľa": [
+"Sobrance"
+],
+"Korunková": [
+"Stropkov"
+],
+"Korytné": [
+"Levoča"
+],
+"Korytárky": [
+"Detva"
+],
+"Korňa": [
+"Čadca"
+],
+"Kosihovce": [
+"Veľký Krtíš"
+],
+"Kosihy nad Ipľom": [
+"Veľký Krtíš"
+],
+"Kosorín": [
+"Žiar nad Hronom"
+],
+"Kostolec": [
+"Považská Bystrica"
+],
+"Kostolište": [
+"Malacky"
+],
+"Kostolná Ves": [
+"Prievidza"
+],
+"Kostolná pri Dunaji": [
+"Senec"
+],
+"Kostolná-Záriečie": [
+"Trenčín"
+],
+"Kostolné": [
+"Myjava"
+],
+"Kostolné Kračany": [
+"Dunajská Streda"
+],
+"Kostoľany nad Hornádom": [
+"Košice-okolie"
+],
+"Kostoľany pod Tribečom": [
+"Zlaté Moravce"
+],
+"Kotešová": [
+"Bytča"
+],
+"Kotmanová": [
+"Lučenec"
+],
+"Kotrčiná Lúčka": [
+"Žilina"
+],
+"Kovarce": [
+"Topoľčany"
+],
+"Koválov": [
+"Senica"
+],
+"Koválovec": [
+"Skalica"
+],
+"Kováčovce": [
+"Veľký Krtíš"
+],
+"Kováčová": [
+"Rožňava",
+"Zvolen"
+],
+"Kozelník": [
+"Banská Štiavnica"
+],
+"Kozárovce": [
+"Levice"
+],
+"Kozí Vrbovok": [
+"Krupina"
+],
+"Kočovce": [
+"Nové Mesto nad Váhom"
+],
+"Kočín-Lančár": [
+"Piešťany"
+],
+"Koňuš": [
+"Sobrance"
+],
+"Koš": [
+"Prievidza"
+],
+"Košariská": [
+"Myjava"
+],
+"Košarovce": [
+"Humenné"
+],
+"Košeca": [
+"Ilava"
+],
+"Košecké Podhradie": [
+"Ilava"
+],
+"Košická Belá": [
+"Košice-okolie"
+],
+"Košická Polianka": [
+"Košice-okolie"
+],
+"Košické Oľšany": [
+"Košice-okolie"
+],
+"Košický Klečenov": [
+"Košice-okolie"
+],
+"Koškovce": [
+"Humenné"
+],
+"Košolná": [
+"Trnava"
+],
+"Košúty": [
+"Galanta"
+],
+"Košťany nad Turcom": [
+"Martin"
+],
+"Kožany": [
+"Bardejov"
+],
+"Kožuchov": [
+"Trebišov"
+],
+"Kožuchovce": [
+"Stropkov"
+],
+"Krahule": [
+"Žiar nad Hronom"
+],
+"Krajná Bystrá": [
+"Svidník"
+],
+"Krajná Porúbka": [
+"Svidník"
+],
+"Krajná Poľana": [
+"Svidník"
+],
+"Krajné": [
+"Myjava"
+],
+"Krajné Čierno": [
+"Svidník"
+],
+"Krakovany": [
+"Piešťany"
+],
+"Kraskovo": [
+"Rimavská Sobota"
+],
+"Krasňany": [
+"Žilina"
+],
+"Kravany": [
+"Poprad",
+"Trebišov"
+],
+"Kravany nad Dunajom": [
+"Komárno"
+],
+"Kračúnovce": [
+"Svidník"
+],
+"Kraľovany": [
+"Dolný Kubín"
+],
+"Kremnica": [
+"Žiar nad Hronom"
+],
+"Kremnické Bane": [
+"Žiar nad Hronom"
+],
+"Kremná": [
+"Stará Ľubovňa"
+],
+"Kristy": [
+"Sobrance"
+],
+"Krivany": [
+"Sabinov"
+],
+"Krivoklát": [
+"Ilava"
+],
+"Krivosúd-Bodovka": [
+"Trenčín"
+],
+"Krivá": [
+"Dolný Kubín"
+],
+"Kriváň": [
+"Detva"
+],
+"Krivé": [
+"Bardejov"
+],
+"Krišovská Liesková": [
+"Michalovce"
+],
+"Krišľovce": [
+"Stropkov"
+],
+"Križovany nad Dudváhom": [
+"Trnava"
+],
+"Krná": [
+"Poltár"
+],
+"Krnča": [
+"Topoľčany"
+],
+"Krokava": [
+"Rimavská Sobota"
+],
+"Krompachy": [
+"Spišská Nová Ves"
+],
+"Krpeľany": [
+"Martin"
+],
+"Krtovce": [
+"Topoľčany"
+],
+"Krupina": [
+"Krupina"
+],
+"Kručov": [
+"Stropkov"
+],
+"Krušetnica": [
+"Námestovo"
+],
+"Krušinec": [
+"Stropkov"
+],
+"Krušovce": [
+"Topoľčany"
+],
+"Kružlov": [
+"Bardejov"
+],
+"Kružlová": [
+"Svidník"
+],
+"Kružno": [
+"Rimavská Sobota"
+],
+"Kružná": [
+"Rožňava"
+],
+"Králiky": [
+"Banská Bystrica"
+],
+"Krásna Lúka": [
+"Sabinov"
+],
+"Krásna Ves": [
+"Bánovce nad Bebravou"
+],
+"Krásno": [
+"Partizánske"
+],
+"Krásno nad Kysucou": [
+"Čadca"
+],
+"Krásnohorská Dlhá Lúka": [
+"Rožňava"
+],
+"Krásnohorské Podhradie": [
+"Rožňava"
+],
+"Krásnovce": [
+"Michalovce"
+],
+"Krásny Brod": [
+"Medzilaborce"
+],
+"Kráľ": [
+"Rimavská Sobota"
+],
+"Kráľov Brod": [
+"Galanta"
+],
+"Kráľova Lehota": [
+"Liptovský Mikuláš"
+],
+"Kráľovce": [
+"Košice-okolie"
+],
+"Kráľovce-Krnišov": [
+"Krupina"
+],
+"Kráľovičove Kračany": [
+"Dunajská Streda"
+],
+"Kráľovský Chlmec": [
+"Trebišov"
+],
+"Kráľová nad Váhom": [
+"Šaľa"
+],
+"Kráľová pri Senci": [
+"Senec"
+],
+"Kríže": [
+"Bardejov"
+],
+"Krížovany": [
+"Prešov"
+],
+"Krížová Ves": [
+"Kežmarok"
+],
+"Krčava": [
+"Sobrance"
+],
+"Krškany": [
+"Levice"
+],
+"Kubáňovo": [
+"Levice"
+],
+"Kuchyňa": [
+"Malacky"
+],
+"Kuklov": [
+"Senica"
+],
+"Kuková": [
+"Svidník"
+],
+"Kukučínov": [
+"Levice"
+],
+"Kunerad": [
+"Žilina"
+],
+"Kunešov": [
+"Žiar nad Hronom"
+],
+"Kunova Teplica": [
+"Rožňava"
+],
+"Kuraľany": [
+"Levice"
+],
+"Kurima": [
+"Bardejov"
+],
+"Kurimany": [
+"Levoča"
+],
+"Kurimka": [
+"Svidník"
+],
+"Kurov": [
+"Bardejov"
+],
+"Kusín": [
+"Michalovce"
+],
+"Kuzmice": [
+"Topoľčany",
+"Trebišov"
+],
+"Kučín": [
+"Bardejov",
+"Vranov nad Topľou"
+],
+"Kvakovce": [
+"Vranov nad Topľou"
+],
+"Kvačany": [
+"Liptovský Mikuláš",
+"Prešov"
+],
+"Kvašov": [
+"Púchov"
+],
+"Kvetoslavov": [
+"Dunajská Streda"
+],
+"Kyjatice": [
+"Rimavská Sobota"
+],
+"Kyjov": [
+"Stará Ľubovňa"
+],
+"Kynceľová": [
+"Banská Bystrica"
+],
+"Kysak": [
+"Košice-okolie"
+],
+"Kyselica": [
+"Dunajská Streda"
+],
+"Kysta": [
+"Trebišov"
+],
+"Kysucké Nové Mesto": [
+"Kysucké Nové Mesto"
+],
+"Kysucký Lieskovec": [
+"Kysucké Nové Mesto"
+],
+"Kálnica": [
+"Nové Mesto nad Váhom"
+],
+"Kátlovce": [
+"Trnava"
+],
+"Kátov": [
+"Skalica"
+],
+"Kútniky": [
+"Dunajská Streda"
+],
+"Kúty": [
+"Senica"
+],
+"Kľak": [
+"Žarnovica"
+],
+"Kľačany": [
+"Hlohovec"
+],
+"Kľače": [
+"Žilina"
+],
+"Kľačno": [
+"Prievidza"
+],
+"Kľušov": [
+"Bardejov"
+],
+"Kľúčovec": [
+"Dunajská Streda"
+],
+"Kšinná": [
+"Bánovce nad Bebravou"
+],
+"Lackov": [
+"Krupina"
+],
+"Lackovce": [
+"Humenné"
+],
+"Lacková": [
+"Stará Ľubovňa"
+],
+"Lada": [
+"Prešov"
+],
+"Ladce": [
+"Ilava"
+],
+"Ladice": [
+"Zlaté Moravce"
+],
+"Ladmovce": [
+"Trebišov"
+],
+"Ladomerská Vieska": [
+"Žiar nad Hronom"
+],
+"Ladomirov": [
+"Snina"
+],
+"Ladomirová": [
+"Svidník"
+],
+"Ladzany": [
+"Krupina"
+],
+"Lakšárska Nová Ves": [
+"Senica"
+],
+"Lascov": [
+"Bardejov"
+],
+"Laskár": [
+"Martin"
+],
+"Lastomír": [
+"Michalovce"
+],
+"Lastovce": [
+"Trebišov"
+],
+"Lazany": [
+"Prievidza"
+],
+"Lazisko": [
+"Liptovský Mikuláš"
+],
+"Lazy pod Makytou": [
+"Púchov"
+],
+"Laškovce": [
+"Michalovce"
+],
+"Lažany": [
+"Prešov"
+],
+"Lechnica": [
+"Kežmarok"
+],
+"Lednica": [
+"Púchov"
+],
+"Lednické Rovne": [
+"Púchov"
+],
+"Legnava": [
+"Stará Ľubovňa"
+],
+"Lehnice": [
+"Dunajská Streda"
+],
+"Lehota": [
+"Nitra"
+],
+"Lehota nad Rimavicou": [
+"Rimavská Sobota"
+],
+"Lehota pod Vtáčnikom": [
+"Prievidza"
+],
+"Lehôtka": [
+"Lučenec"
+],
+"Lehôtka pod Brehmi": [
+"Žiar nad Hronom"
+],
+"Lekárovce": [
+"Sobrance"
+],
+"Leles": [
+"Trebišov"
+],
+"Lemešany": [
+"Prešov"
+],
+"Lenartov": [
+"Bardejov"
+],
+"Lenartovce": [
+"Rimavská Sobota"
+],
+"Lendak": [
+"Kežmarok"
+],
+"Lenka": [
+"Rimavská Sobota"
+],
+"Lentvora": [
+"Lučenec"
+],
+"Leopoldov": [
+"Hlohovec"
+],
+"Lesenice": [
+"Veľký Krtíš"
+],
+"Lesnica": [
+"Stará Ľubovňa"
+],
+"Lesné": [
+"Michalovce"
+],
+"Lesíček": [
+"Prešov"
+],
+"Letanovce": [
+"Spišská Nová Ves"
+],
+"Letničie": [
+"Skalica"
+],
+"Levice": [
+"Levice"
+],
+"Levkuška": [
+"Revúca"
+],
+"Levoča": [
+"Levoča"
+],
+"Leváre": [
+"Revúca"
+],
+"Leľa": [
+"Nové Zámky"
+],
+"Leštiny": [
+"Dolný Kubín"
+],
+"Lešť": [
+"Zvolen"
+],
+"Ležiachov": [
+"Martin"
+],
+"Libichava": [
+"Bánovce nad Bebravou"
+],
+"Licince": [
+"Revúca"
+],
+"Liesek": [
+"Tvrdošín"
+],
+"Lieskovany": [
+"Spišská Nová Ves"
+],
+"Lieskovec": [
+"Humenné",
+"Zvolen"
+],
+"Lietava": [
+"Žilina"
+],
+"Lietavská Lúčka": [
+"Žilina"
+],
+"Lietavská Svinná-Babkov": [
+"Žilina"
+],
+"Liešno": [
+"Turčianske Teplice"
+],
+"Liešťany": [
+"Prievidza"
+],
+"Likavka": [
+"Ružomberok"
+],
+"Limbach": [
+"Pezinok"
+],
+"Lipany": [
+"Sabinov"
+],
+"Lipník": [
+"Prievidza"
+],
+"Lipníky": [
+"Prešov"
+],
+"Lipovany": [
+"Lučenec"
+],
+"Lipovce": [
+"Prešov"
+],
+"Lipovec": [
+"Martin",
+"Rimavská Sobota"
+],
+"Lipovník": [
+"Rožňava",
+"Topoľčany"
+],
+"Lipová": [
+"Bardejov",
+"Nové Zámky"
+],
+"Lipové": [
+"Komárno"
+],
+"Liptovská Anna": [
+"Liptovský Mikuláš"
+],
+"Liptovská Kokava": [
+"Liptovský Mikuláš"
+],
+"Liptovská Lúžna": [
+"Ružomberok"
+],
+"Liptovská Osada": [
+"Ružomberok"
+],
+"Liptovská Porúbka": [
+"Liptovský Mikuláš"
+],
+"Liptovská Sielnica": [
+"Liptovský Mikuláš"
+],
+"Liptovská Teplička": [
+"Poprad"
+],
+"Liptovská Teplá": [
+"Ružomberok"
+],
+"Liptovská Štiavnica": [
+"Ružomberok"
+],
+"Liptovské Beharovce": [
+"Liptovský Mikuláš"
+],
+"Liptovské Kľačany": [
+"Liptovský Mikuláš"
+],
+"Liptovské Matiašovce": [
+"Liptovský Mikuláš"
+],
+"Liptovské Revúce": [
+"Ružomberok"
+],
+"Liptovské Sliače": [
+"Ružomberok"
+],
+"Liptovský Hrádok": [
+"Liptovský Mikuláš"
+],
+"Liptovský Ján": [
+"Liptovský Mikuláš"
+],
+"Liptovský Michal": [
+"Ružomberok"
+],
+"Liptovský Mikuláš": [
+"Liptovský Mikuláš"
+],
+"Liptovský Ondrej": [
+"Liptovský Mikuláš"
+],
+"Liptovský Peter": [
+"Liptovský Mikuláš"
+],
+"Liptovský Trnovec": [
+"Liptovský Mikuláš"
+],
+"Lisková": [
+"Ružomberok"
+],
+"Litava": [
+"Krupina"
+],
+"Litmanová": [
+"Stará Ľubovňa"
+],
+"Livina": [
+"Partizánske"
+],
+"Livinské Opatovce": [
+"Partizánske"
+],
+"Livov": [
+"Bardejov"
+],
+"Livovská Huta": [
+"Bardejov"
+],
+"Ličartovce": [
+"Prešov"
+],
+"Lišov": [
+"Krupina"
+],
+"Lodno": [
+"Kysucké Nové Mesto"
+],
+"Lok": [
+"Levice"
+],
+"Lokca": [
+"Námestovo"
+],
+"Lom nad Rimavicou": [
+"Brezno"
+],
+"Lomnička": [
+"Stará Ľubovňa"
+],
+"Lomná": [
+"Námestovo"
+],
+"Lomné": [
+"Stropkov"
+],
+"Lontov": [
+"Levice"
+],
+"Lopašov": [
+"Skalica"
+],
+"Lopušné Pažite": [
+"Kysucké Nové Mesto"
+],
+"Lopúchov": [
+"Bardejov"
+],
+"Lovce": [
+"Zlaté Moravce"
+],
+"Lovinobaňa": [
+"Lučenec"
+],
+"Lovča": [
+"Žiar nad Hronom"
+],
+"Lovčica-Trubín": [
+"Žiar nad Hronom"
+],
+"Lozorno": [
+"Malacky"
+],
+"Lošonec": [
+"Trnava"
+],
+"Ložín": [
+"Michalovce"
+],
+"Lubeník": [
+"Revúca"
+],
+"Lubina": [
+"Nové Mesto nad Váhom"
+],
+"Ludanice": [
+"Topoľčany"
+],
+"Ludrová": [
+"Ružomberok"
+],
+"Luhyňa": [
+"Trebišov"
+],
+"Lukavica": [
+"Bardejov",
+"Zvolen"
+],
+"Lukačovce": [
+"Humenné"
+],
+"Lukov": [
+"Bardejov"
+],
+"Lukovištia": [
+"Rimavská Sobota"
+],
+"Lukáčovce": [
+"Nitra"
+],
+"Lula": [
+"Levice"
+],
+"Lupoč": [
+"Lučenec"
+],
+"Lutila": [
+"Žiar nad Hronom"
+],
+"Lutiše": [
+"Žilina"
+],
+"Lučatín": [
+"Banská Bystrica"
+],
+"Lučenec": [
+"Lučenec"
+],
+"Lučivná": [
+"Poprad"
+],
+"Lužany": [
+"Topoľčany"
+],
+"Lužany pri Topli": [
+"Svidník"
+],
+"Lužianky": [
+"Nitra"
+],
+"Lysica": [
+"Žilina"
+],
+"Lysá pod Makytou": [
+"Púchov"
+],
+"Láb": [
+"Malacky"
+],
+"Látky": [
+"Detva"
+],
+"Lúka": [
+"Nové Mesto nad Váhom"
+],
+"Lúky": [
+"Púchov"
+],
+"Lúč na Ostrove": [
+"Dunajská Streda"
+],
+"Lúčina": [
+"Prešov"
+],
+"Lúčka": [
+"Levoča",
+"Rožňava",
+"Sabinov",
+"Svidník"
+],
+"Lúčky": [
+"Michalovce",
+"Ružomberok",
+"Žiar nad Hronom"
+],
+"Lúčnica nad Žitavou": [
+"Nitra"
+],
+"Machulince": [
+"Zlaté Moravce"
+],
+"Macov": [
+"Dunajská Streda"
+],
+"Mad": [
+"Dunajská Streda"
+],
+"Madunice": [
+"Hlohovec"
+],
+"Magnezitovce": [
+"Revúca"
+],
+"Majcichov": [
+"Trnava"
+],
+"Majere": [
+"Kežmarok"
+],
+"Majerovce": [
+"Vranov nad Topľou"
+],
+"Makov": [
+"Čadca"
+],
+"Makovce": [
+"Stropkov"
+],
+"Malachov": [
+"Banská Bystrica"
+],
+"Malacky": [
+"Malacky"
+],
+"Malatiná": [
+"Dolný Kubín"
+],
+"Malatíny": [
+"Liptovský Mikuláš"
+],
+"Malcov": [
+"Bardejov"
+],
+"Malinovo": [
+"Senec"
+],
+"Malinová": [
+"Prievidza"
+],
+"Malužiná": [
+"Liptovský Mikuláš"
+],
+"Malá Domaša": [
+"Vranov nad Topľou"
+],
+"Malá Franková": [
+"Kežmarok"
+],
+"Malá Hradná": [
+"Bánovce nad Bebravou"
+],
+"Malá Ida": [
+"Košice-okolie"
+],
+"Malá Lehota": [
+"Žarnovica"
+],
+"Malá Lodina": [
+"Košice-okolie"
+],
+"Malá Mača": [
+"Galanta"
+],
+"Malá Poľana": [
+"Stropkov"
+],
+"Malá Tŕňa": [
+"Trebišov"
+],
+"Malá nad Hronom": [
+"Nové Zámky"
+],
+"Malá Čalomija": [
+"Veľký Krtíš"
+],
+"Malá Čausa": [
+"Prievidza"
+],
+"Malá Čierna": [
+"Žilina"
+],
+"Malé Borové": [
+"Liptovský Mikuláš"
+],
+"Malé Chyndice": [
+"Nitra"
+],
+"Malé Dvorníky": [
+"Dunajská Streda"
+],
+"Malé Hoste": [
+"Bánovce nad Bebravou"
+],
+"Malé Kosihy": [
+"Nové Zámky"
+],
+"Malé Kozmálovce": [
+"Levice"
+],
+"Malé Kršteňany": [
+"Partizánske"
+],
+"Malé Lednice": [
+"Považská Bystrica"
+],
+"Malé Leváre": [
+"Malacky"
+],
+"Malé Ludince": [
+"Levice"
+],
+"Malé Ozorovce": [
+"Trebišov"
+],
+"Malé Raškovce": [
+"Michalovce"
+],
+"Malé Ripňany": [
+"Topoľčany"
+],
+"Malé Straciny": [
+"Veľký Krtíš"
+],
+"Malé Trakany": [
+"Trebišov"
+],
+"Malé Uherce": [
+"Partizánske"
+],
+"Malé Vozokany": [
+"Zlaté Moravce"
+],
+"Malé Zlievce": [
+"Veľký Krtíš"
+],
+"Malé Zálužie": [
+"Nitra"
+],
+"Malý Cetín": [
+"Nitra"
+],
+"Malý Horeš": [
+"Trebišov"
+],
+"Malý Kamenec": [
+"Trebišov"
+],
+"Malý Krtíš": [
+"Veľký Krtíš"
+],
+"Malý Lapáš": [
+"Nitra"
+],
+"Malý Lipník": [
+"Stará Ľubovňa"
+],
+"Malý Slavkov": [
+"Kežmarok"
+],
+"Malý Slivník": [
+"Prešov"
+],
+"Malý Čepčín": [
+"Turčianske Teplice"
+],
+"Malý Šariš": [
+"Prešov"
+],
+"Malčice": [
+"Michalovce"
+],
+"Malženice": [
+"Trnava"
+],
+"Mankovce": [
+"Zlaté Moravce"
+],
+"Marcelová": [
+"Komárno"
+],
+"Margecany": [
+"Gelnica"
+],
+"Marhaň": [
+"Bardejov"
+],
+"Marianka": [
+"Malacky"
+],
+"Markovce": [
+"Michalovce"
+],
+"Markuška": [
+"Rožňava"
+],
+"Markušovce": [
+"Spišská Nová Ves"
+],
+"Martin": [
+"Martin"
+],
+"Martin nad Žitavou": [
+"Zlaté Moravce"
+],
+"Martinová": [
+"Rimavská Sobota"
+],
+"Martinček": [
+"Ružomberok"
+],
+"Martovce": [
+"Komárno"
+],
+"Maršová-Rašov": [
+"Bytča"
+],
+"Matejovce nad Hornádom": [
+"Spišská Nová Ves"
+],
+"Matiaška": [
+"Vranov nad Topľou"
+],
+"Matiašovce": [
+"Kežmarok"
+],
+"Matovce": [
+"Svidník"
+],
+"Matysová": [
+"Stará Ľubovňa"
+],
+"Matúškovo": [
+"Galanta"
+],
+"Maňa": [
+"Nové Zámky"
+],
+"Maškovce": [
+"Humenné"
+],
+"Mašková": [
+"Lučenec"
+],
+"Maťovské Vojkovce": [
+"Michalovce"
+],
+"Medovarce": [
+"Krupina"
+],
+"Medvedie": [
+"Svidník"
+],
+"Medveďov": [
+"Dunajská Streda"
+],
+"Medzany": [
+"Prešov"
+],
+"Medzev": [
+"Košice-okolie"
+],
+"Medzianky": [
+"Vranov nad Topľou"
+],
+"Medzibrod": [
+"Banská Bystrica"
+],
+"Medzibrodie nad Oravou": [
+"Dolný Kubín"
+],
+"Medzilaborce": [
+"Medzilaborce"
+],
+"Melek": [
+"Nitra"
+],
+"Meliata": [
+"Rožňava"
+],
+"Melčice-Lieskové": [
+"Trenčín"
+],
+"Mengusovce": [
+"Poprad"
+],
+"Merašice": [
+"Hlohovec"
+],
+"Merník": [
+"Vranov nad Topľou"
+],
+"Mestečko": [
+"Púchov"
+],
+"Mestisko": [
+"Svidník"
+],
+"Michajlov": [
+"Snina"
+],
+"Michal na Ostrove": [
+"Dunajská Streda"
+],
+"Michal nad Žitavou": [
+"Nové Zámky"
+],
+"Michalková": [
+"Zvolen"
+],
+"Michalok": [
+"Vranov nad Topľou"
+],
+"Michalovce": [
+"Michalovce"
+],
+"Michalová": [
+"Brezno"
+],
+"Michaľany": [
+"Trebišov"
+],
+"Mierovo": [
+"Dunajská Streda"
+],
+"Miezgovce": [
+"Bánovce nad Bebravou"
+],
+"Miklušovce": [
+"Prešov"
+],
+"Miková": [
+"Stropkov"
+],
+"Mikulášová": [
+"Bardejov"
+],
+"Mikušovce": [
+"Ilava",
+"Lučenec"
+],
+"Milhosť": [
+"Košice-okolie"
+],
+"Miloslavov": [
+"Senec"
+],
+"Milpoš": [
+"Sabinov"
+],
+"Mirkovce": [
+"Prešov"
+],
+"Miroľa": [
+"Svidník"
+],
+"Mičakovce": [
+"Svidník"
+],
+"Miňovce": [
+"Stropkov"
+],
+"Mlynica": [
+"Poprad"
+],
+"Mlynky": [
+"Spišská Nová Ves"
+],
+"Mlynárovce": [
+"Svidník"
+],
+"Mlynčeky": [
+"Kežmarok"
+],
+"Mládzovo": [
+"Poltár"
+],
+"Mníchova Lehota": [
+"Trenčín"
+],
+"Mníšek nad Hnilcom": [
+"Gelnica"
+],
+"Mníšek nad Popradom": [
+"Stará Ľubovňa"
+],
+"Modra": [
+"Pezinok"
+],
+"Modra nad Cirochou": [
+"Humenné"
+],
+"Modrany": [
+"Komárno"
+],
+"Modrovka": [
+"Nové Mesto nad Váhom"
+],
+"Modrová": [
+"Nové Mesto nad Váhom"
+],
+"Modrý Kameň": [
+"Veľký Krtíš"
+],
+"Mojmírovce": [
+"Nitra"
+],
+"Mojtín": [
+"Púchov"
+],
+"Mojzesovo": [
+"Nové Zámky"
+],
+"Mojš": [
+"Žilina"
+],
+"Mokrance": [
+"Košice-okolie"
+],
+"Mokroluh": [
+"Bardejov"
+],
+"Mokrá Lúka": [
+"Revúca"
+],
+"Mokrý Háj": [
+"Skalica"
+],
+"Moldava nad Bodvou": [
+"Košice-okolie"
+],
+"Moravany": [
+"Michalovce"
+],
+"Moravany nad Váhom": [
+"Piešťany"
+],
+"Moravské Lieskové": [
+"Nové Mesto nad Váhom"
+],
+"Moravský Svätý Ján": [
+"Senica"
+],
+"Most pri Bratislave": [
+"Senec"
+],
+"Mostová": [
+"Galanta"
+],
+"Motešice": [
+"Trenčín"
+],
+"Motyčky": [
+"Banská Bystrica"
+],
+"Moča": [
+"Komárno"
+],
+"Močenok": [
+"Šaľa"
+],
+"Močiar": [
+"Banská Štiavnica"
+],
+"Moškovec": [
+"Turčianske Teplice"
+],
+"Mošovce": [
+"Turčianske Teplice"
+],
+"Moštenica": [
+"Banská Bystrica"
+],
+"Mošurov": [
+"Prešov"
+],
+"Mrázovce": [
+"Stropkov"
+],
+"Mudrovce": [
+"Košice-okolie"
+],
+"Mudroňovo": [
+"Komárno"
+],
+"Muránska Dlhá Lúka": [
+"Revúca"
+],
+"Muránska Huta": [
+"Revúca"
+],
+"Muránska Lehota": [
+"Revúca"
+],
+"Muránska Zdychava": [
+"Revúca"
+],
+"Muráň": [
+"Revúca"
+],
+"Mučín": [
+"Lučenec"
+],
+"Muľa": [
+"Veľký Krtíš"
+],
+"Myjava": [
+"Myjava"
+],
+"Myslina": [
+"Humenné"
+],
+"Málaš": [
+"Levice"
+],
+"Málinec": [
+"Poltár"
+],
+"Môlča": [
+"Banská Bystrica"
+],
+"Mútne": [
+"Námestovo"
+],
+"Mýtna": [
+"Lučenec"
+],
+"Mýtne Ludany": [
+"Levice"
+],
+"Mýto pod Ďumbierom": [
+"Brezno"
+],
+"Nacina Ves": [
+"Michalovce"
+],
+"Nadlice": [
+"Partizánske"
+],
+"Naháč": [
+"Trnava"
+],
+"Nandraž": [
+"Revúca"
+],
+"Nechválova Polianka": [
+"Humenné"
+],
+"Necpaly": [
+"Martin"
+],
+"Nedanovce": [
+"Partizánske"
+],
+"Nedašovce": [
+"Bánovce nad Bebravou"
+],
+"Neded": [
+"Šaľa"
+],
+"Nededza": [
+"Žilina"
+],
+"Nedožery-Brezany": [
+"Prievidza"
+],
+"Nemce": [
+"Banská Bystrica"
+],
+"Nemcovce": [
+"Bardejov",
+"Prešov"
+],
+"Nemecká": [
+"Brezno"
+],
+"Nemečky": [
+"Topoľčany"
+],
+"Nemešany": [
+"Levoča"
+],
+"Nemčice": [
+"Topoľčany"
+],
+"Nemčiňany": [
+"Zlaté Moravce"
+],
+"Nemšová": [
+"Trenčín"
+],
+"Nenince": [
+"Veľký Krtíš"
+],
+"Neporadza": [
+"Rimavská Sobota",
+"Trenčín"
+],
+"Nesluša": [
+"Kysucké Nové Mesto"
+],
+"Nesvady": [
+"Komárno"
+],
+"Neverice": [
+"Zlaté Moravce"
+],
+"Nevidzany": [
+"Prievidza",
+"Zlaté Moravce"
+],
+"Nevoľné": [
+"Žiar nad Hronom"
+],
+"Nezbudská Lúčka": [
+"Žilina"
+],
+"Nimnica": [
+"Púchov"
+],
+"Nitra": [
+"Nitra"
+],
+"Nitra nad Ipľom": [
+"Lučenec"
+],
+"Nitrianska Blatnica": [
+"Topoľčany"
+],
+"Nitrianska Streda": [
+"Topoľčany"
+],
+"Nitrianske Hrnčiarovce": [
+"Nitra"
+],
+"Nitrianske Pravno": [
+"Prievidza"
+],
+"Nitrianske Rudno": [
+"Prievidza"
+],
+"Nitrianske Sučany": [
+"Prievidza"
+],
+"Nitrica": [
+"Prievidza"
+],
+"Nižná": [
+"Piešťany",
+"Tvrdošín"
+],
+"Nižná Boca": [
+"Liptovský Mikuláš"
+],
+"Nižná Hutka": [
+"Košice-okolie"
+],
+"Nižná Jablonka": [
+"Humenné"
+],
+"Nižná Jedľová": [
+"Svidník"
+],
+"Nižná Kamenica": [
+"Košice-okolie"
+],
+"Nižná Myšľa": [
+"Košice-okolie"
+],
+"Nižná Olšava": [
+"Stropkov"
+],
+"Nižná Pisaná": [
+"Svidník"
+],
+"Nižná Polianka": [
+"Bardejov"
+],
+"Nižná Rybnica": [
+"Sobrance"
+],
+"Nižná Sitnica": [
+"Humenné"
+],
+"Nižná Slaná": [
+"Rožňava"
+],
+"Nižná Voľa": [
+"Bardejov"
+],
+"Nižné Ladičkovce": [
+"Humenné"
+],
+"Nižné Nemecké": [
+"Sobrance"
+],
+"Nižné Repaše": [
+"Levoča"
+],
+"Nižné Ružbachy": [
+"Stará Ľubovňa"
+],
+"Nižný Hrabovec": [
+"Vranov nad Topľou"
+],
+"Nižný Hrušov": [
+"Vranov nad Topľou"
+],
+"Nižný Klátov": [
+"Košice-okolie"
+],
+"Nižný Komárnik": [
+"Svidník"
+],
+"Nižný Kručov": [
+"Vranov nad Topľou"
+],
+"Nižný Lánec": [
+"Košice-okolie"
+],
+"Nižný Mirošov": [
+"Svidník"
+],
+"Nižný Orlík": [
+"Svidník"
+],
+"Nižný Skálnik": [
+"Rimavská Sobota"
+],
+"Nižný Slavkov": [
+"Sabinov"
+],
+"Nižný Tvarožec": [
+"Bardejov"
+],
+"Nižný Čaj": [
+"Košice-okolie"
+],
+"Nižný Žipov": [
+"Trebišov"
+],
+"Nolčovo": [
+"Martin"
+],
+"Norovce": [
+"Topoľčany"
+],
+"Novosad": [
+"Trebišov"
+],
+"Novoť": [
+"Námestovo"
+],
+"Nová Baňa": [
+"Žarnovica"
+],
+"Nová Bašta": [
+"Rimavská Sobota"
+],
+"Nová Bošáca": [
+"Nové Mesto nad Váhom"
+],
+"Nová Bystrica": [
+"Čadca"
+],
+"Nová Dedina": [
+"Levice"
+],
+"Nová Dedinka": [
+"Senec"
+],
+"Nová Dubnica": [
+"Ilava"
+],
+"Nová Kelča": [
+"Vranov nad Topľou"
+],
+"Nová Lehota": [
+"Nové Mesto nad Váhom"
+],
+"Nová Lesná": [
+"Poprad"
+],
+"Nová Polhora": [
+"Košice-okolie"
+],
+"Nová Polianka": [
+"Svidník"
+],
+"Nová Sedlica": [
+"Snina"
+],
+"Nová Ves": [
+"Veľký Krtíš"
+],
+"Nová Ves nad Váhom": [
+"Nové Mesto nad Váhom"
+],
+"Nová Ves nad Žitavou": [
+"Nitra"
+],
+"Nová Vieska": [
+"Nové Zámky"
+],
+"Nová Ľubovňa": [
+"Stará Ľubovňa"
+],
+"Nováky": [
+"Prievidza"
+],
+"Nováčany": [
+"Košice-okolie"
+],
+"Nové Hony": [
+"Lučenec"
+],
+"Nové Mesto nad Váhom": [
+"Nové Mesto nad Váhom"
+],
+"Nové Sady": [
+"Nitra"
+],
+"Nové Zámky": [
+"Nové Zámky"
+],
+"Nový Ruskov": [
+"Trebišov"
+],
+"Nový Salaš": [
+"Košice-okolie"
+],
+"Nový Svet": [
+"Senec"
+],
+"Nový Tekov": [
+"Levice"
+],
+"Nový Život": [
+"Dunajská Streda"
+],
+"Nálepkovo": [
+"Gelnica"
+],
+"Námestovo": [
+"Námestovo"
+],
+"Nána": [
+"Nové Zámky"
+],
+"Nýrovce": [
+"Levice"
+],
+"Obeckov": [
+"Veľký Krtíš"
+],
+"Obid": [
+"Nové Zámky"
+],
+"Obišovce": [
+"Košice-okolie"
+],
+"Oborín": [
+"Michalovce"
+],
+"Obručné": [
+"Stará Ľubovňa"
+],
+"Obyce": [
+"Zlaté Moravce"
+],
+"Ochodnica": [
+"Kysucké Nové Mesto"
+],
+"Ochtiná": [
+"Rožňava"
+],
+"Odorín": [
+"Spišská Nová Ves"
+],
+"Ohrady": [
+"Dunajská Streda"
+],
+"Ohradzany": [
+"Humenné"
+],
+"Okoličná na Ostrove": [
+"Komárno"
+],
+"Okoč": [
+"Dunajská Streda"
+],
+"Okružná": [
+"Prešov"
+],
+"Okrúhle": [
+"Svidník"
+],
+"Olcnava": [
+"Spišská Nová Ves"
+],
+"Olejníkov": [
+"Sabinov"
+],
+"Olešná": [
+"Čadca"
+],
+"Olováry": [
+"Veľký Krtíš"
+],
+"Olšovany": [
+"Košice-okolie"
+],
+"Omastiná": [
+"Bánovce nad Bebravou"
+],
+"Omšenie": [
+"Trenčín"
+],
+"Ondavka": [
+"Bardejov"
+],
+"Ondavské Matiašovce": [
+"Vranov nad Topľou"
+],
+"Ondrašovce": [
+"Prešov"
+],
+"Ondrašová": [
+"Turčianske Teplice"
+],
+"Ondrejovce": [
+"Levice"
+],
+"Opatovce": [
+"Trenčín"
+],
+"Opatovce nad Nitrou": [
+"Prievidza"
+],
+"Opatovská Nová Ves": [
+"Veľký Krtíš"
+],
+"Opava": [
+"Veľký Krtíš"
+],
+"Opiná": [
+"Košice-okolie"
+],
+"Opoj": [
+"Trnava"
+],
+"Oponice": [
+"Topoľčany"
+],
+"Opátka": [
+"Košice-okolie"
+],
+"Oravce": [
+"Banská Bystrica"
+],
+"Oravská Jasenica": [
+"Námestovo"
+],
+"Oravská Lesná": [
+"Námestovo"
+],
+"Oravská Polhora": [
+"Námestovo"
+],
+"Oravská Poruba": [
+"Dolný Kubín"
+],
+"Oravské Veselé": [
+"Námestovo"
+],
+"Oravský Biely Potok": [
+"Tvrdošín"
+],
+"Oravský Podzámok": [
+"Dolný Kubín"
+],
+"Ordzovany": [
+"Levoča"
+],
+"Orechová": [
+"Sobrance"
+],
+"Orechová Potôň": [
+"Dunajská Streda"
+],
+"Oreské": [
+"Michalovce",
+"Skalica"
+],
+"Orešany": [
+"Topoľčany"
+],
+"Orlov": [
+"Stará Ľubovňa"
+],
+"Orovnica": [
+"Žarnovica"
+],
+"Ortuťová": [
+"Bardejov"
+],
+"Orávka": [
+"Rimavská Sobota"
+],
+"Osadné": [
+"Snina"
+],
+"Osikov": [
+"Bardejov"
+],
+"Oslany": [
+"Prievidza"
+],
+"Osrblie": [
+"Brezno"
+],
+"Ostratice": [
+"Partizánske"
+],
+"Ostrov": [
+"Piešťany",
+"Sobrance"
+],
+"Ostrovany": [
+"Sabinov"
+],
+"Ostrá Lúka": [
+"Zvolen"
+],
+"Ostrý Grúň": [
+"Žarnovica"
+],
+"Osturňa": [
+"Kežmarok"
+],
+"Osuské": [
+"Senica"
+],
+"Osádka": [
+"Dolný Kubín"
+],
+"Otrhánky": [
+"Bánovce nad Bebravou"
+],
+"Otročok": [
+"Revúca"
+],
+"Ovčiarsko": [
+"Žilina"
+],
+"Ovčie": [
+"Prešov"
+],
+"Ozdín": [
+"Poltár"
+],
+"Očkov": [
+"Nové Mesto nad Váhom"
+],
+"Očová": [
+"Zvolen"
+],
+"Oľdza": [
+"Dunajská Streda"
+],
+"Oľka": [
+"Medzilaborce"
+],
+"Oľšavce": [
+"Bardejov"
+],
+"Oľšavica": [
+"Levoča"
+],
+"Oľšavka": [
+"Spišská Nová Ves",
+"Stropkov"
+],
+"Oľšinkov": [
+"Medzilaborce"
+],
+"Oľšov": [
+"Sabinov"
+],
+"Oščadnica": [
+"Čadca"
+],
+"Ožďany": [
+"Rimavská Sobota"
+],
+"Padarovce": [
+"Rimavská Sobota"
+],
+"Padáň": [
+"Dunajská Streda"
+],
+"Pakostov": [
+"Humenné"
+],
+"Palota": [
+"Medzilaborce"
+],
+"Palárikovo": [
+"Nové Zámky"
+],
+"Palín": [
+"Michalovce"
+],
+"Panické Dravce": [
+"Lučenec"
+],
+"Papradno": [
+"Považská Bystrica"
+],
+"Papín": [
+"Humenné"
+],
+"Parchovany": [
+"Trebišov"
+],
+"Parihuzovce": [
+"Snina"
+],
+"Partizánska Ľupča": [
+"Liptovský Mikuláš"
+],
+"Partizánske": [
+"Partizánske"
+],
+"Pastovce": [
+"Levice"
+],
+"Pastuchov": [
+"Hlohovec"
+],
+"Pata": [
+"Galanta"
+],
+"Pataš": [
+"Dunajská Streda"
+],
+"Patince": [
+"Komárno"
+],
+"Pavlice": [
+"Trnava"
+],
+"Pavlova Ves": [
+"Liptovský Mikuláš"
+],
+"Pavlovce": [
+"Rimavská Sobota",
+"Vranov nad Topľou"
+],
+"Pavlovce nad Uhom": [
+"Michalovce"
+],
+"Pavlová": [
+"Nové Zámky"
+],
+"Pavčina Lehota": [
+"Liptovský Mikuláš"
+],
+"Pavľany": [
+"Levoča"
+],
+"Pača": [
+"Rožňava"
+],
+"Paňa": [
+"Nitra"
+],
+"Paňovce": [
+"Košice-okolie"
+],
+"Pašková": [
+"Rožňava"
+],
+"Paština Závada": [
+"Žilina"
+],
+"Pažiť": [
+"Partizánske"
+],
+"Peder": [
+"Košice-okolie"
+],
+"Pernek": [
+"Malacky"
+],
+"Perín-Chym": [
+"Košice-okolie"
+],
+"Petkovce": [
+"Vranov nad Topľou"
+],
+"Petrikovce": [
+"Michalovce"
+],
+"Petrova Lehota": [
+"Trenčín"
+],
+"Petrova Ves": [
+"Skalica"
+],
+"Petrovany": [
+"Prešov"
+],
+"Petrovce": [
+"Rimavská Sobota",
+"Sobrance",
+"Vranov nad Topľou"
+],
+"Petrovce nad Laborcom": [
+"Michalovce"
+],
+"Petrovice": [
+"Bytča"
+],
+"Petrovo": [
+"Rožňava"
+],
+"Petrová": [
+"Bardejov"
+],
+"Pezinok": [
+"Pezinok"
+],
+"Pečenice": [
+"Levice"
+],
+"Pečeňady": [
+"Piešťany"
+],
+"Pečeňany": [
+"Bánovce nad Bebravou"
+],
+"Pečovská Nová Ves": [
+"Sabinov"
+],
+"Pichne": [
+"Snina"
+],
+"Piešťany": [
+"Piešťany"
+],
+"Pinciná": [
+"Lučenec"
+],
+"Pinkovce": [
+"Sobrance"
+],
+"Piskorovce": [
+"Vranov nad Topľou"
+],
+"Pitelová": [
+"Žiar nad Hronom"
+],
+"Plavecké Podhradie": [
+"Malacky"
+],
+"Plavecký Mikuláš": [
+"Malacky"
+],
+"Plavecký Peter": [
+"Senica"
+],
+"Plavecký Štvrtok": [
+"Malacky"
+],
+"Plaveč": [
+"Stará Ľubovňa"
+],
+"Plavnica": [
+"Stará Ľubovňa"
+],
+"Plavé Vozokany": [
+"Levice"
+],
+"Plechotice": [
+"Trebišov"
+],
+"Plevník-Drienové": [
+"Považská Bystrica"
+],
+"Pleš": [
+"Lučenec"
+],
+"Plešivec": [
+"Rožňava"
+],
+"Pliešovce": [
+"Zvolen"
+],
+"Ploské": [
+"Košice-okolie",
+"Revúca"
+],
+"Plášťovce": [
+"Levice"
+],
+"Pobedim": [
+"Nové Mesto nad Váhom"
+],
+"Pochabany": [
+"Bánovce nad Bebravou"
+],
+"Podbiel": [
+"Tvrdošín"
+],
+"Podbranč": [
+"Senica"
+],
+"Podbrezová": [
+"Brezno"
+],
+"Podhorany": [
+"Kežmarok",
+"Nitra",
+"Prešov"
+],
+"Podhorie": [
+"Banská Štiavnica",
+"Žilina"
+],
+"Podhoroď": [
+"Sobrance"
+],
+"Podhradie": [
+"Martin",
+"Prievidza",
+"Topoľčany"
+],
+"Podhradík": [
+"Prešov"
+],
+"Podhájska": [
+"Nové Zámky"
+],
+"Podkonice": [
+"Banská Bystrica"
+],
+"Podkriváň": [
+"Detva"
+],
+"Podkylava": [
+"Myjava"
+],
+"Podlužany": [
+"Bánovce nad Bebravou",
+"Levice"
+],
+"Podolie": [
+"Nové Mesto nad Váhom"
+],
+"Podolínec": [
+"Stará Ľubovňa"
+],
+"Podrečany": [
+"Lučenec"
+],
+"Podskalie": [
+"Považská Bystrica"
+],
+"Podtureň": [
+"Liptovský Mikuláš"
+],
+"Podvysoká": [
+"Čadca"
+],
+"Podzámčok": [
+"Zvolen"
+],
+"Pohorelá": [
+"Brezno"
+],
+"Pohranice": [
+"Nitra"
+],
+"Pohronská Polhora": [
+"Brezno"
+],
+"Pohronský Bukovec": [
+"Banská Bystrica"
+],
+"Pohronský Ruskov": [
+"Levice"
+],
+"Pokryváč": [
+"Dolný Kubín"
+],
+"Poliakovce": [
+"Bardejov"
+],
+"Polianka": [
+"Myjava"
+],
+"Polichno": [
+"Lučenec"
+],
+"Polina": [
+"Revúca"
+],
+"Poloma": [
+"Sabinov"
+],
+"Polomka": [
+"Brezno"
+],
+"Poltár": [
+"Poltár"
+],
+"Poluvsie": [
+"Prievidza"
+],
+"Pongrácovce": [
+"Levoča"
+],
+"Poniky": [
+"Banská Bystrica"
+],
+"Poprad": [
+"Poprad"
+],
+"Poproč": [
+"Košice-okolie",
+"Rimavská Sobota"
+],
+"Popudinské Močidľany": [
+"Skalica"
+],
+"Poriadie": [
+"Myjava"
+],
+"Porostov": [
+"Sobrance"
+],
+"Poruba": [
+"Prievidza"
+],
+"Poruba pod Vihorlatom": [
+"Michalovce"
+],
+"Poráč": [
+"Spišská Nová Ves"
+],
+"Porúbka": [
+"Bardejov",
+"Humenné",
+"Sobrance",
+"Žilina"
+],
+"Potok": [
+"Rimavská Sobota",
+"Ružomberok"
+],
+"Potoky": [
+"Stropkov"
+],
+"Potvorice": [
+"Nové Mesto nad Váhom"
+],
+"Potônske Lúky": [
+"Dunajská Streda"
+],
+"Potôčky": [
+"Stropkov"
+],
+"Považany": [
+"Nové Mesto nad Váhom"
+],
+"Považská Bystrica": [
+"Považská Bystrica"
+],
+"Povina": [
+"Kysucké Nové Mesto"
+],
+"Povoda": [
+"Dunajská Streda"
+],
+"Povrazník": [
+"Banská Bystrica"
+],
+"Pozba": [
+"Nové Zámky"
+],
+"Pozdišovce": [
+"Michalovce"
+],
+"Počarová": [
+"Považská Bystrica"
+],
+"Počúvadlo": [
+"Banská Štiavnica"
+],
+"Poľanovce": [
+"Levoča"
+],
+"Poľany": [
+"Trebišov"
+],
+"Poľný Kesov": [
+"Nitra"
+],
+"Poša": [
+"Vranov nad Topľou"
+],
+"Praha": [
+"Lučenec"
+],
+"Prakovce": [
+"Gelnica"
+],
+"Pravenec": [
+"Prievidza"
+],
+"Pravica": [
+"Veľký Krtíš"
+],
+"Pravotice": [
+"Bánovce nad Bebravou"
+],
+"Prašice": [
+"Topoľčany"
+],
+"Prašník": [
+"Piešťany"
+],
+"Predajná": [
+"Brezno"
+],
+"Predmier": [
+"Bytča"
+],
+"Prenčov": [
+"Banská Štiavnica"
+],
+"Preseľany": [
+"Topoľčany"
+],
+"Prestavlky": [
+"Žiar nad Hronom"
+],
+"Prečín": [
+"Považská Bystrica"
+],
+"Prešov": [
+"Prešov"
+],
+"Pribeník": [
+"Trebišov"
+],
+"Pribeta": [
+"Komárno"
+],
+"Pribiš": [
+"Dolný Kubín"
+],
+"Pribylina": [
+"Liptovský Mikuláš"
+],
+"Priechod": [
+"Banská Bystrica"
+],
+"Priekopa": [
+"Sobrance"
+],
+"Priepasné": [
+"Myjava"
+],
+"Prietrž": [
+"Senica"
+],
+"Prietržka": [
+"Skalica"
+],
+"Prievaly": [
+"Senica"
+],
+"Prievidza": [
+"Prievidza"
+],
+"Prihradzany": [
+"Revúca"
+],
+"Prituľany": [
+"Humenné"
+],
+"Prochot": [
+"Žiar nad Hronom"
+],
+"Prosačov": [
+"Vranov nad Topľou"
+],
+"Prosiek": [
+"Liptovský Mikuláš"
+],
+"Proč": [
+"Prešov"
+],
+"Pruské": [
+"Ilava"
+],
+"Prusy": [
+"Bánovce nad Bebravou"
+],
+"Pružina": [
+"Považská Bystrica"
+],
+"Práznovce": [
+"Topoľčany"
+],
+"Príbelce": [
+"Veľký Krtíš"
+],
+"Príbovce": [
+"Martin"
+],
+"Príkra": [
+"Svidník"
+],
+"Príslop": [
+"Snina"
+],
+"Prša": [
+"Lučenec"
+],
+"Pstriná": [
+"Svidník"
+],
+"Ptičie": [
+"Humenné"
+],
+"Ptrukša": [
+"Michalovce"
+],
+"Pucov": [
+"Dolný Kubín"
+],
+"Pukanec": [
+"Levice"
+],
+"Pusté Pole": [
+"Stará Ľubovňa"
+],
+"Pusté Sady": [
+"Galanta"
+],
+"Pusté Úľany": [
+"Galanta"
+],
+"Pusté Čemerné": [
+"Michalovce"
+],
+"Pušovce": [
+"Prešov"
+],
+"Párnica": [
+"Dolný Kubín"
+],
+"Píla": [
+"Lučenec",
+"Pezinok",
+"Žarnovica"
+],
+"Pôtor": [
+"Veľký Krtíš"
+],
+"Púchov": [
+"Púchov"
+],
+"Pčoliné": [
+"Snina"
+],
+"Rabča": [
+"Námestovo"
+],
+"Rabčice": [
+"Námestovo"
+],
+"Rad": [
+"Trebišov"
+],
+"Radatice": [
+"Prešov"
+],
+"Radava": [
+"Nové Zámky"
+],
+"Radimov": [
+"Skalica"
+],
+"Radnovce": [
+"Rimavská Sobota"
+],
+"Radobica": [
+"Prievidza"
+],
+"Radoma": [
+"Svidník"
+],
+"Radoľa": [
+"Kysucké Nové Mesto"
+],
+"Radošina": [
+"Topoľčany"
+],
+"Radošovce": [
+"Skalica",
+"Trnava"
+],
+"Radvanovce": [
+"Vranov nad Topľou"
+],
+"Radvaň nad Dunajom": [
+"Komárno"
+],
+"Radvaň nad Laborcom": [
+"Medzilaborce"
+],
+"Radzovce": [
+"Lučenec"
+],
+"Radôstka": [
+"Čadca"
+],
+"Rafajovce": [
+"Vranov nad Topľou"
+],
+"Rajec": [
+"Žilina"
+],
+"Rajecká Lesná": [
+"Žilina"
+],
+"Rajecké Teplice": [
+"Žilina"
+],
+"Rajčany": [
+"Topoľčany"
+],
+"Rakovec nad Ondavou": [
+"Michalovce"
+],
+"Rakovice": [
+"Piešťany"
+],
+"Rakovnica": [
+"Rožňava"
+],
+"Rakovo": [
+"Martin"
+],
+"Raková": [
+"Čadca"
+],
+"Rakovčík": [
+"Svidník"
+],
+"Rakytník": [
+"Rimavská Sobota"
+],
+"Rakúsy": [
+"Kežmarok"
+],
+"Rakša": [
+"Turčianske Teplice"
+],
+"Rankovce": [
+"Košice-okolie"
+],
+"Rapovce": [
+"Lučenec"
+],
+"Raslavice": [
+"Bardejov"
+],
+"Rastislavice": [
+"Nové Zámky"
+],
+"Ratka": [
+"Lučenec"
+],
+"Ratkovce": [
+"Hlohovec"
+],
+"Ratkovo": [
+"Martin"
+],
+"Ratkovská Lehota": [
+"Rimavská Sobota"
+],
+"Ratkovská Suchá": [
+"Rimavská Sobota"
+],
+"Ratkovské Bystré": [
+"Revúca"
+],
+"Ratková": [
+"Revúca"
+],
+"Ratnovce": [
+"Piešťany"
+],
+"Ratvaj": [
+"Sabinov"
+],
+"Rašice": [
+"Revúca"
+],
+"Ražňany": [
+"Sabinov"
+],
+"Reca": [
+"Senec"
+],
+"Regetovka": [
+"Bardejov"
+],
+"Rejdová": [
+"Rožňava"
+],
+"Remeniny": [
+"Vranov nad Topľou"
+],
+"Remetské Hámre": [
+"Sobrance"
+],
+"Renčišov": [
+"Sabinov"
+],
+"Repejov": [
+"Medzilaborce"
+],
+"Repište": [
+"Žiar nad Hronom"
+],
+"Revúca": [
+"Revúca"
+],
+"Revúcka Lehota": [
+"Revúca"
+],
+"Reľov": [
+"Kežmarok"
+],
+"Rešica": [
+"Košice-okolie"
+],
+"Rešov": [
+"Bardejov"
+],
+"Richnava": [
+"Gelnica"
+],
+"Richvald": [
+"Bardejov"
+],
+"Riečka": [
+"Banská Bystrica",
+"Rimavská Sobota"
+],
+"Rimavská Baňa": [
+"Rimavská Sobota"
+],
+"Rimavská Seč": [
+"Rimavská Sobota"
+],
+"Rimavská Sobota": [
+"Rimavská Sobota"
+],
+"Rimavské Brezovo": [
+"Rimavská Sobota"
+],
+"Rimavské Janovce": [
+"Rimavská Sobota"
+],
+"Rimavské Zalužany": [
+"Rimavská Sobota"
+],
+"Rišňovce": [
+"Nitra"
+],
+"Rochovce": [
+"Rožňava"
+],
+"Rohov": [
+"Senica"
+],
+"Rohovce": [
+"Dunajská Streda"
+],
+"Rohožník": [
+"Humenné",
+"Malacky"
+],
+"Rokycany": [
+"Prešov"
+],
+"Rokytov": [
+"Bardejov"
+],
+"Rokytov pri Humennom": [
+"Humenné"
+],
+"Rokytovce": [
+"Medzilaborce"
+],
+"Rosina": [
+"Žilina"
+],
+"Rovensko": [
+"Senica"
+],
+"Rovinka": [
+"Senec"
+],
+"Rovné": [
+"Humenné",
+"Rimavská Sobota",
+"Svidník"
+],
+"Rovňany": [
+"Poltár"
+],
+"Rozhanovce": [
+"Košice-okolie"
+],
+"Rozložná": [
+"Rožňava"
+],
+"Roztoky": [
+"Svidník"
+],
+"Roškovce": [
+"Medzilaborce"
+],
+"Roštár": [
+"Rožňava"
+],
+"Rožkovany": [
+"Sabinov"
+],
+"Rožňava": [
+"Rožňava"
+],
+"Rožňavské Bystré": [
+"Rožňava"
+],
+"Rudina": [
+"Kysucké Nové Mesto"
+],
+"Rudinka": [
+"Kysucké Nové Mesto"
+],
+"Rudinská": [
+"Kysucké Nové Mesto"
+],
+"Rudlov": [
+"Vranov nad Topľou"
+],
+"Rudnianska Lehota": [
+"Prievidza"
+],
+"Rudno": [
+"Turčianske Teplice"
+],
+"Rudno nad Hronom": [
+"Žarnovica"
+],
+"Rudná": [
+"Rožňava"
+],
+"Rudník": [
+"Košice-okolie",
+"Myjava"
+],
+"Rudňany": [
+"Spišská Nová Ves"
+],
+"Rumanová": [
+"Nitra"
+],
+"Rumince": [
+"Rimavská Sobota"
+],
+"Runina": [
+"Snina"
+],
+"Ruskov": [
+"Košice-okolie"
+],
+"Ruskovce": [
+"Bánovce nad Bebravou",
+"Sobrance"
+],
+"Ruská": [
+"Michalovce"
+],
+"Ruská Bystrá": [
+"Sobrance"
+],
+"Ruská Kajňa": [
+"Humenné"
+],
+"Ruská Nová Ves": [
+"Prešov"
+],
+"Ruská Poruba": [
+"Humenné"
+],
+"Ruská Volová": [
+"Snina"
+],
+"Ruská Voľa": [
+"Vranov nad Topľou"
+],
+"Ruská Voľa nad Popradom": [
+"Stará Ľubovňa"
+],
+"Ruský Hrabovec": [
+"Sobrance"
+],
+"Ruský Potok": [
+"Snina"
+],
+"Ružindol": [
+"Trnava"
+],
+"Ružiná": [
+"Lučenec"
+],
+"Ružomberok": [
+"Ružomberok"
+],
+"Rybany": [
+"Bánovce nad Bebravou"
+],
+"Rybky": [
+"Senica"
+],
+"Rybník": [
+"Levice",
+"Revúca"
+],
+"Rykynčice": [
+"Krupina"
+],
+"Rákoš": [
+"Košice-okolie",
+"Revúca"
+],
+"Ráztoka": [
+"Brezno"
+],
+"Ráztočno": [
+"Prievidza"
+],
+"Rúbaň": [
+"Nové Zámky"
+],
+"Sabinov": [
+"Sabinov"
+],
+"Sady nad Torysou": [
+"Košice-okolie"
+],
+"Salka": [
+"Nové Zámky"
+],
+"Santovka": [
+"Levice"
+],
+"Sap": [
+"Dunajská Streda"
+],
+"Sasinkovo": [
+"Hlohovec"
+],
+"Sazdice": [
+"Levice"
+],
+"Sačurov": [
+"Vranov nad Topľou"
+],
+"Sebechleby": [
+"Krupina"
+],
+"Sebedražie": [
+"Prievidza"
+],
+"Sebedín-Bečov": [
+"Banská Bystrica"
+],
+"Sedliacka Dubová": [
+"Dolný Kubín"
+],
+"Sedlice": [
+"Prešov"
+],
+"Sedliská": [
+"Vranov nad Topľou"
+],
+"Sedmerovec": [
+"Ilava"
+],
+"Sejkov": [
+"Sobrance"
+],
+"Sekule": [
+"Senica"
+],
+"Selce": [
+"Banská Bystrica",
+"Krupina",
+"Poltár"
+],
+"Selec": [
+"Trenčín"
+],
+"Selice": [
+"Šaľa"
+],
+"Semerovo": [
+"Nové Zámky"
+],
+"Senec": [
+"Senec"
+],
+"Seniakovce": [
+"Prešov"
+],
+"Senica": [
+"Senica"
+],
+"Senné": [
+"Michalovce",
+"Veľký Krtíš"
+],
+"Senohrad": [
+"Krupina"
+],
+"Sereď": [
+"Galanta"
+],
+"Seč": [
+"Prievidza"
+],
+"Sečianky": [
+"Veľký Krtíš"
+],
+"Sečovce": [
+"Trebišov"
+],
+"Sečovská Polianka": [
+"Vranov nad Topľou"
+],
+"Seľany": [
+"Veľký Krtíš"
+],
+"Seňa": [
+"Košice-okolie"
+],
+"Sielnica": [
+"Zvolen"
+],
+"Sihelné": [
+"Námestovo"
+],
+"Sihla": [
+"Brezno"
+],
+"Sikenica": [
+"Levice"
+],
+"Sikenička": [
+"Nové Zámky"
+],
+"Siladice": [
+"Hlohovec"
+],
+"Silica": [
+"Rožňava"
+],
+"Silická Brezová": [
+"Rožňava"
+],
+"Silická Jablonica": [
+"Rožňava"
+],
+"Sirk": [
+"Revúca"
+],
+"Sirník": [
+"Trebišov"
+],
+"Skalica": [
+"Skalica"
+],
+"Skalité": [
+"Čadca"
+],
+"Skalka nad Váhom": [
+"Trenčín"
+],
+"Skačany": [
+"Partizánske"
+],
+"Skerešovo": [
+"Revúca"
+],
+"Sklabinský Podzámok": [
+"Martin"
+],
+"Sklabiná": [
+"Veľký Krtíš"
+],
+"Sklabiňa": [
+"Martin"
+],
+"Sklené": [
+"Turčianske Teplice"
+],
+"Sklené Teplice": [
+"Žiar nad Hronom"
+],
+"Skrabské": [
+"Vranov nad Topľou"
+],
+"Skároš": [
+"Košice-okolie"
+],
+"Skýcov": [
+"Zlaté Moravce"
+],
+"Slanec": [
+"Košice-okolie"
+],
+"Slanská Huta": [
+"Košice-okolie"
+],
+"Slanské Nové Mesto": [
+"Košice-okolie"
+],
+"Slančík": [
+"Košice-okolie"
+],
+"Slaská": [
+"Žiar nad Hronom"
+],
+"Slatina": [
+"Levice"
+],
+"Slatina nad Bebravou": [
+"Bánovce nad Bebravou"
+],
+"Slatinka nad Bebravou": [
+"Bánovce nad Bebravou"
+],
+"Slatinské Lazy": [
+"Detva"
+],
+"Slatvina": [
+"Spišská Nová Ves"
+],
+"Slavec": [
+"Rožňava"
+],
+"Slavkovce": [
+"Michalovce"
+],
+"Slavnica": [
+"Ilava"
+],
+"Slavoška": [
+"Rožňava"
+],
+"Slavošovce": [
+"Rožňava"
+],
+"Slepčany": [
+"Zlaté Moravce"
+],
+"Sliač": [
+"Zvolen"
+],
+"Sliepkovce": [
+"Michalovce"
+],
+"Slivník": [
+"Trebišov"
+],
+"Slizké": [
+"Rimavská Sobota"
+],
+"Slopná": [
+"Považská Bystrica"
+],
+"Slovany": [
+"Martin"
+],
+"Slovenská Kajňa": [
+"Vranov nad Topľou"
+],
+"Slovenská Nová Ves": [
+"Trnava"
+],
+"Slovenská Ves": [
+"Kežmarok"
+],
+"Slovenská Volová": [
+"Humenné"
+],
+"Slovenská Ľupča": [
+"Banská Bystrica"
+],
+"Slovenské Krivé": [
+"Humenné"
+],
+"Slovenské Kľačany": [
+"Veľký Krtíš"
+],
+"Slovenské Nové Mesto": [
+"Trebišov"
+],
+"Slovenské Pravno": [
+"Turčianske Teplice"
+],
+"Slovenské Ďarmoty": [
+"Veľký Krtíš"
+],
+"Slovenský Grob": [
+"Pezinok"
+],
+"Slovinky": [
+"Spišská Nová Ves"
+],
+"Sládkovičovo": [
+"Galanta"
+],
+"Smilno": [
+"Bardejov"
+],
+"Smižany": [
+"Spišská Nová Ves"
+],
+"Smolenice": [
+"Trnava"
+],
+"Smolinské": [
+"Senica"
+],
+"Smolnícka Huta": [
+"Gelnica"
+],
+"Smolník": [
+"Gelnica"
+],
+"Smrdáky": [
+"Senica"
+],
+"Smrečany": [
+"Liptovský Mikuláš"
+],
+"Snakov": [
+"Bardejov"
+],
+"Snežnica": [
+"Kysucké Nové Mesto"
+],
+"Snina": [
+"Snina"
+],
+"Soblahov": [
+"Trenčín"
+],
+"Sobotište": [
+"Senica"
+],
+"Soboš": [
+"Svidník"
+],
+"Sobrance": [
+"Sobrance"
+],
+"Socovce": [
+"Martin"
+],
+"Sokolce": [
+"Komárno"
+],
+"Sokolovce": [
+"Piešťany"
+],
+"Sokoľ": [
+"Košice-okolie"
+],
+"Sokoľany": [
+"Košice-okolie"
+],
+"Sološnica": [
+"Malacky"
+],
+"Solčany": [
+"Topoľčany"
+],
+"Solčianky": [
+"Topoľčany"
+],
+"Somotor": [
+"Trebišov"
+],
+"Sopkovce": [
+"Humenné"
+],
+"Soľ": [
+"Vranov nad Topľou"
+],
+"Soľnička": [
+"Trebišov"
+],
+"Soľník": [
+"Stropkov"
+],
+"Spišská Belá": [
+"Kežmarok"
+],
+"Spišská Nová Ves": [
+"Spišská Nová Ves"
+],
+"Spišská Stará Ves": [
+"Kežmarok"
+],
+"Spišská Teplica": [
+"Poprad"
+],
+"Spišské Bystré": [
+"Poprad"
+],
+"Spišské Hanušovce": [
+"Kežmarok"
+],
+"Spišské Podhradie": [
+"Levoča"
+],
+"Spišské Tomášovce": [
+"Spišská Nová Ves"
+],
+"Spišské Vlachy": [
+"Spišská Nová Ves"
+],
+"Spišský Hrhov": [
+"Levoča"
+],
+"Spišský Hrušov": [
+"Spišská Nová Ves"
+],
+"Spišský Štiavnik": [
+"Poprad"
+],
+"Spišský Štvrtok": [
+"Levoča"
+],
+"Stakčín": [
+"Snina"
+],
+"Stakčínska Roztoka": [
+"Snina"
+],
+"Stankovany": [
+"Ružomberok"
+],
+"Stankovce": [
+"Trebišov"
+],
+"Stanča": [
+"Trebišov"
+],
+"Starina": [
+"Stará Ľubovňa"
+],
+"Stará Bašta": [
+"Rimavská Sobota"
+],
+"Stará Bystrica": [
+"Čadca"
+],
+"Stará Halič": [
+"Lučenec"
+],
+"Stará Huta": [
+"Detva"
+],
+"Stará Kremnička": [
+"Žiar nad Hronom"
+],
+"Stará Lehota": [
+"Nové Mesto nad Váhom"
+],
+"Stará Lesná": [
+"Kežmarok"
+],
+"Stará Myjava": [
+"Myjava"
+],
+"Stará Turá": [
+"Nové Mesto nad Váhom"
+],
+"Stará Voda": [
+"Gelnica"
+],
+"Stará Ľubovňa": [
+"Stará Ľubovňa"
+],
+"Staré": [
+"Michalovce"
+],
+"Staré Hory": [
+"Banská Bystrica"
+],
+"Starý Hrádok": [
+"Levice"
+],
+"Starý Tekov": [
+"Levice"
+],
+"Staškov": [
+"Čadca"
+],
+"Staškovce": [
+"Stropkov"
+],
+"Stebnícka Huta": [
+"Bardejov"
+],
+"Stebník": [
+"Bardejov"
+],
+"Stožok": [
+"Detva"
+],
+"Stratená": [
+"Rožňava"
+],
+"Streda nad Bodrogom": [
+"Trebišov"
+],
+"Stredné Plachtince": [
+"Veľký Krtíš"
+],
+"Strekov": [
+"Nové Zámky"
+],
+"Strelníky": [
+"Banská Bystrica"
+],
+"Stretava": [
+"Michalovce"
+],
+"Stretavka": [
+"Michalovce"
+],
+"Strečno": [
+"Žilina"
+],
+"Streženice": [
+"Púchov"
+],
+"Strihovce": [
+"Snina"
+],
+"Stropkov": [
+"Stropkov"
+],
+"Stročín": [
+"Svidník"
+],
+"Stráne pod Tatrami": [
+"Kežmarok"
+],
+"Stránska": [
+"Rimavská Sobota"
+],
+"Stránske": [
+"Žilina"
+],
+"Stráňany": [
+"Stará Ľubovňa"
+],
+"Stráňavy": [
+"Žilina"
+],
+"Stráža": [
+"Žilina"
+],
+"Strážne": [
+"Trebišov"
+],
+"Strážske": [
+"Michalovce"
+],
+"Studenec": [
+"Levoča"
+],
+"Studená": [
+"Rimavská Sobota"
+],
+"Studienka": [
+"Malacky"
+],
+"Stupava": [
+"Malacky"
+],
+"Stupné": [
+"Považská Bystrica"
+],
+"Stuľany": [
+"Bardejov"
+],
+"Suchohrad": [
+"Malacky"
+],
+"Suchá Dolina": [
+"Prešov"
+],
+"Suchá Hora": [
+"Tvrdošín"
+],
+"Suchá nad Parnou": [
+"Trnava"
+],
+"Sucháň": [
+"Veľký Krtíš"
+],
+"Suché": [
+"Michalovce"
+],
+"Suché Brezovo": [
+"Veľký Krtíš"
+],
+"Sudince": [
+"Krupina"
+],
+"Sukov": [
+"Medzilaborce"
+],
+"Sulín": [
+"Stará Ľubovňa"
+],
+"Sučany": [
+"Martin"
+],
+"Sušany": [
+"Poltár"
+],
+"Svederník": [
+"Žilina"
+],
+"Sverepec": [
+"Považská Bystrica"
+],
+"Sveržov": [
+"Bardejov"
+],
+"Svetlice": [
+"Medzilaborce"
+],
+"Svidnička": [
+"Svidník"
+],
+"Svidník": [
+"Svidník"
+],
+"Svinia": [
+"Prešov"
+],
+"Svinica": [
+"Košice-okolie"
+],
+"Svinice": [
+"Trebišov"
+],
+"Svinná": [
+"Trenčín"
+],
+"Svit": [
+"Poprad"
+],
+"Svodín": [
+"Nové Zámky"
+],
+"Svrbice": [
+"Topoľčany"
+],
+"Svrčinovec": [
+"Čadca"
+],
+"Svätoplukovo": [
+"Nitra"
+],
+"Svätuš": [
+"Sobrance"
+],
+"Svätuše": [
+"Trebišov"
+],
+"Svätá Mária": [
+"Trebišov"
+],
+"Svätý Anton": [
+"Banská Štiavnica"
+],
+"Svätý Jur": [
+"Pezinok"
+],
+"Svätý Kríž": [
+"Liptovský Mikuláš"
+],
+"Svätý Peter": [
+"Komárno"
+],
+"Sádočné": [
+"Považská Bystrica"
+],
+"Sása": [
+"Revúca",
+"Zvolen"
+],
+"Súdovce": [
+"Krupina"
+],
+"Súlovce": [
+"Topoľčany"
+],
+"Sútor": [
+"Rimavská Sobota"
+],
+"Súľov-Hradná": [
+"Bytča"
+],
+"Sľažany": [
+"Zlaté Moravce"
+],
+"Tachty": [
+"Rimavská Sobota"
+],
+"Tajná": [
+"Nitra"
+],
+"Tajov": [
+"Banská Bystrica"
+],
+"Tarnov": [
+"Bardejov"
+],
+"Tatranská Javorina": [
+"Poprad"
+],
+"Tašuľa": [
+"Sobrance"
+],
+"Tehla": [
+"Levice"
+],
+"Tekolďany": [
+"Hlohovec"
+],
+"Tekovská Breznica": [
+"Žarnovica"
+],
+"Tekovské Lužany": [
+"Levice"
+],
+"Tekovské Nemce": [
+"Zlaté Moravce"
+],
+"Tekovský Hrádok": [
+"Levice"
+],
+"Telgárt": [
+"Brezno"
+],
+"Telince": [
+"Nitra"
+],
+"Temeš": [
+"Prievidza"
+],
+"Teplička": [
+"Spišská Nová Ves"
+],
+"Teplička nad Váhom": [
+"Žilina"
+],
+"Tepličky": [
+"Hlohovec"
+],
+"Teplý Vrch": [
+"Rimavská Sobota"
+],
+"Terany": [
+"Krupina"
+],
+"Terchová": [
+"Žilina"
+],
+"Teriakovce": [
+"Prešov"
+],
+"Terňa": [
+"Prešov"
+],
+"Tesáre": [
+"Topoľčany"
+],
+"Tesárske Mlyňany": [
+"Zlaté Moravce"
+],
+"Tešedíkovo": [
+"Šaľa"
+],
+"Tibava": [
+"Sobrance"
+],
+"Tichý Potok": [
+"Sabinov"
+],
+"Timoradza": [
+"Bánovce nad Bebravou"
+],
+"Tisinec": [
+"Stropkov"
+],
+"Tisovec": [
+"Rimavská Sobota"
+],
+"Tlmače": [
+"Levice"
+],
+"Tokajík": [
+"Stropkov"
+],
+"Tomášikovo": [
+"Galanta"
+],
+"Tomášov": [
+"Senec"
+],
+"Tomášovce": [
+"Lučenec",
+"Rimavská Sobota"
+],
+"Toporec": [
+"Kežmarok"
+],
+"Topoľa": [
+"Snina"
+],
+"Topoľnica": [
+"Galanta"
+],
+"Topoľníky": [
+"Dunajská Streda"
+],
+"Topoľovka": [
+"Humenné"
+],
+"Topoľčany": [
+"Topoľčany"
+],
+"Topoľčianky": [
+"Zlaté Moravce"
+],
+"Tornaľa": [
+"Revúca"
+],
+"Torysa": [
+"Sabinov"
+],
+"Torysky": [
+"Levoča"
+],
+"Tovarnianska Polianka": [
+"Vranov nad Topľou"
+],
+"Tovarné": [
+"Vranov nad Topľou"
+],
+"Tovarníky": [
+"Topoľčany"
+],
+"Točnica": [
+"Lučenec"
+],
+"Trakovice": [
+"Hlohovec"
+],
+"Trebatice": [
+"Piešťany"
+],
+"Trebejov": [
+"Košice-okolie"
+],
+"Trebeľovce": [
+"Lučenec"
+],
+"Trebichava": [
+"Bánovce nad Bebravou"
+],
+"Trebišov": [
+"Trebišov"
+],
+"Trebostovo": [
+"Martin"
+],
+"Trebušovce": [
+"Veľký Krtíš"
+],
+"Trenč": [
+"Lučenec"
+],
+"Trenčianska Teplá": [
+"Trenčín"
+],
+"Trenčianska Turná": [
+"Trenčín"
+],
+"Trenčianske Bohuslavice": [
+"Nové Mesto nad Váhom"
+],
+"Trenčianske Jastrabie": [
+"Trenčín"
+],
+"Trenčianske Mitice": [
+"Trenčín"
+],
+"Trenčianske Stankovce": [
+"Trenčín"
+],
+"Trenčianske Teplice": [
+"Trenčín"
+],
+"Trenčín": [
+"Trenčín"
+],
+"Trhovište": [
+"Michalovce"
+],
+"Trhová Hradská": [
+"Dunajská Streda"
+],
+"Trnava": [
+"Trnava"
+],
+"Trnava pri Laborci": [
+"Michalovce"
+],
+"Trnavá Hora": [
+"Žiar nad Hronom"
+],
+"Trnkov": [
+"Prešov"
+],
+"Trnovec": [
+"Skalica"
+],
+"Trnovec nad Váhom": [
+"Šaľa"
+],
+"Trnovo": [
+"Martin"
+],
+"Trnávka": [
+"Dunajská Streda",
+"Trebišov"
+],
+"Tročany": [
+"Bardejov"
+],
+"Trpín": [
+"Krupina"
+],
+"Trstená": [
+"Tvrdošín"
+],
+"Trstená na Ostrove": [
+"Dunajská Streda"
+],
+"Trstené": [
+"Liptovský Mikuláš"
+],
+"Trstené pri Hornáde": [
+"Košice-okolie"
+],
+"Trstice": [
+"Galanta"
+],
+"Trstín": [
+"Trnava"
+],
+"Trsťany": [
+"Košice-okolie"
+],
+"Trávnica": [
+"Nové Zámky"
+],
+"Trávnik": [
+"Komárno"
+],
+"Tuchyňa": [
+"Ilava"
+],
+"Tuhrina": [
+"Prešov"
+],
+"Tuhár": [
+"Lučenec"
+],
+"Tulčík": [
+"Prešov"
+],
+"Tupá": [
+"Levice"
+],
+"Turany": [
+"Martin"
+],
+"Turany nad Ondavou": [
+"Stropkov"
+],
+"Turcovce": [
+"Humenné"
+],
+"Turecká": [
+"Banská Bystrica"
+],
+"Tureň": [
+"Senec"
+],
+"Turie": [
+"Žilina"
+],
+"Turnianska Nová Ves": [
+"Košice-okolie"
+],
+"Turová": [
+"Zvolen"
+],
+"Turzovka": [
+"Čadca"
+],
+"Turá": [
+"Levice"
+],
+"Turík": [
+"Ružomberok"
+],
+"Turček": [
+"Turčianske Teplice"
+],
+"Turčianky": [
+"Partizánske"
+],
+"Turčianska Štiavnička": [
+"Martin"
+],
+"Turčianske Jaseno": [
+"Martin"
+],
+"Turčianske Kľačany": [
+"Martin"
+],
+"Turčianske Teplice": [
+"Turčianske Teplice"
+],
+"Turčiansky Peter": [
+"Martin"
+],
+"Turčiansky Ďur": [
+"Martin"
+],
+"Turčok": [
+"Revúca"
+],
+"Turňa nad Bodvou": [
+"Košice-okolie"
+],
+"Tušice": [
+"Michalovce"
+],
+"Tušická Nová Ves": [
+"Michalovce"
+],
+"Tužina": [
+"Prievidza"
+],
+"Tvarožná": [
+"Kežmarok"
+],
+"Tvrdomestice": [
+"Topoľčany"
+],
+"Tvrdošovce": [
+"Nové Zámky"
+],
+"Tvrdošín": [
+"Tvrdošín"
+],
+"Tôň": [
+"Komárno"
+],
+"Tŕnie": [
+"Zvolen"
+],
+"Ubľa": [
+"Snina"
+],
+"Udavské": [
+"Humenné"
+],
+"Udiča": [
+"Považská Bystrica"
+],
+"Uhliská": [
+"Levice"
+],
+"Uhorská Ves": [
+"Liptovský Mikuláš"
+],
+"Uhorské": [
+"Poltár"
+],
+"Uhrovec": [
+"Bánovce nad Bebravou"
+],
+"Uhrovské Podhradie": [
+"Bánovce nad Bebravou"
+],
+"Ulič": [
+"Snina"
+],
+"Uličské Krivé": [
+"Snina"
+],
+"Uloža": [
+"Levoča"
+],
+"Unín": [
+"Skalica"
+],
+"Urmince": [
+"Topoľčany"
+],
+"Utekáč": [
+"Poltár"
+],
+"Uzovce": [
+"Sabinov"
+],
+"Uzovská Panica": [
+"Rimavská Sobota"
+],
+"Uzovské Pekľany": [
+"Sabinov"
+],
+"Uzovský Šalgov": [
+"Sabinov"
+],
+"Uňatín": [
+"Krupina"
+],
+"Vagrinec": [
+"Svidník"
+],
+"Vajkovce": [
+"Košice-okolie"
+],
+"Valaliky": [
+"Košice-okolie"
+],
+"Valaská": [
+"Brezno"
+],
+"Valaská Belá": [
+"Prievidza"
+],
+"Valaská Dubová": [
+"Ružomberok"
+],
+"Valentovce": [
+"Medzilaborce"
+],
+"Valice": [
+"Rimavská Sobota"
+],
+"Valkovce": [
+"Svidník"
+],
+"Valča": [
+"Martin"
+],
+"Vaniškovce": [
+"Bardejov"
+],
+"Varadka": [
+"Bardejov"
+],
+"Varechovce": [
+"Stropkov"
+],
+"Varhaňovce": [
+"Prešov"
+],
+"Varín": [
+"Žilina"
+],
+"Vasiľov": [
+"Námestovo"
+],
+"Vavrečka": [
+"Námestovo"
+],
+"Vavrinec": [
+"Vranov nad Topľou"
+],
+"Vavrišovo": [
+"Liptovský Mikuláš"
+],
+"Vaďovce": [
+"Nové Mesto nad Váhom"
+],
+"Vaľkovňa": [
+"Brezno"
+],
+"Važec": [
+"Liptovský Mikuláš"
+],
+"Vechec": [
+"Vranov nad Topľou"
+],
+"Veličná": [
+"Dolný Kubín"
+],
+"Velušovce": [
+"Topoľčany"
+],
+"Velčice": [
+"Zlaté Moravce"
+],
+"Vernár": [
+"Poprad"
+],
+"Veselé": [
+"Piešťany"
+],
+"Veterná Poruba": [
+"Liptovský Mikuláš"
+],
+"Večelkov": [
+"Rimavská Sobota"
+],
+"Veľaty": [
+"Trebišov"
+],
+"Veľkrop": [
+"Stropkov"
+],
+"Veľká Dolina": [
+"Nitra"
+],
+"Veľká Franková": [
+"Kežmarok"
+],
+"Veľká Hradná": [
+"Trenčín"
+],
+"Veľká Ida": [
+"Košice-okolie"
+],
+"Veľká Lehota": [
+"Žarnovica"
+],
+"Veľká Lesná": [
+"Stará Ľubovňa"
+],
+"Veľká Lodina": [
+"Košice-okolie"
+],
+"Veľká Lomnica": [
+"Kežmarok"
+],
+"Veľká Lúka": [
+"Zvolen"
+],
+"Veľká Mača": [
+"Galanta"
+],
+"Veľká Paka": [
+"Dunajská Streda"
+],
+"Veľká Tŕňa": [
+"Trebišov"
+],
+"Veľká Ves": [
+"Poltár"
+],
+"Veľká Ves nad Ipľom": [
+"Veľký Krtíš"
+],
+"Veľká nad Ipľom": [
+"Lučenec"
+],
+"Veľká Čalomija": [
+"Veľký Krtíš"
+],
+"Veľká Čausa": [
+"Prievidza"
+],
+"Veľká Čierna": [
+"Žilina"
+],
+"Veľké Bierovce": [
+"Trenčín"
+],
+"Veľké Blahovo": [
+"Dunajská Streda"
+],
+"Veľké Borové": [
+"Liptovský Mikuláš"
+],
+"Veľké Chlievany": [
+"Bánovce nad Bebravou"
+],
+"Veľké Chyndice": [
+"Nitra"
+],
+"Veľké Dravce": [
+"Lučenec"
+],
+"Veľké Držkovce": [
+"Bánovce nad Bebravou"
+],
+"Veľké Dvorany": [
+"Topoľčany"
+],
+"Veľké Dvorníky": [
+"Dunajská Streda"
+],
+"Veľké Hoste": [
+"Bánovce nad Bebravou"
+],
+"Veľké Kosihy": [
+"Komárno"
+],
+"Veľké Kostoľany": [
+"Piešťany"
+],
+"Veľké Kozmálovce": [
+"Levice"
+],
+"Veľké Kršteňany": [
+"Partizánske"
+],
+"Veľké Leváre": [
+"Malacky"
+],
+"Veľké Lovce": [
+"Nové Zámky"
+],
+"Veľké Ludince": [
+"Levice"
+],
+"Veľké Orvište": [
+"Piešťany"
+],
+"Veľké Ozorovce": [
+"Trebišov"
+],
+"Veľké Pole": [
+"Žarnovica"
+],
+"Veľké Raškovce": [
+"Michalovce"
+],
+"Veľké Revištia": [
+"Sobrance"
+],
+"Veľké Ripňany": [
+"Topoľčany"
+],
+"Veľké Rovné": [
+"Bytča"
+],
+"Veľké Slemence": [
+"Michalovce"
+],
+"Veľké Straciny": [
+"Veľký Krtíš"
+],
+"Veľké Teriakovce": [
+"Rimavská Sobota"
+],
+"Veľké Trakany": [
+"Trebišov"
+],
+"Veľké Turovce": [
+"Levice"
+],
+"Veľké Uherce": [
+"Partizánske"
+],
+"Veľké Vozokany": [
+"Zlaté Moravce"
+],
+"Veľké Zlievce": [
+"Veľký Krtíš"
+],
+"Veľké Zálužie": [
+"Nitra"
+],
+"Veľké Úľany": [
+"Galanta"
+],
+"Veľký Biel": [
+"Senec"
+],
+"Veľký Blh": [
+"Rimavská Sobota"
+],
+"Veľký Cetín": [
+"Nitra"
+],
+"Veľký Folkmar": [
+"Gelnica"
+],
+"Veľký Grob": [
+"Galanta"
+],
+"Veľký Horeš": [
+"Trebišov"
+],
+"Veľký Kamenec": [
+"Trebišov"
+],
+"Veľký Klíž": [
+"Partizánske"
+],
+"Veľký Krtíš": [
+"Veľký Krtíš"
+],
+"Veľký Kýr": [
+"Nové Zámky"
+],
+"Veľký Lapáš": [
+"Nitra"
+],
+"Veľký Lipník": [
+"Stará Ľubovňa"
+],
+"Veľký Lom": [
+"Veľký Krtíš"
+],
+"Veľký Meder": [
+"Dunajská Streda"
+],
+"Veľký Slavkov": [
+"Poprad"
+],
+"Veľký Slivník": [
+"Prešov"
+],
+"Veľký Čepčín": [
+"Turčianske Teplice"
+],
+"Veľký Ďur": [
+"Levice"
+],
+"Veľký Šariš": [
+"Prešov"
+],
+"Veľopolie": [
+"Humenné"
+],
+"Vidiná": [
+"Lučenec"
+],
+"Vieska": [
+"Dunajská Streda",
+"Veľký Krtíš"
+],
+"Vieska nad Blhom": [
+"Rimavská Sobota"
+],
+"Vieska nad Žitavou": [
+"Zlaté Moravce"
+],
+"Vikartovce": [
+"Poprad"
+],
+"Vinica": [
+"Veľký Krtíš"
+],
+"Viničky": [
+"Trebišov"
+],
+"Viničné": [
+"Pezinok"
+],
+"Vinné": [
+"Michalovce"
+],
+"Vinodol": [
+"Nitra"
+],
+"Vinohrady nad Váhom": [
+"Galanta"
+],
+"Vinosady": [
+"Pezinok"
+],
+"Virt": [
+"Komárno"
+],
+"Vislanka": [
+"Stará Ľubovňa"
+],
+"Vislava": [
+"Stropkov"
+],
+"Visolaje": [
+"Púchov"
+],
+"Vitanová": [
+"Tvrdošín"
+],
+"Vištuk": [
+"Pezinok"
+],
+"Višňov": [
+"Trebišov"
+],
+"Višňové": [
+"Nové Mesto nad Váhom",
+"Revúca",
+"Žilina"
+],
+"Vlachovo": [
+"Rožňava"
+],
+"Vlachy": [
+"Liptovský Mikuláš"
+],
+"Vladiča": [
+"Stropkov"
+],
+"Vlača": [
+"Vranov nad Topľou"
+],
+"Vlkanová": [
+"Banská Bystrica"
+],
+"Vlkas": [
+"Nové Zámky"
+],
+"Vlkovce": [
+"Kežmarok"
+],
+"Vlková": [
+"Kežmarok"
+],
+"Vlky": [
+"Senec"
+],
+"Vlkyňa": [
+"Rimavská Sobota"
+],
+"Vlčany": [
+"Šaľa"
+],
+"Vlčkovce": [
+"Trnava"
+],
+"Voderady": [
+"Trnava"
+],
+"Vojany": [
+"Michalovce"
+],
+"Vojka": [
+"Trebišov"
+],
+"Vojka nad Dunajom": [
+"Dunajská Streda"
+],
+"Vojkovce": [
+"Spišská Nová Ves"
+],
+"Vojnatina": [
+"Sobrance"
+],
+"Vojtovce": [
+"Stropkov"
+],
+"Vojčice": [
+"Trebišov"
+],
+"Vojňany": [
+"Kežmarok"
+],
+"Volica": [
+"Medzilaborce"
+],
+"Volkovce": [
+"Zlaté Moravce"
+],
+"Voznica": [
+"Žarnovica"
+],
+"Vozokany": [
+"Galanta",
+"Topoľčany"
+],
+"Voľa": [
+"Michalovce"
+],
+"Vrakúň": [
+"Dunajská Streda"
+],
+"Vranov nad Topľou": [
+"Vranov nad Topľou"
+],
+"Vrbnica": [
+"Michalovce"
+],
+"Vrbov": [
+"Kežmarok"
+],
+"Vrbovce": [
+"Myjava"
+],
+"Vrbovka": [
+"Veľký Krtíš"
+],
+"Vrbová nad Váhom": [
+"Komárno"
+],
+"Vrbové": [
+"Piešťany"
+],
+"Vrchteplá": [
+"Považská Bystrica"
+],
+"Vráble": [
+"Nitra"
+],
+"Vrádište": [
+"Skalica"
+],
+"Vrícko": [
+"Martin"
+],
+"Vrútky": [
+"Martin"
+],
+"Vršatské Podhradie": [
+"Ilava"
+],
+"Vtáčkovce": [
+"Košice-okolie"
+],
+"Vydrany": [
+"Dunajská Streda"
+],
+"Vydrná": [
+"Púchov"
+],
+"Vydrník": [
+"Poprad"
+],
+"Vyhne": [
+"Žiar nad Hronom"
+],
+"Vysoká": [
+"Banská Štiavnica",
+"Sabinov"
+],
+"Vysoká nad Kysucou": [
+"Čadca"
+],
+"Vysoká nad Uhom": [
+"Michalovce"
+],
+"Vysoká pri Morave": [
+"Malacky"
+],
+"Vysoké Tatry": [
+"Poprad"
+],
+"Vysočany": [
+"Bánovce nad Bebravou"
+],
+"Vyškovce": [
+"Stropkov"
+],
+"Vyškovce nad Ipľom": [
+"Levice"
+],
+"Vyšná Boca": [
+"Liptovský Mikuláš"
+],
+"Vyšná Hutka": [
+"Košice-okolie"
+],
+"Vyšná Jablonka": [
+"Humenné"
+],
+"Vyšná Jedľová": [
+"Svidník"
+],
+"Vyšná Kamenica": [
+"Košice-okolie"
+],
+"Vyšná Myšľa": [
+"Košice-okolie"
+],
+"Vyšná Olšava": [
+"Stropkov"
+],
+"Vyšná Pisaná": [
+"Svidník"
+],
+"Vyšná Polianka": [
+"Bardejov"
+],
+"Vyšná Rybnica": [
+"Sobrance"
+],
+"Vyšná Sitnica": [
+"Humenné"
+],
+"Vyšná Slaná": [
+"Rožňava"
+],
+"Vyšná Voľa": [
+"Bardejov"
+],
+"Vyšná Šebastová": [
+"Prešov"
+],
+"Vyšné Ladičkovce": [
+"Humenné"
+],
+"Vyšné Nemecké": [
+"Sobrance"
+],
+"Vyšné Remety": [
+"Sobrance"
+],
+"Vyšné Repaše": [
+"Levoča"
+],
+"Vyšné Ružbachy": [
+"Stará Ľubovňa"
+],
+"Vyšné Valice": [
+"Rimavská Sobota"
+],
+"Vyšné nad Hronom": [
+"Levice"
+],
+"Vyšný Hrabovec": [
+"Stropkov"
+],
+"Vyšný Hrušov": [
+"Humenné"
+],
+"Vyšný Kazimír": [
+"Vranov nad Topľou"
+],
+"Vyšný Klátov": [
+"Košice-okolie"
+],
+"Vyšný Komárnik": [
+"Svidník"
+],
+"Vyšný Kručov": [
+"Bardejov"
+],
+"Vyšný Kubín": [
+"Dolný Kubín"
+],
+"Vyšný Medzev": [
+"Košice-okolie"
+],
+"Vyšný Mirošov": [
+"Svidník"
+],
+"Vyšný Orlík": [
+"Svidník"
+],
+"Vyšný Skálnik": [
+"Rimavská Sobota"
+],
+"Vyšný Slavkov": [
+"Levoča"
+],
+"Vyšný Tvarožec": [
+"Bardejov"
+],
+"Vyšný Čaj": [
+"Košice-okolie"
+],
+"Vyšný Žipov": [
+"Vranov nad Topľou"
+],
+"Váhovce": [
+"Galanta"
+],
+"Vápeník": [
+"Svidník"
+],
+"Vígľaš": [
+"Detva"
+],
+"Vígľašská Huta-Kalinka": [
+"Detva"
+],
+"Vítkovce": [
+"Spišská Nová Ves"
+],
+"Víťaz": [
+"Prešov"
+],
+"Víťazovce": [
+"Humenné"
+],
+"Výborná": [
+"Kežmarok"
+],
+"Východná": [
+"Liptovský Mikuláš"
+],
+"Výrava": [
+"Medzilaborce"
+],
+"Výčapy-Opatovce": [
+"Nitra"
+],
+"Včelince": [
+"Rimavská Sobota"
+],
+"Zacharovce": [
+"Rimavská Sobota"
+],
+"Zalaba": [
+"Levice"
+],
+"Zalužice": [
+"Michalovce"
+],
+"Zamarovce": [
+"Trenčín"
+],
+"Zatín": [
+"Trebišov"
+],
+"Zavar": [
+"Trnava"
+],
+"Zbehy": [
+"Nitra"
+],
+"Zbehňov": [
+"Trebišov"
+],
+"Zboj": [
+"Snina"
+],
+"Zbojné": [
+"Medzilaborce"
+],
+"Zborov": [
+"Bardejov"
+],
+"Zborov nad Bystricou": [
+"Čadca"
+],
+"Zbrojníky": [
+"Levice"
+],
+"Zbudská Belá": [
+"Medzilaborce"
+],
+"Zbudské Dlhé": [
+"Humenné"
+],
+"Zbudza": [
+"Michalovce"
+],
+"Zbyňov": [
+"Žilina"
+],
+"Zeleneč": [
+"Trnava"
+],
+"Zemianska Olča": [
+"Komárno"
+],
+"Zemianske Kostoľany": [
+"Prievidza"
+],
+"Zemianske Podhradie": [
+"Nové Mesto nad Váhom"
+],
+"Zemianske Sady": [
+"Galanta"
+],
+"Zemiansky Vrbovok": [
+"Krupina"
+],
+"Zemné": [
+"Nové Zámky"
+],
+"Zemplín": [
+"Trebišov"
+],
+"Zemplínska Nová Ves": [
+"Trebišov"
+],
+"Zemplínska Teplica": [
+"Trebišov"
+],
+"Zemplínska Široká": [
+"Michalovce"
+],
+"Zemplínske Hradište": [
+"Trebišov"
+],
+"Zemplínske Hámre": [
+"Snina"
+],
+"Zemplínske Jastrabie": [
+"Trebišov"
+],
+"Zemplínske Kopčany": [
+"Michalovce"
+],
+"Zemplínsky Branč": [
+"Trebišov"
+],
+"Zlatno": [
+"Poltár",
+"Zlaté Moravce"
+],
+"Zlatná na Ostrove": [
+"Komárno"
+],
+"Zlatník": [
+"Vranov nad Topľou"
+],
+"Zlatníky": [
+"Bánovce nad Bebravou"
+],
+"Zlatá Baňa": [
+"Prešov"
+],
+"Zlatá Idka": [
+"Košice-okolie"
+],
+"Zlaté": [
+"Bardejov"
+],
+"Zlaté Klasy": [
+"Dunajská Streda"
+],
+"Zlaté Moravce": [
+"Zlaté Moravce"
+],
+"Zliechov": [
+"Ilava"
+],
+"Zohor": [
+"Malacky"
+],
+"Zombor": [
+"Veľký Krtíš"
+],
+"Zuberec": [
+"Tvrdošín"
+],
+"Zubné": [
+"Humenné"
+],
+"Zubrohlava": [
+"Námestovo"
+],
+"Zubák": [
+"Púchov"
+],
+"Zvolen": [
+"Zvolen"
+],
+"Zvolenská Slatina": [
+"Zvolen"
+],
+"Zvončín": [
+"Trnava"
+],
+"Zábiedovo": [
+"Tvrdošín"
+],
+"Záborie": [
+"Martin"
+],
+"Záborské": [
+"Prešov"
+],
+"Zádiel": [
+"Košice-okolie"
+],
+"Zádor": [
+"Rimavská Sobota"
+],
+"Záhor": [
+"Sobrance"
+],
+"Záhorce": [
+"Veľký Krtíš"
+],
+"Záhorie": [
+"Malacky"
+],
+"Záhorská Ves": [
+"Malacky"
+],
+"Záhradné": [
+"Prešov"
+],
+"Zákamenné": [
+"Námestovo"
+],
+"Zákopčie": [
+"Čadca"
+],
+"Zálesie": [
+"Kežmarok",
+"Senec"
+],
+"Zámutov": [
+"Vranov nad Topľou"
+],
+"Záriečie": [
+"Púchov"
+],
+"Záskalie": [
+"Považská Bystrica"
+],
+"Závada": [
+"Humenné",
+"Topoľčany",
+"Veľký Krtíš"
+],
+"Závadka": [
+"Gelnica",
+"Humenné",
+"Michalovce"
+],
+"Závadka nad Hronom": [
+"Brezno"
+],
+"Závažná Poruba": [
+"Liptovský Mikuláš"
+],
+"Závod": [
+"Malacky"
+],
+"Zázrivá": [
+"Dolný Kubín"
+],
+"Ábelová": [
+"Lučenec"
+],
+"Úbrež": [
+"Sobrance"
+],
+"Údol": [
+"Stará Ľubovňa"
+],
+"Úhorná": [
+"Gelnica"
+],
+"Úľany nad Žitavou": [
+"Nové Zámky"
+],
+"Čab": [
+"Nitra"
+],
+"Čabalovce": [
+"Medzilaborce"
+],
+"Čabiny": [
+"Medzilaborce"
+],
+"Čabradský Vrbovok": [
+"Krupina"
+],
+"Čachtice": [
+"Nové Mesto nad Váhom"
+],
+"Čadca": [
+"Čadca"
+],
+"Čajkov": [
+"Levice"
+],
+"Čaka": [
+"Levice"
+],
+"Čakajovce": [
+"Nitra"
+],
+"Čakanovce": [
+"Košice-okolie",
+"Lučenec"
+],
+"Čakany": [
+"Dunajská Streda"
+],
+"Čaklov": [
+"Vranov nad Topľou"
+],
+"Čalovec": [
+"Komárno"
+],
+"Čamovce": [
+"Lučenec"
+],
+"Čaradice": [
+"Zlaté Moravce"
+],
+"Častkov": [
+"Senica"
+],
+"Častkovce": [
+"Nové Mesto nad Váhom"
+],
+"Častá": [
+"Pezinok"
+],
+"Čata": [
+"Levice"
+],
+"Čataj": [
+"Senec"
+],
+"Čavoj": [
+"Prievidza"
+],
+"Čaňa": [
+"Košice-okolie"
+],
+"Čebovce": [
+"Veľký Krtíš"
+],
+"Čechy": [
+"Nové Zámky"
+],
+"Čechynce": [
+"Nitra"
+],
+"Čekovce": [
+"Krupina"
+],
+"Čelkova Lehota": [
+"Považská Bystrica"
+],
+"Čelovce": [
+"Prešov",
+"Veľký Krtíš"
+],
+"Čeláre": [
+"Veľký Krtíš"
+],
+"Čenkovce": [
+"Dunajská Streda"
+],
+"Čerenčany": [
+"Rimavská Sobota"
+],
+"Čereňany": [
+"Prievidza"
+],
+"Čerhov": [
+"Trebišov"
+],
+"Čermany": [
+"Topoľčany"
+],
+"Černina": [
+"Humenné"
+],
+"Černochov": [
+"Trebišov"
+],
+"Černík": [
+"Nové Zámky"
+],
+"Čertižné": [
+"Medzilaborce"
+],
+"Červenica": [
+"Prešov"
+],
+"Červenica pri Sabinove": [
+"Sabinov"
+],
+"Červená Voda": [
+"Sabinov"
+],
+"Červeník": [
+"Hlohovec"
+],
+"Červený Hrádok": [
+"Zlaté Moravce"
+],
+"Červený Kameň": [
+"Ilava"
+],
+"Červený Kláštor": [
+"Kežmarok"
+],
+"Červeňany": [
+"Veľký Krtíš"
+],
+"Čerín": [
+"Banská Bystrica"
+],
+"České Brezovo": [
+"Poltár"
+],
+"Čečehov": [
+"Michalovce"
+],
+"Čečejovce": [
+"Košice-okolie"
+],
+"Čeľadice": [
+"Nitra"
+],
+"Čeľadince": [
+"Topoľčany"
+],
+"Čeľovce": [
+"Trebišov"
+],
+"Čierna": [
+"Trebišov"
+],
+"Čierna Lehota": [
+"Bánovce nad Bebravou",
+"Rožňava"
+],
+"Čierna Voda": [
+"Galanta"
+],
+"Čierna nad Tisou": [
+"Trebišov"
+],
+"Čierne": [
+"Čadca"
+],
+"Čierne Kľačany": [
+"Zlaté Moravce"
+],
+"Čierne Pole": [
+"Michalovce"
+],
+"Čierne nad Topľou": [
+"Vranov nad Topľou"
+],
+"Čierny Balog": [
+"Brezno"
+],
+"Čierny Brod": [
+"Galanta"
+],
+"Čierny Potok": [
+"Rimavská Sobota"
+],
+"Čifáre": [
+"Nitra"
+],
+"Čiližská Radvaň": [
+"Dunajská Streda"
+],
+"Čimhová": [
+"Tvrdošín"
+],
+"Čirč": [
+"Stará Ľubovňa"
+],
+"Čičarovce": [
+"Michalovce"
+],
+"Čičava": [
+"Vranov nad Topľou"
+],
+"Čičmany": [
+"Žilina"
+],
+"Čižatice": [
+"Košice-okolie"
+],
+"Čoltovo": [
+"Rožňava"
+],
+"Čremošné": [
+"Turčianske Teplice"
+],
+"Čukalovce": [
+"Snina"
+],
+"Čučma": [
+"Rožňava"
+],
+"Čáry": [
+"Senica"
+],
+"Číčov": [
+"Komárno"
+],
+"Číž": [
+"Rimavská Sobota"
+],
+"Ďanová": [
+"Martin"
+],
+"Ďapalovce": [
+"Vranov nad Topľou"
+],
+"Ďačov": [
+"Sabinov"
+],
+"Ďubákovo": [
+"Poltár"
+],
+"Ďurkov": [
+"Košice-okolie"
+],
+"Ďurkovce": [
+"Veľký Krtíš"
+],
+"Ďurková": [
+"Stará Ľubovňa"
+],
+"Ďurčiná": [
+"Žilina"
+],
+"Ďurďové": [
+"Považská Bystrica"
+],
+"Ďurďoš": [
+"Vranov nad Topľou"
+],
+"Ďurďošík": [
+"Košice-okolie"
+],
+"Ľubeľa": [
+"Liptovský Mikuláš"
+],
+"Ľubica": [
+"Kežmarok"
+],
+"Ľubietová": [
+"Banská Bystrica"
+],
+"Ľubiša": [
+"Humenné"
+],
+"Ľubochňa": [
+"Ružomberok"
+],
+"Ľuboreč": [
+"Lučenec"
+],
+"Ľuboriečka": [
+"Veľký Krtíš"
+],
+"Ľubotice": [
+"Prešov"
+],
+"Ľubotín": [
+"Stará Ľubovňa"
+],
+"Ľubovec": [
+"Prešov"
+],
+"Ľubá": [
+"Nové Zámky"
+],
+"Ľudovítová": [
+"Nitra"
+],
+"Ľutina": [
+"Sabinov"
+],
+"Ľutov": [
+"Bánovce nad Bebravou"
+],
+"Ňagov": [
+"Medzilaborce"
+],
+"Ňárad": [
+"Dunajská Streda"
+],
+"Šahy": [
+"Levice"
+],
+"Šajdíkove Humence": [
+"Senica"
+],
+"Šalgovce": [
+"Topoľčany"
+],
+"Šalgočka": [
+"Galanta"
+],
+"Šalov": [
+"Levice"
+],
+"Šambron": [
+"Stará Ľubovňa"
+],
+"Šamorín": [
+"Dunajská Streda"
+],
+"Šamudovce": [
+"Michalovce"
+],
+"Šandal": [
+"Stropkov"
+],
+"Šarbov": [
+"Svidník"
+],
+"Šarišská Poruba": [
+"Prešov"
+],
+"Šarišská Trstená": [
+"Prešov"
+],
+"Šarišské Bohdanovce": [
+"Prešov"
+],
+"Šarišské Dravce": [
+"Sabinov"
+],
+"Šarišské Jastrabie": [
+"Stará Ľubovňa"
+],
+"Šarišské Michaľany": [
+"Sabinov"
+],
+"Šarišské Sokolovce": [
+"Sabinov"
+],
+"Šarišské Čierne": [
+"Bardejov"
+],
+"Šarišský Štiavnik": [
+"Svidník"
+],
+"Šarkan": [
+"Nové Zámky"
+],
+"Šarovce": [
+"Levice"
+],
+"Šaľa": [
+"Šaľa"
+],
+"Šašová": [
+"Bardejov"
+],
+"Šaštín-Stráže": [
+"Senica"
+],
+"Šelpice": [
+"Trnava"
+],
+"Šemetkovce": [
+"Svidník"
+],
+"Šemša": [
+"Košice-okolie"
+],
+"Šenkvice": [
+"Pezinok"
+],
+"Šiatorská Bukovinka": [
+"Lučenec"
+],
+"Šiba": [
+"Bardejov"
+],
+"Šimonovce": [
+"Rimavská Sobota"
+],
+"Šindliar": [
+"Prešov"
+],
+"Šintava": [
+"Galanta"
+],
+"Širkovce": [
+"Rimavská Sobota"
+],
+"Široké": [
+"Prešov"
+],
+"Širákov": [
+"Veľký Krtíš"
+],
+"Šivetice": [
+"Revúca"
+],
+"Šišov": [
+"Bánovce nad Bebravou"
+],
+"Šmigovec": [
+"Snina"
+],
+"Šoltýska": [
+"Poltár"
+],
+"Šoporňa": [
+"Galanta"
+],
+"Špania Dolina": [
+"Banská Bystrica"
+],
+"Španie Pole": [
+"Rimavská Sobota"
+],
+"Špačince": [
+"Trnava"
+],
+"Šrobárová": [
+"Komárno"
+],
+"Štefanov": [
+"Senica"
+],
+"Štefanov nad Oravou": [
+"Tvrdošín"
+],
+"Štefanovce": [
+"Prešov",
+"Vranov nad Topľou"
+],
+"Štefanovičová": [
+"Nitra"
+],
+"Štefanová": [
+"Pezinok"
+],
+"Štefurov": [
+"Svidník"
+],
+"Šterusy": [
+"Piešťany"
+],
+"Štiavnické Bane": [
+"Banská Štiavnica"
+],
+"Štiavnik": [
+"Bytča"
+],
+"Štiavnička": [
+"Ružomberok"
+],
+"Štitáre": [
+"Nitra"
+],
+"Štrba": [
+"Poprad"
+],
+"Štrkovec": [
+"Rimavská Sobota"
+],
+"Štvrtok": [
+"Trenčín"
+],
+"Štvrtok na Ostrove": [
+"Dunajská Streda"
+],
+"Štítnik": [
+"Rožňava"
+],
+"Štós": [
+"Košice-okolie"
+],
+"Štôla": [
+"Poprad"
+],
+"Štúrovo": [
+"Nové Zámky"
+],
+"Šuja": [
+"Žilina"
+],
+"Šumiac": [
+"Brezno"
+],
+"Šurany": [
+"Nové Zámky"
+],
+"Šurianky": [
+"Nitra"
+],
+"Šurice": [
+"Lučenec"
+],
+"Šuľa": [
+"Veľký Krtíš"
+],
+"Šuňava": [
+"Poprad"
+],
+"Švedlár": [
+"Gelnica"
+],
+"Švošov": [
+"Ružomberok"
+],
+"Švábovce": [
+"Poprad"
+],
+"Šávoľ": [
+"Lučenec"
+],
+"Šíd": [
+"Lučenec"
+],
+"Šípkov": [
+"Bánovce nad Bebravou"
+],
+"Šípkové": [
+"Piešťany"
+],
+"Šúrovce": [
+"Trnava"
+],
+"Šútovce": [
+"Prievidza"
+],
+"Šútovo": [
+"Martin"
+],
+"Ťapešovo": [
+"Námestovo"
+],
+"Žabokreky": [
+"Martin"
+],
+"Žabokreky nad Nitrou": [
+"Partizánske"
+],
+"Žakarovce": [
+"Gelnica"
+],
+"Žakovce": [
+"Kežmarok"
+],
+"Žalobín": [
+"Vranov nad Topľou"
+],
+"Žarnov": [
+"Košice-okolie"
+],
+"Žarnovica": [
+"Žarnovica"
+],
+"Žaškov": [
+"Dolný Kubín"
+],
+"Žbince": [
+"Michalovce"
+],
+"Ždaňa": [
+"Košice-okolie"
+],
+"Ždiar": [
+"Poprad"
+],
+"Žehra": [
+"Spišská Nová Ves"
+],
+"Žehňa": [
+"Prešov"
+],
+"Železná Breznica": [
+"Zvolen"
+],
+"Železník": [
+"Svidník"
+],
+"Želiezovce": [
+"Levice"
+],
+"Želmanovce": [
+"Svidník"
+],
+"Želovce": [
+"Veľký Krtíš"
+],
+"Žemberovce": [
+"Levice"
+],
+"Žemliare": [
+"Levice"
+],
+"Žiar": [
+"Liptovský Mikuláš",
+"Revúca"
+],
+"Žiar nad Hronom": [
+"Žiar nad Hronom"
+],
+"Žibritov": [
+"Krupina"
+],
+"Žihárec": [
+"Šaľa"
+],
+"Žikava": [
+"Zlaté Moravce"
+],
+"Žilina": [
+"Žilina"
+],
+"Žipov": [
+"Prešov"
+],
+"Žirany": [
+"Nitra"
+],
+"Žitavany": [
+"Zlaté Moravce"
+],
+"Žitavce": [
+"Nitra"
+],
+"Žitná-Radiša": [
+"Bánovce nad Bebravou"
+],
+"Žlkovce": [
+"Hlohovec"
+],
+"Župkov": [
+"Žarnovica"
+],
+"Župčany": [
+"Prešov"
+],
+"Žíp": [
+"Rimavská Sobota"
+]
+}
+}

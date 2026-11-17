@@ -4,10 +4,14 @@ modules/alerts.py — Telegram alerts after each full run.
 After ▶ RUN EVERYTHING or the scheduler's run, one message to your Telegram
 chat with what is new since the last one:
 
-  - deals: an active listing of a class in config.ALERT_CLASSES (GREEN and
-    YELLOW by default), not rejected on its title deed, and not cash-flow
-    negative under its better structure (CASHFLOW_MIN_SURPLUS) — the first
-    time it qualifies, one message per flat across its portal copies;
+  - deals: an active listing, not rejected on its title deed, that matches
+    one of your alert rules — the first time it does, one message per flat
+    across its portal copies. Rules are saved searches from the dashboard's
+    ALERTS tab (class, grade, district, size, price, least monthly surplus);
+    with none saved, the built-in rule from .env applies: ALERT_CLASSES
+    (GREEN and YELLOW), ALERT_GRADES and ALERT_MIN_SURPLUS, both off by
+    default. A deal you were told about is announced again when it turns
+    GREEN, and when its price is cut;
   - price cuts on the deals you track in DEAL PIPELINE (not CLOSED or
     PASSED), each cut once;
   - with config.ALERT_FAILURES: a market whose run failed with no retry left,
@@ -42,9 +46,13 @@ log = logging.getLogger("sovereign")
 
 API = "https://api.telegram.org/bot{token}/{method}"
 TIMEOUT_S = 20
-# Telegram refuses a message over 4,096 characters: at most this many deals
-# are listed, the rest counted.
+# Telegram refuses a message over 4,096 characters: at most this many lines
+# of each kind are listed, the rest counted — and the text is cut at
+# MESSAGE_MAX whatever it holds, so one long run can't block every later one.
 DEALS_SHOWN = 10
+CUTS_SHOWN = 10
+ISSUES_SHOWN = 8
+MESSAGE_MAX = 3900
 # A price cut on a tracked deal older than this isn't news any more.
 CUT_MAX_AGE_DAYS = 14
 _DONE_STAGES = ("CLOSED", "PASSED")
@@ -124,26 +132,124 @@ def _deal_key(l: dict) -> str:
 
 
 def _best_surplus(l: dict):
-    values = [v for v in (l.get("surplus_personal"), l.get("surplus_sro")) if v is not None]
-    return max(values) if values else None
+    """The monthly surplus under the structure recommended for the listing —
+    the dashboard's own rule (engine.financial.shown_surplus)."""
+    from engine.financial import shown_surplus
+    return shown_surplus(l)
 
 
-def qualifying_deals() -> list[dict]:
-    """The active listings an alert is for, best discount first, one per flat."""
+def builtin_rule() -> dict:
+    """The rule in force while none is saved: .env's ALERT_CLASSES,
+    ALERT_GRADES and ALERT_MIN_SURPLUS."""
+    return {"name": "", "enabled": 1, "market": "",
+            "classes": ",".join(config.ALERT_CLASSES), "grades": ",".join(config.ALERT_GRADES),
+            "district": "", "min_size": None, "max_price_eur": None,
+            "min_surplus": config.ALERT_MIN_SURPLUS}
+
+
+def active_rules() -> list[dict]:
+    """The rules a deal is matched against: the saved ones that are switched
+    on, or the built-in one when none was ever saved."""
+    saved = _db.get_alert_rules()
+    return [r for r in saved if r.get("enabled")] if saved else [builtin_rule()]
+
+
+def _fold(text: str) -> str:
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", text or "")
+                   if unicodedata.category(c) != "Mn").lower()
+
+
+def matches(l: dict, rule: dict, grade: str | None = None) -> bool:
+    """Whether a scored listing row fits a rule. Money in the rule is in EUR
+    (a Czech listing's is converted at the dated rate); a blank field of the
+    rule asks for nothing."""
+    cur = l.get("currency") or markets.get(markets.of_row(l)).currency
+    cls = (l.get("cf_class") or l.get("classification") or "").upper()
+    if rule.get("market") and markets.of_row(l) != rule["market"]:
+        return False
+    if rule.get("classes") and cls not in rule["classes"].split(","):
+        return False
+    if rule.get("grades"):
+        if grade is None:
+            from engine.financial import compute_deal_score
+            grade = compute_deal_score(l)[1]
+        if grade not in rule["grades"].split(","):
+            return False
+    if rule.get("district") and _fold(rule["district"]) not in _fold(l.get("district") or ""):
+        return False
+    if rule.get("min_size") is not None and (l.get("size_m2") or 0) < rule["min_size"]:
+        return False
+    if rule.get("max_price_eur") is not None and \
+            (markets.to_eur(l.get("price_eur") or 0, cur) or 0) > rule["max_price_eur"]:
+        return False
+    if rule.get("min_surplus") is not None:
+        surplus = _best_surplus(l)
+        if surplus is None or markets.to_eur(surplus, cur) < rule["min_surplus"]:
+            return False
+    return True
+
+
+def qualifying_deals(rules: list[dict] | None = None) -> list[dict]:
+    """The active listings an alert is for, best discount first, one per
+    flat: scored, not a developer project, and fitting at least one rule
+    (`rules`, default active_rules()). Each carries "_class", "_best" (its
+    recommended structure's surplus) and "_rules" (the names it fits)."""
     from engine.duplicates import one_per_flat
-    from engine.financial import is_cashflow_negative
+    from engine.financial import compute_deal_score
+    rules = active_rules() if rules is None else rules
+    need_grade = any(r.get("grades") for r in rules)
     out = []
     for l in _db.get_all_active():           # LV-rejected listings are left out
         cls = (l.get("cf_class") or l.get("classification") or "").upper()
         best = _best_surplus(l)
-        if cls not in config.ALERT_CLASSES or best is None or l.get("is_dev_project"):
+        if best is None or l.get("is_dev_project"):
             continue
-        if is_cashflow_negative(best, markets.of_row(l)):
-            continue
-        out.append({**l, "_class": cls, "_best": best})
+        grade = compute_deal_score(l)[1] if need_grade else None
+        fits = [r["name"] for r in rules if matches(l, r, grade)]
+        if fits:
+            out.append({**l, "_class": cls, "_best": best, "_rules": [n for n in fits if n]})
     out = one_per_flat(out)
     out.sort(key=lambda l: l.get("market_discount") or 0, reverse=True)
     return out
+
+
+def note_existing(rules: list[dict] | None = None) -> int:
+    """Record every deal that fits the rules now as already announced,
+    without a message — after you change the rules, so you hear only about
+    what comes in from here on. Returns how many were noted."""
+    deals = qualifying_deals(rules)
+    _mark_sent([("deal", "__baseline__")] + [("deal", _deal_key(l)) for l in deals]
+               + [("deal-green", _deal_key(l)) for l in deals if l["_class"] == "GREEN"])
+    return len(deals)
+
+
+def _sent_at(kind: str) -> dict[str, str]:
+    conn = _db.get_conn()
+    try:
+        _ensure_table(conn)
+        return {r[0]: r[1] for r in conn.execute(
+            "SELECT key, sent_at FROM sent_alerts WHERE kind = ?", (kind,))}
+    finally:
+        conn.close()
+
+
+def follow_ups(deals: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Of the deals you were already told about: (the ones that have turned
+    GREEN since, the ones whose price was cut since) — each cut once."""
+    told = _sent_at("deal")
+    green_told, cut_told = _sent("deal-green"), _sent("deal-cut")
+    known = [l for l in deals if _deal_key(l) in told]
+    greens = [l for l in known if l["_class"] == "GREEN" and _deal_key(l) not in green_told]
+    hist = _db.get_price_history({l["id"] for l in known}) if known else {}
+    cuts = []
+    for l in known:
+        h = hist.get(l["id"]) or {}
+        if (h.get("last_change_pct") or 0) < 0 and (h.get("last_change_at") or "") > told[_deal_key(l)]:
+            key = f"{_deal_key(l)}@{h['last_change_at']}"
+            if key not in cut_told:
+                cuts.append({**l, "_cut": h["last_change_pct"], "_key": key})
+    return greens, cuts
 
 
 def tracked_cuts(now: datetime | None = None) -> list[dict]:
@@ -206,10 +312,12 @@ def _deal_line(l: dict) -> str:
     below = f" · {disc:.0%} below market" if disc is not None else ""
     title = html.escape((l.get("title") or l.get("district") or "—")[:60])
     district = html.escape(l.get("district") or "")
+    rules = f" · 🔎 {html.escape(', '.join(l['_rules'])[:60])}" if l.get("_rules") else ""
+    cut = f" · 🔻 {l['_cut']:+.1%}" if l.get("_cut") else ""
     return (f"{emoji} <a href=\"{html.escape(l.get('url') or '', quote=True)}\">{title}</a>"
             f"{f' · {district}' if district and district not in title else ''}\n"
-            f"    {_money(l, l.get('price_eur'))}{below} · "
-            f"{_money(l, l['_best'], '/mo')} · {_lv(l)}")
+            f"    {_money(l, l.get('price_eur'))}{cut}{below} · "
+            f"{_money(l, l['_best'], '/mo')} · {_lv(l)}{rules}")
 
 
 def _cut_line(t: dict) -> str:
@@ -224,22 +332,37 @@ def _cut_line(t: dict) -> str:
             f"    now {_money(t, t['price_eur'])} ({t['_cut']:+.1%}){inside}")
 
 
-def build_message(deals, cuts, issues, now: datetime | None = None) -> str:
+def _section(parts: list, title: str, lines: list, shown: int) -> None:
+    if not lines:
+        return
+    parts.append(f"<b>{title}</b>")
+    parts += lines[:shown]
+    if len(lines) > shown:
+        parts.append(f"…and {len(lines) - shown} more on the dashboard.")
+
+
+def build_message(deals, cuts, issues, now: datetime | None = None,
+                  now_green=(), recut=()) -> str:
+    """The message: new deals, deals that turned GREEN, deals cut again,
+    price cuts on tracked deals, problems — each section capped, and the
+    whole cut at MESSAGE_MAX (Telegram's limit is 4,096 characters)."""
     now = now or datetime.now(timezone.utc)
     from modules.contract_draft import to_local
     parts = [f"🏛 <b>Sovereign</b> · {to_local(now.isoformat()):%d.%m. %H:%M}"]
-    if deals:
-        parts.append(f"<b>{len(deals)} new deal{'s' if len(deals) != 1 else ''}</b>")
-        parts += [_deal_line(l) for l in deals[:DEALS_SHOWN]]
-        if len(deals) > DEALS_SHOWN:
-            parts.append(f"…and {len(deals) - DEALS_SHOWN} more on the dashboard.")
-    if cuts:
-        parts.append("<b>Price cuts on deals you track</b>")
-        parts += [_cut_line(t) for t in cuts]
-    if issues:
-        parts.append("<b>Needs a look</b>")
-        parts += [line for _key, line in issues]
-    return "\n".join(parts)
+    _section(parts, f"{len(deals)} new deal{'s' if len(deals) != 1 else ''}",
+             [_deal_line(l) for l in deals], DEALS_SHOWN)
+    _section(parts, "Now GREEN", [_deal_line(l) for l in now_green], DEALS_SHOWN)
+    _section(parts, "Cut since you were told", [_deal_line(l) for l in recut], DEALS_SHOWN)
+    _section(parts, "Price cuts on deals you track", [_cut_line(t) for t in cuts], CUTS_SHOWN)
+    _section(parts, "Needs a look", [line for _key, line in issues], ISSUES_SHOWN)
+    out, size = [], 0
+    for part in parts:              # whole lines only: a cut tag would be refused
+        if size + len(part) + 1 > MESSAGE_MAX:
+            out.append("…more on the dashboard.")
+            break
+        out.append(part)
+        size += len(part) + 1
+    return "\n".join(out)
 
 
 # ── The pipeline's step ───────────────────────────────────────────────────────
@@ -254,25 +377,31 @@ def run() -> str:
         # First run with alerts on: today's deals are already on the
         # dashboard. Say how many, and alert only new ones from now on.
         send(f"🏛 <b>Sovereign alerts are on.</b>\n{len(deals)} deal(s) matching your "
-             f"alert settings are already on the dashboard; from now on you'll hear "
+             f"alert rules are already on the dashboard; from now on you'll hear "
              f"about each new one, price cuts on the deals you track"
              + (", and failed runs or quiet portals." if config.ALERT_FAILURES else "."))
         # A marker row, so a dashboard with no deal yet isn't "first" forever.
-        _mark_sent([("deal", "__baseline__")] + [("deal", _deal_key(l)) for l in deals])
+        _mark_sent([("deal", "__baseline__")] + [("deal", _deal_key(l)) for l in deals]
+                   + [("deal-green", _deal_key(l)) for l in deals if l["_class"] == "GREEN"])
         return f"alerts on: {len(deals)} existing deal(s) noted, none messaged"
     new = [l for l in deals if _deal_key(l) not in sent_deals]
-    cuts = [t for t in tracked_cuts() if t["_key"] not in _sent("cut")]
+    now_green, recut = follow_ups(deals)
+    sent_cuts = _sent("cut")
+    cuts = [t for t in tracked_cuts() if t["_key"] not in sent_cuts]
     issues = []
     if config.ALERT_FAILURES:
         done = _sent("issue")
         issues = [(k, line) for k, line in problems() if k not in done]
-    if not (new or cuts or issues):
+    if not (new or now_green or recut or cuts or issues):
         return "nothing new"
-    send(build_message(new, cuts, issues))
+    send(build_message(new, cuts, issues, now_green=now_green, recut=recut))
     _mark_sent([("deal", _deal_key(l)) for l in new]
+               + [("deal-green", _deal_key(l)) for l in new + now_green if l["_class"] == "GREEN"]
+               + [("deal-cut", l["_key"]) for l in recut]
                + [("cut", t["_key"]) for t in cuts]
                + [("issue", k) for k, _line in issues])
-    return f"sent: {len(new)} deal(s), {len(cuts)} cut(s), {len(issues)} issue(s)"
+    return (f"sent: {len(new)} deal(s), {len(now_green)} now GREEN, {len(recut)} cut again, "
+            f"{len(cuts)} tracked cut(s), {len(issues)} issue(s)")
 
 
 def run_quietly() -> None:

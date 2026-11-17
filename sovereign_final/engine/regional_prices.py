@@ -11,7 +11,10 @@ Lookup priority (most specific wins):
      weighted median of its okres's city parts
   2. Slovak city (Realitná únia, April 2026) — or, for a town in
      OKRES_TOWN_FOR, the town its okres is named for
-  3. Kraj fallback (NBS Q1 2026)
+  3. Kraj fallback (NBS Q1 2026) — the kraj found from the place names
+     below, or else from every Slovak municipality and its okres
+     (engine/sk_municipalities.json); a village in Bratislavský kraj takes
+     its okres town's median instead (Bratislava's own is far above it)
   4. Global blank-district floor
 
 The medians are for older 3-room flats. benchmark_median() adjusts one for
@@ -28,8 +31,11 @@ A Czech listing is looked up in engine/regional_prices_cz (Kč/m²), with the
 same floor and ceiling ratios and the Czech blank-district bounds.
 """
 
+import json
 import logging
+import os
 import re
+import unicodedata
 
 import markets
 
@@ -304,6 +310,112 @@ _DISTRICT_TO_KRAJ = {
     "moldava nad bodvou": "KE",
 }
 
+# Košice's 22 city parts in its four okresy (Košice I–IV). A portal names
+# many a flat by its city part alone ("Košická Nová Ves", "Dargovských
+# hrdinov"), and "Staré Mesto, Košice" is Košice I, not Bratislava's. Folded
+# names; the ones that are also ordinary words count only with "Košice".
+KE_PART_OKRES = {
+    "dzungla": "I", "kavecany": "I", "sever": "I", "sidlisko tahanovce": "I",
+    "stare mesto": "I", "tahanovce": "I",
+    "lorincik": "II", "lunik ix": "II", "myslava": "II", "peres": "II", "polov": "II",
+    "sidlisko kvp": "II", "kvp": "II", "saca": "II", "zapad": "II",
+    "dargovskych hrdinov": "III", "kosicka nova ves": "III",
+    "barca": "IV", "juh": "IV", "krasna": "IV", "nad jazerom": "IV", "sebastovce": "IV",
+    "vysne opatske": "IV",
+}
+_KE_GENERIC_PARTS = {"sever", "zapad", "juh", "stare mesto", "krasna", "kvp"}
+KE_PART_NAMES = {
+    "dzungla": "Džungľa", "kavecany": "Kavečany", "sever": "Sever",
+    "sidlisko tahanovce": "Sídlisko Ťahanovce", "stare mesto": "Staré Mesto",
+    "tahanovce": "Ťahanovce", "lorincik": "Lorinčík", "lunik ix": "Luník IX",
+    "myslava": "Myslava", "peres": "Pereš", "polov": "Poľov", "sidlisko kvp": "Sídlisko KVP",
+    "kvp": "KVP", "saca": "Šaca", "zapad": "Západ", "dargovskych hrdinov": "Dargovských hrdinov",
+    "kosicka nova ves": "Košická Nová Ves", "barca": "Barca", "juh": "Juh", "krasna": "Krásna",
+    "nad jazerom": "Nad Jazerom", "sebastovce": "Šebastovce", "vysne opatske": "Vyšné Opátske",
+}
+_KE_PARTS_BY_LENGTH = sorted(KE_PART_OKRES, key=len, reverse=True)
+
+
+def _fold(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", text or "")
+                   if unicodedata.category(c) != "Mn").lower()
+
+
+def kosice_part(district: str) -> tuple[str, str] | None:
+    """(city part, its okres "I"–"IV") for a district string naming one of
+    Košice's city parts; None otherwise."""
+    folded = _fold(district)
+    named = re.search(r"(?<!\w)kosic(?:e|iach)(?!\w)", folded) is not None
+    for part in _KE_PARTS_BY_LENGTH:
+        if (named or part not in _KE_GENERIC_PARTS) and \
+                re.search(rf"(?<!\w){re.escape(part)}(?!\w)", folded):
+            return part, KE_PART_OKRES[part]
+    return None
+
+
+# ── Every Slovak municipality and its okres ───────────────────────────────────
+# From Wikidata (engine/sk_municipalities.json, built by the same query the
+# tax-rate updater runs). A village no table above names still has an okres,
+# so a kraj: its kraj's median and rent instead of nothing — a listing with
+# no benchmark is WHITE at any price (audit of 12 Nov 2026, finding 10).
+_MUNI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sk_municipalities.json")
+_MUNIS: dict | None = None
+_MAX_NAME_WORDS = 6
+
+
+def _municipality_index() -> dict:
+    """{"okres_kraj": {folded okres: kraj}, "names": {folded name: [folded
+    okres, …]}, "okres_label": {folded okres: okres}} — read once."""
+    global _MUNIS
+    if _MUNIS is None:
+        try:
+            with open(_MUNI_PATH, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError) as e:
+            log.warning(f"Slovak municipality list not read ({e}): villages get no kraj")
+            data = {"okres_kraj": {}, "municipalities": {}}
+        okres_kraj = {_fold(o): k for k, names in data["okres_kraj"].items() for o in names}
+        _MUNIS = {
+            "okres_kraj": okres_kraj,
+            "okres_label": {_fold(o): o for names in data["okres_kraj"].values() for o in names},
+            "names": {_fold(n): [_fold(o) for o in oks]
+                      for n, oks in data["municipalities"].items()},
+        }
+    return _MUNIS
+
+
+def municipality_okres(district: str) -> tuple[str, str] | None:
+    """(the okres's name, its kraj code) of the Slovak municipality a district
+    string names — the longest name in it, as whole words. A name several
+    municipalities share counts only when the string names the okres too, or
+    all of them lie in one kraj (then the okres is the first). None when it
+    names none."""
+    idx = _municipality_index()
+    if not district or not idx["names"]:
+        return None
+    folded = _fold(district)
+    words = re.findall(r"[\w.]+", folded.replace("-", " "))
+    best = None
+    for i in range(len(words)):
+        for n in range(min(_MAX_NAME_WORDS, len(words) - i), 0, -1):
+            name = " ".join(words[i:i + n])
+            if name in idx["names"] and (best is None or len(name) > len(best)):
+                best = name
+                break
+    if best is None:
+        return None
+    okresy = idx["names"][best]
+    if len(okresy) > 1:
+        named = [o for o in okresy if re.search(rf"(?<!\w){re.escape(o)}(?!\w)", folded)]
+        if len(named) == 1:
+            okresy = named
+        elif len({idx["okres_kraj"].get(o) for o in okresy}) != 1:
+            return None
+    okres = okresy[0]
+    kraj = idx["okres_kraj"].get(okres)
+    return (idx["okres_label"][okres], kraj) if kraj else None
+
+
 # Kraj names, for labels and the kraj-level rent fallback (engine.financial).
 KRAJ_NAMES = {
     "BA": "Bratislavský kraj", "TT": "Trnavský kraj", "TN": "Trenčiansky kraj",
@@ -365,11 +477,16 @@ def kraj_for_district(district: str, market: str = "sk") -> str | None:
         return _cz_module().kraj_for_district(district)
     if not district:
         return None
+    # A Košice city part first: "Staré Mesto, Košice" is Košice's, though
+    # "staré mesto" alone names Bratislava's.
+    if kosice_part(district):
+        return "KE"
     key = district.lower()
     for needle in _DISTRICT_KEYS_BY_LENGTH:
         if _has_place(needle, key):
             return _DISTRICT_TO_KRAJ[needle]
-    return None
+    found = municipality_okres(district)
+    return found[1] if found else None
 
 
 def median_source(district: str, market: str = "sk") -> tuple[float | None, str]:
@@ -420,11 +537,25 @@ def median_source(district: str, market: str = "sk") -> tuple[float | None, str]
             return (CITY_MEDIAN_PRICE_PER_M2[town],
                     f"{_title(town)} (okres town — no median for {_title(needle)})")
 
+    part = kosice_part(district)
+    if part:
+        return (CITY_MEDIAN_PRICE_PER_M2["košice"],
+                f"Košice ({KE_PART_NAMES[part[0]]}, Košice {part[1]})")
+
     for needle in _CITY_KEYS_BY_LENGTH:
         if _has_place(needle, key, _CITY_TAIL):
             where = ("Bratislava city-wide (no city part or okres named)"
                      if needle == "bratislava" else _title(needle))
             return CITY_MEDIAN_PRICE_PER_M2[needle], where
+
+    # A village in Bratislavský kraj: its okres town's median. The kraj's
+    # NBS figure is Bratislava's own market, and against it an ordinary flat
+    # in Dunajská Lužná read as 25–30 % below market.
+    muni = municipality_okres(district)
+    if muni and muni[1] == "BA" and muni[0].lower() in CITY_MEDIAN_PRICE_PER_M2:
+        town = muni[0].lower()
+        return (CITY_MEDIAN_PRICE_PER_M2[town],
+                f"{_title(town)} (okres town — no median for the village itself)")
 
     kraj = kraj_for_district(district)
     if kraj:

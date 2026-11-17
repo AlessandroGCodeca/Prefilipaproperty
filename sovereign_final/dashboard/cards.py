@@ -12,7 +12,7 @@ from dashboard.listing_cache import clear_listing_cache
 from dashboard.fmt import (
     _floor_label, _labels, _lv_link, _lv_state_t, _of100, _pct_or_dash,
     _quick_cadastre, _rent_fallback, _risk_label, amt, badge, esc, fp, last_seen_label,
-    market_badge,
+    lv_checked_label, market_badge,
     mkw, sgn, tier_badge,
 )
 
@@ -53,7 +53,7 @@ def _save_stage(lid):
 
 def render_card(l, v):
     # This run's page state (dashboard/view.py).
-    show_sro, using_demo = v.show_sro, v.using_demo
+    show_sro, using_demo = v.sro(l), v.using_demo
     _LV_DOCS, _cf_negative = v.lv_docs, v.cf_negative
     T        = _labels(l)
     cz       = l.get("_market") == "cz"
@@ -65,6 +65,9 @@ def render_card(l, v):
     ratio    = l.get("ratio_sro")   if show_sro else l.get("ratio_personal")
     total_c  = l.get("total_costs_sro") if show_sro else l.get("total_costs_personal")
     struct   = "s.r.o." if show_sro else T("Personal")
+    # The +2 pp stress test of the structure shown (a score from before both
+    # were stored has the s.r.o.'s only).
+    stress_k = "sro" if show_sro or l.get("stress_surplus_personal") is None else "personal"
     rent     = l.get("estimated_rent_eur", 0) or 0
     price    = l.get("price_eur", 0) or 0
     size     = l.get("size_m2", 0) or 0
@@ -195,15 +198,19 @@ def render_card(l, v):
             (f' <span class="badge bs">{stage["stage"]}</span>' if stage else "")
         )
         st.markdown(badges, unsafe_allow_html=True)
+        if deal_grade != "—":
+            with st.popover(f"Why grade {deal_grade}?" if not cz else f"Proč známka {deal_grade}?"):
+                st.markdown(grade_breakdown_html(l), unsafe_allow_html=True)
         # A check Claude decided writes "[Claude LEVEL] <summary>" as the
         # detail, so the summary on its own would say the same thing twice.
         lv_detail, lv_summary = l.get("lv_detail") or "", l.get("lv_summary") or ""
         soft_note = l.get("lv_soft_flags") or ""
         if soft_note and soft_note in lv_detail:
             soft_note = ""
+        # When the deed was last read: a PASS is as good as its date.
         for lv_note in (lv_detail, "" if lv_summary in lv_detail else lv_summary,
                         f"⚑ soft flags (not rejected — check with your lawyer): {soft_note}"
-                        if soft_note else ""):
+                        if soft_note else "", lv_checked_label(l, cz)):
             if lv_note:
                 st.markdown(
                     f'<div class="muted" style="margin-top:6px">⚖️ LV: {esc(lv_note)}</div>',
@@ -303,15 +310,20 @@ def render_card(l, v):
                           ltv=inv_ltv,
                           rate=l.get("mortgage_rate_used") or base_rate,
                           term_years=int(l.get("loan_term_years") or base_term), **mkw(l))
-                sts = l.get("stress_surplus_sro")
-                html = f'<div class="muted" style="margin-top:10px">{T("FINANCING STRESS (s.r.o.)")}</div>'
+                sts = l.get(f"stress_surplus_{stress_k}")
+                s_sro = stress_k == "sro"
+                inv_s = inv.surplus_sro if s_sro else inv.surplus_personal
+                inv_r = inv.ratio_sro if s_sro else inv.ratio_personal
+                inv_c = inv.total_cash_invested_sro if s_sro else inv.total_cash_invested
+                html = (f'<div class="muted" style="margin-top:10px">{T("FINANCING STRESS")} — '
+                        f'{"s.r.o." if s_sro else T("Personal")}</div>')
                 if sts is not None:
                     html += (f'<div class="brow {"pos" if sts >= 0 else "neg"}"><span class="l">{T("Rate +2 pp")}</span>'
                              f'<span class="v">{sgn(l, sts)} · {T("self-funding")} '
-                             f'{fp(l.get("stress_ratio_sro"))}</span></div>')
-                html += (f'<div class="brow {"pos" if inv.surplus_sro >= 0 else "neg"}"><span class="l">{T("70% LTV (3rd+ flat)")}</span>'
-                         f'<span class="v">{sgn(l, inv.surplus_sro)} · {T("self-funding")} {fp(inv.ratio_sro)} · '
-                         f'{T("cash in")} {amt(l, inv.total_cash_invested)}</span></div>')
+                             f'{fp(l.get(f"stress_ratio_{stress_k}"))}</span></div>')
+                html += (f'<div class="brow {"pos" if inv_s >= 0 else "neg"}"><span class="l">{T("70% LTV (3rd+ flat)")}</span>'
+                         f'<span class="v">{sgn(l, inv_s)} · {T("self-funding")} {fp(inv_r)} · '
+                         f'{T("cash in")} {amt(l, inv_c)}</span></div>')
                 st.markdown(html, unsafe_allow_html=True)
 
         with bc2:
@@ -380,7 +392,7 @@ def render_card(l, v):
         st.markdown('<hr class="div">', unsafe_allow_html=True)
 
         # Action buttons
-        a1,a2,a3,a4,a5 = st.columns(5)
+        a1,a2,a3,a4,a5,a6 = st.columns(6)
         with a1: st.link_button(T("VIEW LISTING"), l.get("url","#"), width="stretch")
         with a2:
             lat, lng = l.get("lat"), l.get("lng")
@@ -393,6 +405,8 @@ def render_card(l, v):
                                disabled=using_demo)
         with a5:
             render_memo_button(l, key=f"memo_{lid}")
+        with a6:
+            render_offer_sheet_button(l, key=f"offer_{lid}")
 
         # The flat's own LV — the only thing that can verify it. The building
         # plot found from the map pin is a different LV (see modules/debt_bot).
@@ -456,12 +470,35 @@ def render_card(l, v):
             except Exception as e:
                 st.warning(f"Re-verify: {e}")
 
+        from dashboard.lv_view import render_part_c
+        render_part_c(l, _LV_DOCS)
+
         seen = last_seen_label(l, cz)
         seen = f" · {seen}" if seen else ""
         if cz:
             st.markdown(f'<div class="muted">Zdroj: {esc((l.get("source") or "").upper())} · Tento přehled jej poprvé viděl: {esc((l.get("scraped_at") or "")[:10])}{seen}</div>', unsafe_allow_html=True)
         else:
             st.markdown(f'<div class="muted">Source: {esc((l.get("source") or "").upper())} · First seen by this dashboard: {esc((l.get("scraped_at") or "")[:10])}{seen}</div>', unsafe_allow_html=True)
+
+
+def grade_breakdown_html(l) -> str:
+    """The deal grade's parts as rows (engine.financial.deal_score_parts):
+    points out of each part's maximum and why, then the total."""
+    from engine.financial import compute_deal_score, deal_score_parts
+    parts = deal_score_parts(l)
+    score, grade = compute_deal_score(l)
+    if not parts:
+        return '<div class="muted">No financial figures yet — no grade.</div>'
+    rows = "".join(
+        f'<div class="brow"><span class="l">{esc(p["part"])} — {esc(p["why"])}</span>'
+        f'<span class="v">{p["points"]:.1f} / {p["max"]}</span></div>' for p in parts)
+    got = sum(p["points"] for p in parts)
+    top = sum(p["max"] for p in parts)
+    return (rows + f'<div class="brow tot"><span class="l">{got:.1f} of {top} points = {score}/100 '
+                   f'→ grade {grade}</span><span class="v">A ≥ 80 · B ≥ 65 · C ≥ 50</span></div>'
+            '<div class="muted" style="margin-top:6px">A part with no data (location not scored, '
+            'energy class or condition unknown) is left out of the total, so the grade is over '
+            'what is known.</div>')
 
 
 def render_memo_button(l, key):
@@ -498,6 +535,35 @@ def render_memo_button(l, key):
             st.warning(f"Memo: {e}")
 
 
+def render_offer_sheet_button(l, key):
+    """📑 OFFER SHEET: built on the first click (it reads the other active
+    listings for its comparables), then offered for download — as the memo."""
+    from modules.memo import memo_fingerprint
+    ready = st.session_state.setdefault("offer_ready", {})
+    sig = memo_fingerprint(l)
+    kept = ready.get(key)
+    if kept is not None and kept[0] != sig:
+        ready.pop(key, None)
+        kept = None
+    if kept is not None:
+        st.download_button("⬇️ OFFER PDF", kept[1],
+                           file_name=f"offer_{(l.get('id') or 'x')[:8]}.pdf",
+                           mime="application/pdf", key=f"{key}_dl", width="stretch")
+    elif st.button("📑 OFFER SHEET", key=key, width="stretch",
+                   help="One page for the viewing: your max offer, flats like it listed now, "
+                        "time on the market and price cuts."):
+        import markets
+        from database import get_all_active
+        from modules.offer_sheet import build_offer_sheet, comparables
+        try:
+            mkt = markets.of_row(l)
+            comps = comparables(l, get_all_active(market=mkt))
+            ready[key] = (sig, build_offer_sheet(l, comps, days_listed=l.get("_dom")))
+            st.rerun()
+        except Exception as e:
+            st.warning(f"Offer sheet: {e}")
+
+
 CARDS_PER_PAGE = 25
 
 
@@ -509,7 +575,7 @@ def compact_cards_html(listings, v) -> str:
     for l in listings:
         cls = (l.get("cf_class") or l.get("classification") or "PENDING").upper()
         emoji = {"GREEN": "🟢", "YELLOW": "🟡", "WHITE": "⚪"}.get(cls, "⏳")
-        surplus = l.get("surplus_sro") if v.show_sro else l.get("surplus_personal")
+        surplus = v.surplus(l)
         tone = "" if surplus is None else ("neg" if v.cf_negative(l) else "pos")
         disc = l.get("market_discount")
         below = (f" · {abs(disc):.0%} {'below' if disc >= 0 else 'above'} market"

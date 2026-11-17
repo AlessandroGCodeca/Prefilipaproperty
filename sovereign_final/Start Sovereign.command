@@ -3,7 +3,8 @@
 #  Sovereign RE Dashboard — macOS start, without Docker
 #  Double-click this file in Finder. The first start sets everything up
 #  (a few minutes); later starts take seconds. Keep the Terminal window it
-#  opens: closing it (or Ctrl+C in it) stops the dashboard.
+#  opens: closing it (or Ctrl+C in it) stops the dashboard and the daily
+#  scheduler it starts alongside.
 # ══════════════════════════════════════════════════════
 
 cd "$(dirname "$0")" || exit 1
@@ -97,6 +98,37 @@ fi
     done
 ) &
 
+# The scheduler: the daily 06:00 run (backup, every portal, LV checks,
+# scoring, Telegram alerts), as Docker's second container does it. Without it
+# nothing ran unless ▶ RUN EVERYTHING was clicked. It runs while this window
+# is open; a run missed while the Mac slept starts when it wakes, and on its
+# first start it runs at once if none has run since the last 06:00. Its
+# lines go to logs/scheduler.log. SOVEREIGN_NO_SCHEDULER=1 leaves it out.
+mkdir -p logs
+SCHED_PIDFILE="logs/scheduler.pid"
+SCHED_PID=""
+scheduler_running() {
+    [ -f "$SCHED_PIDFILE" ] && ps -p "$(cat "$SCHED_PIDFILE")" -o command= 2>/dev/null \
+        | grep -q "scheduler.py"
+}
+stop_scheduler() {
+    if [ -n "$SCHED_PID" ] && kill -0 "$SCHED_PID" 2>/dev/null; then
+        kill "$SCHED_PID" 2>/dev/null
+        rm -f "$SCHED_PIDFILE"
+    fi
+}
+if [ "${SOVEREIGN_NO_SCHEDULER:-0}" = "1" ]; then
+    echo "The scheduler is off (SOVEREIGN_NO_SCHEDULER=1): use ▶ RUN EVERYTHING."
+elif scheduler_running; then
+    echo "The scheduler is already running (started from another window)."
+else
+    "$VENV/bin/python" scheduler.py > logs/scheduler.out 2>&1 &
+    SCHED_PID=$!
+    echo "$SCHED_PID" > "$SCHED_PIDFILE"
+    echo "Started the scheduler: the daily run at 06:00 (and now, if one is owed)."
+    trap stop_scheduler EXIT INT TERM HUP
+fi
+
 echo
 echo "Starting the dashboard at $URL — leave this window open while you use it."
 echo
@@ -105,5 +137,6 @@ echo
 # 127.0.0.1: this Mac only, as Docker does it (docker-compose.yml). Streamlit
 # on its own listens on every network, so anyone on the same Wi-Fi could open
 # the dashboard and press its buttons. See "Who can open it" in README.md.
-exec "$VENV/bin/python" -m streamlit run app.py --server.headless true \
+# Not exec: the scheduler started above is stopped when the dashboard stops.
+"$VENV/bin/python" -m streamlit run app.py --server.headless true \
     --server.address 127.0.0.1

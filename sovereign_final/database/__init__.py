@@ -104,7 +104,11 @@ from database.portal_runs import (
     portal_health,
 )
 
+from database.alert_rules import get_alert_rules, save_alert_rules
+
 __all__ = [
+    "get_alert_rules",
+    "save_alert_rules",
     "QUIET_RUNS",
     "count_seen_since",
     "record_portal_run",

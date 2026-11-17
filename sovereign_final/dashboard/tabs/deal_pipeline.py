@@ -93,3 +93,9 @@ def render(v) -> None:
                 f'<div class="brow"><span class="l">{_local_stamp(h["changed_at"])[0]}</span>'
                 f'<span class="v">{esc(h["stage"])}{" — " + esc(h["note"]) if h.get("note") else ""}</span></div>'
                 for h in hist), unsafe_allow_html=True)
+        # The deal's checklist, documents and the letter to the správca.
+        row = (next((l for l in data if l.get("id") == pick_id), None)
+               or next((t for t in tracked if t.get("id") == pick_id), None))
+        if row is not None:
+            from dashboard import due_diligence
+            due_diligence.render(row, disabled=demo_pick)

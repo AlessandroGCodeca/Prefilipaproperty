@@ -107,12 +107,28 @@ class TestSroTax:
         assert sro_corporate_rate(150_000) == 0.21
 
     def test_combines_corporate_and_dividend(self):
-        # 10% corp on 10k = 1000; dividend 10% on the remaining 9000 = 900.
+        # 10% corp on 10k = 1000; dividend 7% on the remaining 9000 = 630
+        # (7 % on profit from 2025 on; 10 % applied to 2024's only).
         tax = calc_tax_sro(10_000, annual_revenue=50_000)
-        assert tax == pytest.approx(1000 + 900, abs=1.0)
+        assert tax == pytest.approx(1000 + 630, abs=1.0)
 
-    def test_no_tax_on_loss(self):
-        assert calc_tax_sro(-500, annual_revenue=50_000) == 0.0
+    def test_a_loss_year_still_pays_the_minimum_tax(self):
+        # § 46b: €340 a year at income up to €50,000, whatever the profit.
+        assert calc_tax_sro(-500, annual_revenue=8_000) == 340
+        assert calc_tax_sro(0, annual_revenue=8_000) == 340
+        # A small profit: the minimum, not 10 % of it; nothing left to pay out.
+        assert calc_tax_sro(1_000, annual_revenue=8_000) == pytest.approx(340 + 660 * 0.07)
+        # The bands by income.
+        from engine.financial import sro_minimum_tax
+        assert [sro_minimum_tax(x) for x in (50_000, 50_001, 400_000, 2_000_000, 6_000_000)] \
+            == [340, 960, 1_920, 3_840, 11_520]
+
+    def test_czechia_has_no_minimum_tax(self):
+        import markets
+        from engine.financial import sro_minimum_tax
+        rules = markets.tax_rules(market="cz")
+        assert sro_minimum_tax(100_000, rules) == 0
+        assert calc_tax_sro(-500, 100_000, rules) == 0
 
 
 class TestIndustrialPremiumNoLongerDoubleCounts:
@@ -126,6 +142,8 @@ class TestIndustrialPremiumNoLongerDoubleCounts:
         assert rate == pytest.approx(10.5, abs=0.1)
 
     def test_small_industrial_town_still_gets_premium(self):
-        # Voderady isn't in RENT_PER_M2 → default 6.5 × 1.12 industrial premium.
+        # Voderady isn't in RENT_PER_M2 → its kraj's figure (okres Trnava, from
+        # the municipality list) × 1.12 industrial premium.
+        from engine.financial import KRAJ_RENT_FALLBACK
         rate = get_rent_estimate("Voderady", 50.0) / 50.0
-        assert rate == pytest.approx(6.5 * 1.12, abs=0.1)
+        assert rate == pytest.approx(KRAJ_RENT_FALLBACK["trnavský kraj"] * 1.12, abs=0.1)
