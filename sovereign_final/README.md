@@ -82,6 +82,22 @@ After 5 wrong passwords within 15 minutes the login locks for 15 minutes, for
 every browser at once (a guesser just opens new sessions) — the right
 password included. Restarting the dashboard lifts the lock.
 
+**From your phone, away from home (Mac):** don't open the port. Use
+Tailscale, a private network between your own devices:
+
+1. install Tailscale on the Mac (tailscale.com/download) and on the phone,
+   and sign in to the same account on both;
+2. on the Mac, with the dashboard running, in Terminal once:
+   `tailscale serve --bg 8501` — it serves the dashboard to your devices only,
+   over HTTPS, at `https://<your-mac-name>.<your-tailnet>.ts.net`
+   (`tailscale serve status` shows the address; `tailscale serve reset`
+   stops it);
+3. set `DASHBOARD_PASSWORD` in `.env` all the same, and restart.
+
+The dashboard keeps listening on 127.0.0.1 only; nothing is open to the
+internet. If the page loads but stays on "Connecting…", say so — the
+dashboard's start line then needs a setting for the proxy.
+
 API keys live in `.env`, which Docker hands to the containers when they start
 (`env_file`). `.dockerignore` keeps it out of the image, so the keys are never
 baked into an image layer.
@@ -296,20 +312,20 @@ sovereign_final/
 
 ## Dashboard Tabs
 
-The thirteen tabs sit in three groups (one row of them overflowed at 1440 px):
+The sixteen tabs sit in three groups (one row of them overflowed at 1440 px):
 
-- **🎯 DEALS** — TRIAGE TABLE, ACTIVE SNAG LIST, MAP, SATELLITE VIEWER
-- **📊 ANALYSIS** — WHAT-IF / TAX, COMPARE, RENT COMPS, TAX RATES
-- **🗂 WORKFLOW** — DEAL PIPELINE, LV TO-DO, REJECTED, ONE-CLICK CLOSE, ALERTS
+- **🎯 DEALS** — TRIAGE TABLE, ACTIVE SNAG LIST, MAP, SATELLITE VIEWER, AUCTIONS
+- **📊 ANALYSIS** — WHAT-IF / TAX, COMPARE, RENT COMPS, TAX RATES, BACKTEST
+- **🗂 WORKFLOW** — DEAL PIPELINE, LV TO-DO, REJECTED, ONE-CLICK CLOSE, ALERTS, PORTFOLIO
 
 | Tab | What it does |
 |-----|-------------|
 | TRIAGE TABLE | Flat, sortable view of every scored listing — grade, price, **max offer** (🟡/🟢), ask vs max offer, below-market %, rent, surplus, **+2 pp stress**, gross yield, cap rate, **IRR**, **days tracked** (since the first scrape — not the portal's posting date), **price change**, **portals**, deal stage, vibe, LV status, **⛔ cash-flow negative**. Grade, Title, Price and Surplus stay pinned on the left; **Hide columns** hides any other, and **⬇️ CSV** downloads every row and column of the filtered table (opens in Excel) |
 | ACTIVE SNAG LIST | 🟢🟡 deal cards, 25 a page per class, each built when you open it (⚪ WHITE listings are one table, not cards): cost breakdown (the s.r.o.'s own loan and running cost), financing stress (+2 pp, 70% LTV), location risk with sources, price history, other portals' copies, deal stage, vibe notes, **PDF memo**, **📑 offer sheet** (one page for the viewing: your max offer, the flats like it listed now, time on the market and price cuts), **Why grade A?** (the grade's parts and their points), LV status with the date of the check, flat-LV verify and **📜 Read part C** (the deed's encumbrances, marked: blocks, flagged, bank lien, no rule for it); a ⛔ CASH-FLOW NEGATIVE badge and a ⚠ rent-fallback warning where they apply |
-| MAP | Every listing with coordinates, coloured by class or by monthly cash flow (faded = area-level geocode). **Group nearby pins** draws neighbours as one circle with their count; **Near** narrows the map to the listings within 1–50 km of a point — an address, or coordinates as `48.1486, 17.1077`. The distance is a straight line: travel time would need a routing service |
+| MAP | Every listing with coordinates, coloured by class or by monthly cash flow (faded = area-level geocode). **Group nearby pins** draws neighbours as one circle with their count; **Near** narrows the map to the listings within 1–50 km of a point — an address, or coordinates as `48.1486, 17.1077`. With a point set, **Distance** switches from a straight line to **travel time on foot or by car** (openrouteservice with `ORS_API_KEY`, else the public OSRM servers — free, for light use; every answer is kept) or **by public transport** (`GOOGLE_ROUTES_API_KEY`), with a minutes limit |
 | WHAT-IF / TAX | The tax toggle calculator: any listing (or a custom one) re-run with your own price, rate, LTV, term, rent, hold period, growth and exit costs, and the s.r.o.'s loan premium, LTV and running cost — personal vs s.r.o. side by side, rate-shock table, IRR, max offer. **🏦 Compare mortgage offers**: two or three banks' offers (rate, years fixed, the rate you expect after, term, LTV, fees) worked through the hold with the payment recomputed when each fixation ends |
 | COMPARE | Two to four listings side by side, one column each: price and price per m², the regional median, rent and yield, the surplus under both structures and the better one, IRR, the title deed, location and risk flags, days tracked, price change |
-| DEAL PIPELINE | Board of the deals you're working: WATCHING → VIEWING → OFFER → NEGOTIATING → DUE DILIGENCE → NOTARY → CLOSED / PASSED, with a timeline per deal. For the deal picked: a **due-diligence checklist** (twelve checks from the viewing to the meter readings), its **documents** (LV, the správca's confirmation, energy certificate, bank offer, contract — kept in the database and so in the backup) and the **letter to the správca / SVJ** asking for the confirmation of no arrears, the repair fund, the building's loans and planned works |
+| DEAL PIPELINE | Board of the deals you're working: WATCHING → VIEWING → OFFER → NEGOTIATING → DUE DILIGENCE → NOTARY → CLOSED / PASSED, with a timeline per deal. For the deal picked: a **due-diligence checklist** (twelve checks from the viewing to the meter readings), its **documents** (LV, the správca's confirmation, energy certificate, bank offer, contract — kept in the database and so in the backup), **🔍 seller checks** (the owners named in the deed; a company checked in ARES — Czechia, with its insolvency flag — or the register of financial statements — Slovakia; links to the insolvency and execution registers for a person), **🏢 building facts** (construction, year, insulated, heating, the real monthly fee — which replaces the estimate in the score) and the **letter to the správca / SVJ** asking for the confirmation of no arrears, the repair fund, the building's loans and planned works |
 | SATELLITE VIEWER | Listing photo vs Google satellite + Street View + vibe score, and every note saved for the listing |
 | REJECTED | Every LV rejection with its reason, detail and LV risk read; re-verify from here |
 | LV TO-DO | Every GREEN / YELLOW deal whose title deed isn't verified, with what the plot check found; type the flats' own LV numbers in bulk, then save (checked on the next LV run) or save & verify now (in the background, like the pipeline buttons) |
@@ -317,6 +333,9 @@ The thirteen tabs sit in three groups (one row of them overflowed at 1440 px):
 | TAX RATES | Slovakia: each town's flat property-tax rate — what the engine charges, what the town's own site says, and the source; a doubtful reading waits here to be accepted or turned down, and a town whose site blocks automated requests takes an uploaded ordinance. Czechia: every municipality's size and local coefficients with the ordinances they come from, and a lookup by place. One click re-reads both countries |
 | ONE-CLICK CLOSE | Pre-filled Slovak notary contract draft with download; the deal's numbers are a separate download, not part of the draft |
 | ALERTS | The Telegram alert rules: saved searches by market, class, grade, district, size, price and least monthly surplus; what fits them now |
+| AUCTIONS | Slovak real-estate auctions from the notaries' central register (NCRdr, notar.sk): date, proposer (a bank, a creditor, an owners' association), auctioneer, venue; **📄 READ ANNOUNCEMENT** has Claude read the published announcement (usually a scan): the town, flat or not, size, lowest bid, valuation, deposit, viewings, the LV — and the lowest bid against the district median. Read daily after the run (`AUCTIONS_SOURCE=0` turns it off). Not scored: no mortgage before you bid, a deposit before, set viewings, the flat may be occupied |
+| BACKTEST | Does GREEN mean cheap? Of the flats each class held 30–60 days ago (daily snapshots), how many left the portals, how fast, after what cuts. **Sold prices**: the last asking price of flats that left, and the sold prices you enter (agent, notary, your own), against the asking median per district |
+| PORTFOLIO | The flats you own: value (yours, or the district median), the loan's balance today (with a fixation reset), equity, the last twelve months from your monthly ledger (rent in, costs, days empty), the tax, cash flow and yields — and **the model against your flats** (rent, building fee, vacancy). A deal at CLOSED starts a flat with its figures |
 
 A 🔻 banner above the tabs lists price cuts from the last 14 days (the 50
 latest, built when you open it), and says
@@ -896,6 +915,11 @@ send `/revoke` to @BotFather and put the new one in `.env`.
 | GOOGLE_PLACES_API_KEY | console.cloud.google.com | Google geocoding/places + inline satellite view (OpenStreetMap is used without it) |
 | CZ_CUZK_API_KEY | registrace.cuzk.gov.cz (free) | Czech LV check: the building under a listing's pin, its LV and pending proceedings |
 | TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID | @BotFather in Telegram (free) | Alerts after each run — see "Telegram alerts" |
+| HEALTHCHECK_URL | healthchecks.io (free) | An e-mail when the daily run is late or fails — see "Is the daily run happening?" |
+| CZ_ARAD_API_KEY, CZ_ARAD_RATE_INDICATOR | cnb.cz/arad (free account → key in your profile) | The Czech average mortgage rate, read monthly (see "Market rates") |
+| ORS_API_KEY | openrouteservice.org (free) | Travel times on the map from a service with a key (without it: the public OSRM servers) |
+| GOOGLE_ROUTES_API_KEY | console.cloud.google.com → enable the Routes API | Travel time by public transport on the map |
+| ANTHROPIC_API_KEY | console.anthropic.com | Also: scanned ordinances and auction announcements, LV photos on a card (`TAX_SCANS_WITH_CLAUDE=1` lets the automated tax runs read scans too) |
 
 > LV debt checking needs **no key**: ÚGKK SR has no public API, so
 > `kataster_scraper.py` scrapes kataster.skgeodesy.sk directly (unofficial —
@@ -903,6 +927,62 @@ send `/revoke` to @BotFather and put the new one in `.env`.
 > shown as ⚠ UNVERIFIED, never as clean.
 
 ---
+
+## Market rates
+
+The model's mortgage rate, where you set none (👤 YOUR SITUATION or
+`.env`), is the central bank's average for new housing loans, read before
+each run at most weekly and kept in `data/market_rates.json`:
+
+- **Slovakia**: the ECB Data Portal, series `MIR.M.SK.B.A2C.A.R.A.2250.EUR.N`
+  (free, no key) — 3.74 % for September 2026.
+- **Czechia**: ČNB ARAD, with your key in `CZ_ARAD_API_KEY` and the indicator
+  you picked in ARAD (new business, loans to households for house purchase)
+  in `CZ_ARAD_RATE_INDICATOR`. Without them the Czech default (5.51 %) stays.
+
+When the rate in use moves, the scores worked out on the old one are redone
+by the next scoring run. YOUR SITUATION shows the market average under your
+rate field and whether it is in use.
+
+## Is the daily run happening?
+
+A stopped scheduler sends nothing, so silence looks like "no new deals".
+Two checks:
+
+- **On the page**: a run more than 30 hours old shows a yellow banner over
+  the tabs.
+- **By e-mail, even with the Mac off**: create a free check at
+  healthchecks.io (period 1 day, grace 3 hours), copy its ping URL into
+  `.env` as `HEALTHCHECK_URL=https://hc-ping.com/<uuid>` and restart. Each
+  run pings it at its start and end (`/fail` when a market failed); a late or
+  failed run sends you an e-mail.
+
+Every December the page and the Telegram message also remind you to collect
+the next year's tax figures, until that year's table is in the code.
+
+## Building, renovation, flip and short let (on a card)
+
+**🏗 Building · renovation · flip**: what is known of the building — yours
+from DEAL PIPELINE first, then what the ad says (construction, insulation,
+heating, the monthly costs it quotes) — with warnings (an old building not
+insulated: expect the fond opráv to rise); the renovation estimate by the
+ad's condition; heating by energy class; and a buy–renovate–sell scenario at
+the district median + 10 % for a renovated flat. All estimates: a
+contractor's quote, the energy certificate and the správca's figures
+replace them.
+
+**🛏 Short let** (the Tatras, Liptov, Bratislava I, Prague 1 and 2): a month
+let by the night — bookings, platform fee, cleaning, local tax, utilities,
+furnishing — against the long let, with the occupancy at which it starts to
+win. The nightly rates and occupancies are starting points, not market data:
+set your own in `.env` (`SHORT_LET_BA1_ADR=95`, `SHORT_LET_BA1_OCCUPANCY=0.6`;
+areas `TATRY`, `LIPTOV`, `BA1`, `PRAHA1`, `PRAHA2`) from Inside Airbnb,
+AirDNA or a local manager, and check the town's rules first.
+
+The card also shows this flat type's rental comps (rooms; furnishing in
+RENT COMPS) and how long such rental ads stay up. A Slovak **cooperative
+flat** (družstevný byt) is marked 🏘 COOPERATIVE · NO OWN LV and never
+called clean.
 
 ## Backups
 

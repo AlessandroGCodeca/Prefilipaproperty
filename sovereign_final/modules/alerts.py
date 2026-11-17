@@ -295,6 +295,15 @@ def problems() -> list[tuple[str, str]]:
     return out
 
 
+def _reminders() -> list[dict]:
+    from modules import yearly
+    try:
+        return yearly.reminders()
+    except Exception as e:
+        log.warning(f"Yearly reminders skipped: {type(e).__name__}: {e}")
+        return []
+
+
 # ── The message ───────────────────────────────────────────────────────────────
 def _money(l: dict, v, suffix: str = "") -> str:
     cur = l.get("currency") or markets.get(markets.of_row(l)).currency
@@ -388,10 +397,11 @@ def run() -> str:
     now_green, recut = follow_ups(deals)
     sent_cuts = _sent("cut")
     cuts = [t for t in tracked_cuts() if t["_key"] not in sent_cuts]
-    issues = []
-    if config.ALERT_FAILURES:
-        done = _sent("issue")
-        issues = [(k, line) for k, line in problems() if k not in done]
+    done = _sent("issue")
+    issues = [(k, line) for k, line in (problems() if config.ALERT_FAILURES else [])
+              if k not in done]
+    # The yearly tax-table reminder (modules/yearly), once each.
+    issues += [(r["key"], r["text"]) for r in _reminders() if r["key"] not in done]
     if not (new or now_green or recut or cuts or issues):
         return "nothing new"
     send(build_message(new, cuts, issues, now_green=now_green, recut=recut))

@@ -59,6 +59,31 @@ def _no_live_fx_rate(monkeypatch, tmp_path):
     monkeypatch.setattr(fx_rate, "CACHE_PATH", str(tmp_path / "fx_rate.json"))
 
 
+@pytest.fixture(autouse=True)
+def _no_live_market_rates(monkeypatch, tmp_path):
+    """No test reads the ECB or ARAD, or the real data/market_rates.json; the
+    model's rates stay what this process started with. A test about
+    modules/market_rates passes its own `get`."""
+    import config
+    import markets
+    from engine import financial
+    from modules import market_rates
+    monkeypatch.setattr(config, "MARKET_RATES_PATH", str(tmp_path / "market_rates.json"))
+
+    def _offline(get=None):
+        if get is None:
+            raise OSError("no network in tests")
+        return real_sk(get=get)
+    real_sk = market_rates.fetch_sk
+    monkeypatch.setattr(market_rates, "fetch_sk", _offline)
+    for mod in (config, financial):
+        monkeypatch.setattr(mod, "MORTGAGE_RATE_PA", mod.MORTGAGE_RATE_PA)
+    monkeypatch.setattr(markets, "SK", markets.SK)
+    monkeypatch.setattr(markets, "CZ", markets.CZ)
+    monkeypatch.setitem(markets.MARKETS, "sk", markets.MARKETS["sk"])
+    monkeypatch.setitem(markets.MARKETS, "cz", markets.MARKETS["cz"])
+
+
 def make_full_db(path: str):
     """Give the SQLite file at `path` the real schema; return a connect()
     for it. full_db wraps this; a module-scoped fixture can call it itself."""
@@ -144,3 +169,27 @@ def _no_real_telegram(monkeypatch):
     import config
     monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", "")
     monkeypatch.setattr(config, "TELEGRAM_CHAT_ID", "")
+    # ... nor ping your healthcheck, nor read ARAD with your key.
+    for key in ("HEALTHCHECK_URL", "CZ_ARAD_API_KEY", "CZ_ARAD_RATE_INDICATOR",
+                "ORS_API_KEY", "GOOGLE_ROUTES_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_auction_register(monkeypatch):
+    """No test reads the notaries' auction register; one about it passes its
+    own `get` to modules/auctions_sk."""
+    from modules import auctions_sk
+    monkeypatch.setattr(auctions_sk, "refresh_quietly", lambda now=None: None)
+    monkeypatch.setattr(auctions_sk, "PAUSE_S", 0)
+    from modules import travel
+    monkeypatch.setattr(travel, "PAUSE_S", 0)
+
+
+@pytest.fixture(autouse=True)
+def _no_calendar_reminders(monkeypatch):
+    """The yearly reminders (modules/yearly) depend on today's date: a test
+    run in December would see them in every message and page. Tests of them
+    pass a date to yearly.due()."""
+    from modules import yearly
+    monkeypatch.setattr(yearly, "reminders", lambda today=None: yearly.due(today) if today else [])

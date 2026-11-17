@@ -108,6 +108,14 @@ def quiet_portal_note(q: dict) -> str:
             f"again. It may be blocked, or its page layout changed — 🔗 TEST SITES checks it.")
 
 
+def _yearly_reminders() -> list[dict]:
+    from modules import yearly
+    try:
+        return yearly.reminders()
+    except Exception:          # a reminder never breaks the page
+        return []
+
+
 def render(v, sb) -> None:
     """The banners, tiles and price-cut list over the tabs."""
     _OTHER_RUNS = sb.other_runs
@@ -129,6 +137,21 @@ def render(v, sb) -> None:
     # phone), and everything below is as old as the last run that worked.
     if _run_level == "error":
         st.error(_run_text)
+    elif _run_level == "warning" and getattr(sb, "run_overdue", False):
+        # No run for over a day: silence would look the same as no new deals.
+        from modules import heartbeat
+        st.warning(_run_text + ("" if heartbeat.enabled() else
+                                " Set HEALTHCHECK_URL in .env to be e-mailed when this "
+                                "happens (README “Is the daily run happening?”)."))
+    # The jobs that come back every year (modules/yearly): the tax tables.
+    _due = [_r for _r in ([] if using_demo else _yearly_reminders())
+            if view_market in (None, _r["market"])]
+    for _r in _due:
+        (st.warning if _r["level"] == "warning" else st.info)(_r["text"])
+    if _due:
+        from modules.yearly import STEPS
+        with st.expander("📅 What to do for the new tax year"):
+            st.markdown("\n".join(f"{i}. {esc(step)}" for i, step in enumerate(STEPS, 1)))
     for _m, (_lvl, _txt) in _OTHER_RUNS.items():
         if _lvl == "error" and (view_market in (None, _m)):
             st.error(f"{_m.upper()} — {_txt}")

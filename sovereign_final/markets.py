@@ -261,7 +261,8 @@ CZ = Market(
     # 5.51 % (press release 9 Sep 2026). Loans to buy to let are priced
     # above it (banky.cz lists investment mortgages from 5.19 % at 60 % LTV
     # to 5.69 % at 75 %), so this sits at the ~70 % LTV such a loan gets.
-    mortgage_rate_pa=_env_float("CZ_MORTGAGE_RATE_PA", 0.0551),
+    # ČNB ARAD's figure when you set up its key (modules/market_rates).
+    mortgage_rate_pa=_env_float("CZ_MORTGAGE_RATE_PA", config.market_rate("cz") or 0.0551),
     loan_term_years=25,          # the Hypoindex model mortgage's term
     ltv_ratio=0.80,              # ČNB: 80 % (90 % under 36) for own housing
     ltv_ratio_investor=0.70,     # ČNB: 70 % for an investment mortgage

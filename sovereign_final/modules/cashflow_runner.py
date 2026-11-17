@@ -95,6 +95,10 @@ def run_scoring(progress_callback=None, market: str | None = None) -> int:
     waiting: dict[str, list] = {}
     emojis = {"GREEN": "🟢", "YELLOW": "🟡", "WHITE": "⚪"}
 
+    # The buildings' real fees you entered (database/building).
+    from database.building import building_facts_map
+    facts = building_facts_map()
+
     for i, row in enumerate(listings):
         if progress_callback:
             progress_callback(i + 1, len(listings))
@@ -113,6 +117,7 @@ def run_scoring(progress_callback=None, market: str | None = None) -> int:
                 furnished  = row.get("furnished"),
                 balcony    = row.get("has_balcony"),
                 rent_rates = rates,
+                hoa_override = (facts.get(row["id"]) or {}).get("hoa_monthly"),
                 **_mkw(m),
             )
             db_data = result_to_db_dict(result)

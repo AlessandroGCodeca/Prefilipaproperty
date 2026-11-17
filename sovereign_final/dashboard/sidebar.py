@@ -59,6 +59,10 @@ def _situation_panel(busy: bool) -> bool:
                 typed[f.key] = st.number_input(
                     f.label, min_value=f.low * 100, max_value=f.high * 100,
                     value=float(round(v * 100, 3)), step=0.05, format="%.2f", help=f.help) / 100
+                market = {"MORTGAGE_RATE_PA": "sk", "CZ_MORTGAGE_RATE_PA": "cz"}.get(f.key)
+                if market:
+                    from modules import market_rates
+                    st.caption(market_rates.describe(market))
             elif f.kind == "money":
                 typed[f.key] = float(st.number_input(
                     f.label, min_value=int(f.low), max_value=int(f.high),
@@ -94,7 +98,10 @@ def render() -> SimpleNamespace:
     import scheduler as _scheduler
 
     _lock_now = get_pipeline_lock()
-    _run_level, _run_text = _summarize_run(_read_run_status(), _lock_now)
+    _run_status = _read_run_status()
+    _run_level, _run_text = _summarize_run(_run_status, _lock_now)
+    from modules.pipeline_state import overdue as _overdue
+    _run_overdue = _overdue(_run_status)
     # Every other market with portals (or a run on record) gets its own line.
     _OTHER_RUNS = {}
     for _m in markets.MARKET_CODES:
@@ -357,6 +364,7 @@ def render() -> SimpleNamespace:
         busy=_busy,
         cz_clicks=_cz_clicks,
         run_level=_run_level,
+        run_overdue=_run_overdue,
         run_text=_run_text,
         cf_positive_only=cf_positive_only,
         classes=classes,

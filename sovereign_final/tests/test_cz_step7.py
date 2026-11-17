@@ -92,7 +92,8 @@ def test_czech_comps(full_db):
     # The Slovak rebuild reads only Slovak rentals and keeps the Czech comps.
     sk = rent_comps.rebuild_rent_comps()
     assert sk["keys"] == 1 and sk["rentals"] == 6
-    assert set(rent_comps.load_live_rates()) <= {"žilina"}
+    # The Slovak comps' keys (a flat type's carry "#r<rooms>") are Slovak only.
+    assert {k.split("#")[0] for k in rent_comps.load_live_rates()} <= {"žilina"}
     assert set(rent_comps_cz.load_live_rates()) == {"kladno", "praha"}
     rows = rent_comps_cz.comps_table()
     assert {r["District key"]: r["Source"] for r in rows} == {

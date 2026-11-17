@@ -30,17 +30,20 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(
                     datefmt="%Y-%m-%d %H:%M:%S")
 logging.getLogger("httpx").setLevel(logging.WARNING)   # one line per Claude call
 
+from modules import market_rates as _market_rates  # noqa: E402
 from modules import settings as _settings  # noqa: E402
 
 # Your own figures (👤 YOUR SITUATION), when another process — or another
 # browser tab — saved a change since this one last looked: one stat() a run.
+# The same for the market rate the scheduler last read from the ECB.
 _settings.sync()
+_market_rates.sync()
 
 from dashboard import actions, diagnostics, overview, sidebar, style, view  # noqa: E402
 from dashboard.login import require_password  # noqa: E402
 from dashboard.tabs import (  # noqa: E402
-    alert_rules, close, compare, deal_pipeline, lv_todo, map_view, rejected, rent_comps,
-    satellite, snag_list, tax_rates, triage, what_if,
+    alert_rules, auctions, backtest, close, compare, deal_pipeline, lv_todo, map_view, portfolio,
+    rejected, rent_comps, satellite, snag_list, tax_rates, triage, what_if,
 )
 
 st.set_page_config(
@@ -97,16 +100,19 @@ overview.render(v, sb)
 # 1440 px and hid the last behind an arrow.
 TAB_GROUPS = (
     ("🎯 DEALS",    (("TRIAGE TABLE", triage), ("ACTIVE SNAG LIST", snag_list),
-                     ("MAP", map_view), ("SATELLITE VIEWER", satellite))),
+                     ("MAP", map_view), ("SATELLITE VIEWER", satellite),
+                     ("AUCTIONS", auctions))),
     ("📊 ANALYSIS", (("WHAT-IF / TAX", what_if), ("COMPARE", compare),
-                     ("RENT COMPS", rent_comps), ("TAX RATES", tax_rates))),
+                     ("RENT COMPS", rent_comps), ("TAX RATES", tax_rates),
+                     ("BACKTEST", backtest))),
     ("🗂 WORKFLOW", (("DEAL PIPELINE", deal_pipeline), ("LV TO-DO", lv_todo),
                      ("REJECTED", rejected), ("ONE-CLICK CLOSE", close),
-                     ("ALERTS", alert_rules))),
+                     ("ALERTS", alert_rules), ("PORTFOLIO", portfolio))),
 )
 # Drawn in the order the tabs were always drawn in, whatever group holds them.
 DRAW_ORDER = (triage, snag_list, map_view, what_if, deal_pipeline, rejected, lv_todo,
-              rent_comps, tax_rates, satellite, close, compare, alert_rules)
+              rent_comps, tax_rates, satellite, close, compare, alert_rules, auctions, portfolio,
+              backtest)
 
 _page_tab = {}
 for group, (_label, pages) in zip(st.tabs([g for g, _ in TAB_GROUPS]), TAB_GROUPS):

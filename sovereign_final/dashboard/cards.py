@@ -28,6 +28,43 @@ def _load_stage(key, cur, *source):
     _load_box(key, cur, *source)
 
 
+def _lv_photo(lid: str, cz: bool, disabled: bool) -> None:
+    """📷 An LV photo or scan, read by Claude: its number and cadastral area
+    go into the card's boxes (and, for a Czech flat, its text into the výpis
+    box), so RE-VERIFY LV checks them. Shown only with ANTHROPIC_API_KEY."""
+    from modules import doc_reader
+    if not doc_reader.enabled():
+        return
+    with st.expander("📷 Fotka nebo sken LV" if cz else "📷 LV photo or scan"):
+        up = st.file_uploader(
+            "Photo (JPEG, PNG, WebP) or PDF", type=["pdf", "jpg", "jpeg", "png", "webp"],
+            key=f"lvph_{lid}", disabled=disabled,
+            help="Claude copies the deed; nothing is stored until you press RE-VERIFY LV. "
+                 "An iPhone photo: share it as JPEG (Settings → Camera → Most Compatible).")
+        if up is not None and st.button("📖 READ IT", key=f"lvphb_{lid}", disabled=disabled):
+            with st.spinner("Claude is reading the deed…"):
+                got = doc_reader.read_title_deed(up.getvalue())
+            if not got:
+                st.warning("Not read: the file isn't a title deed, or it can't be read.")
+                return
+            if got["lv_number"]:
+                st.session_state[f"lvno_{lid}"] = got["lv_number"]
+            if got["cadastral_area"]:
+                st.session_state[f"lvku_{lid}"] = got["cadastral_area"]
+            if cz:
+                st.session_state[f"lvdoc_{lid}"] = got["text"]
+            st.session_state[f"lvphtext_{lid}"] = got["text"]
+            st.rerun()
+        text = st.session_state.get(f"lvphtext_{lid}")
+        if text:
+            st.caption("Read from your file. Check the LV number and area below, then press "
+                       "RE-VERIFY LV — " + ("the text is in the výpis box." if cz else
+                                            "the cadastre's own copy is what gets verified."))
+            st.markdown(f'<div class="mono" style="white-space:pre-wrap;max-height:220px;'
+                        f'overflow:auto;font-size:.72rem">{esc(text)}</div>',
+                        unsafe_allow_html=True)
+
+
 def _load_box(key, value, *source):
     """Put a stored value into its keyed box, as _load_stage does for a stage
     box: a keyed text_input also keeps its last value whatever value= says, so
@@ -190,6 +227,9 @@ def render_card(l, v):
             (' <span class="badge by">⚑ LV SOFT FLAG</span>' if l.get("lv_soft_flags") else "") +
             (f' <span class="badge bp">📡 {l["_portals"]} PORTALS</span>' if l.get("_portals", 1) > 1 else "") +
             (' <span class="badge br">⛔ A COPY FAILED LV</span>' if l.get("dup_lv_failed") else "") +
+            (' <span class="badge br">🏘 COOPERATIVE · NO OWN LV</span>'
+             if (l.get("lv_detail") or "").startswith(("Cooperative flat", "LV: Cooperative"))
+             else "") +
             (' <span class="badge br">🌊 FLOOD Q100</span>' if l.get("flood_zone") else "") +
             (f' <span class="badge br">⛔ CASH-FLOW NEGATIVE · {struct}</span>'
              if _cf_negative(l) else "") +
@@ -238,6 +278,15 @@ def render_card(l, v):
             st.markdown(f'<div class="muted" style="margin-top:6px;color:#ffd740">⚠ Rent uses '
                         f'{why}. Check local rents before trusting the surplus.</div>',
                         unsafe_allow_html=True)
+        # This flat type's own rental comps and how long such ads stay up
+        # (engine/rent_comps, M10 of the 12 Nov audit).
+        if not cz and not using_demo:
+            from dashboard.listing_cache import rent_types
+            from engine.rent_comps import type_note
+            _tn = type_note(l.get("district") or "", l.get("rooms"), rent_types())
+            if _tn:
+                st.markdown(f'<div class="muted" style="margin-top:6px">🏘 {esc(_tn)}</div>',
+                            unsafe_allow_html=True)
         if ph:
             steps = " → ".join(f"{amt(l, p)} ({str(w)[:10]})" for w, p in ph["history"])
             st.markdown(f'<div class="muted" style="margin-top:6px">📉 Price: {steps} '
@@ -413,6 +462,9 @@ def render_card(l, v):
         # The boxes reload when the stored LV changes (saved in LV TO-DO, say):
         # RE-VERIFY LV takes a box that differs from the stored LV as an edit,
         # and a stale box would clear the saved number or put back an old one.
+        # A photo or scan of the LV (the agent's phone picture): Claude copies
+        # it into the boxes below (modules/doc_reader).
+        _lv_photo(lid, cz, using_demo)
         _load_box(f"lvno_{lid}", l.get("lv_number") or "")
         _load_box(f"lvku_{lid}", l.get("cadastral_area") or "")
         v1, v2 = st.columns(2)
@@ -472,6 +524,10 @@ def render_card(l, v):
 
         from dashboard.lv_view import render_part_c
         render_part_c(l, _LV_DOCS)
+        if not using_demo:
+            from dashboard.building_view import render_building, render_short_let
+            render_building(l, cz)
+            render_short_let(l, cz)
 
         seen = last_seen_label(l, cz)
         seen = f" · {seen}" if seen else ""

@@ -125,9 +125,25 @@ def portal_health() -> dict:
         return {}
 
 
+@st.cache_data(ttl=LISTINGS_TTL_S, show_spinner=False)
+def _rent_types(db_path: str) -> list[dict]:
+    from engine.rent_comps import rooms_table
+    return rooms_table()
+
+
+def rent_types() -> list[dict]:
+    """engine.rent_comps.rooms_table, cached as the listing load is."""
+    import database
+    try:
+        return _rent_types(database.SQLITE_PATH)
+    except Exception:
+        return []
+
+
 def clear_listing_cache() -> None:
     """After the dashboard changes listings: the next load reads the database."""
     _load_active.clear()
+    _rent_types.clear()
     _waiting_for_rent.clear()
     _quiet_portals.clear()
     _portal_health.clear()

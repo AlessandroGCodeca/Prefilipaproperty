@@ -24,6 +24,14 @@ A key's live rate is the median of its comps, cut by RENT_COMP_ASKING_HAIRCUT
 baseline weighted as RENT_COMP_PRIOR_WEIGHT comps — so a handful of rentals
 nudges the rate and dozens replace it. Keys with fewer than
 RENT_COMP_MIN_SAMPLE comps keep the baseline outright.
+
+By flat type (M10 of the 12 Nov audit): the comps of each key are also split
+by rooms (1, 2, 3, 4+). Where one type has ROOMS_MIN_SAMPLE comps of its own,
+its median (furnishing still normalised away) is blended with that type's
+baseline and replaces the district rate × the fixed rooms multiplier for
+flats of that type — under the key "<key>#r<rooms>" in the rates. The split
+by furnishing is shown, not scored. time_to_let() is how long rental ads of
+a type stay up: the days between first and last seen, of ads gone for good.
 """
 
 from __future__ import annotations
@@ -52,6 +60,10 @@ _MAX_EUR_PER_M2 = 45.0
 # A rate that moved less than this since the last rebuild is not worth
 # re-scoring every listing in its district for.
 RESCORE_THRESHOLD = 0.02
+# Comps a flat type needs before its own rate replaces the rooms multiplier.
+ROOMS_MIN_SAMPLE = 6
+# A rental ad unseen this many days before the newest sighting is gone (let).
+GONE_AFTER_DAYS = 5
 
 
 def _fold(text: str) -> str:
@@ -180,6 +192,83 @@ def aggregate(rentals: list[dict]) -> dict[str, dict]:
     return out
 
 
+def room_band(rooms) -> int:
+    """1, 2, 3 or 4 (four rooms or more); 2 when unknown."""
+    try:
+        r = int(float(rooms))
+    except (TypeError, ValueError):
+        return 2
+    return min(max(r, 1), 4)
+
+
+def _furnish_bucket(furnished) -> str:
+    return "furnished" if furnished in ("furnished", "semi") else "unfurnished"
+
+
+def aggregate_by_rooms(rentals: list[dict]) -> dict[tuple[str, int], dict]:
+    """{(key, rooms band): {n, median_eur_per_m2, by_furnishing: {bucket:
+    {n, median_eur_per_m2}}}} — €/m² with furnishing normalised away but not
+    the rooms (that is what the split is for); by_furnishing is as asked."""
+    groups: dict[tuple[str, int], list[dict]] = {}
+    for r in rentals:
+        key = r.get("rent_key")
+        if not key or key == "default" or r.get("energies_included"):
+            continue
+        if not is_plausible_rent(r.get("rent_eur") or 0, r.get("size_m2") or 0):
+            continue
+        groups.setdefault((key, room_band(r.get("rooms"))), []).append(r)
+    out = {}
+    for gk, rows in groups.items():
+        norm = [baseline_eur_per_m2(r["rent_eur"], r["size_m2"], None, r.get("furnished"))
+                for r in rows]
+        split: dict[str, list[float]] = {}
+        for r in rows:
+            split.setdefault(_furnish_bucket(r.get("furnished")), []).append(
+                r["rent_eur"] / r["size_m2"])
+        out[gk] = {"n": len(rows), "median_eur_per_m2": round(statistics.median(norm), 2),
+                   "by_furnishing": {b: {"n": len(v), "median_eur_per_m2":
+                                         round(statistics.median(v), 2)}
+                                     for b, v in split.items()}}
+    return out
+
+
+def rates_by_rooms(comps: dict[tuple[str, int], dict]) -> dict[str, float]:
+    """{"<key>#r<band>": blended €/m²} for each flat type with
+    ROOMS_MIN_SAMPLE comps; its baseline is the key's × the rooms multiplier."""
+    from engine.financial import _rooms_multiplier, baseline_rent
+    out = {}
+    for (key, band), c in comps.items():
+        if c["n"] < ROOMS_MIN_SAMPLE:
+            continue
+        prior = baseline_rent(key) * _rooms_multiplier(band)
+        out[f"{key}#r{band}"] = blended_rate(c["median_eur_per_m2"], c["n"], prior)
+    return out
+
+
+def time_to_let(rentals: list[dict], min_n: int = 3) -> dict[tuple[str, int], dict]:
+    """{(key, rooms band): {n, median_days}} — how long ads gone for good
+    stayed up. An ad already up when tracking began is left out (its start
+    is unknown), as is one still up."""
+    seen = [r for r in rentals if r.get("scraped_at") and r.get("last_seen_at")]
+    if not seen:
+        return {}
+    parse = datetime.fromisoformat
+    newest = max(parse(r["last_seen_at"]) for r in seen)
+    first = min(parse(r["scraped_at"]) for r in seen)
+    groups: dict[tuple[str, int], list[float]] = {}
+    for r in seen:
+        start, last = parse(r["scraped_at"]), parse(r["last_seen_at"])
+        if (newest - last).days < GONE_AFTER_DAYS or (start - first).days < 2:
+            continue
+        key = r.get("rent_key")
+        if not key or key == "default":
+            continue
+        groups.setdefault((key, room_band(r.get("rooms"))), []).append(
+            max((last - start).total_seconds() / 86400, 0.0))
+    return {k: {"n": len(v), "median_days": round(statistics.median(v))}
+            for k, v in groups.items() if len(v) >= min_n}
+
+
 def rates_from_comps(comps: dict[str, dict]) -> dict[str, float]:
     """{key: blended €/m²} for every key with enough comps."""
     from engine.financial import baseline_rent
@@ -204,11 +293,22 @@ def _sk_rows(conn, table: str) -> str:
 def _active_rentals(conn, max_age_days: int) -> list[dict]:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
     rows = conn.execute(f"""
-        SELECT rent_eur, size_m2, rooms, furnished, energies_included, rent_key
+        SELECT rent_eur, size_m2, rooms, furnished, energies_included, rent_key,
+               scraped_at, last_seen_at
         FROM rental_listings
         WHERE is_active = 1 AND last_seen_at >= ?{_sk_rows(conn, "rental_listings")}
     """, (cutoff,)).fetchall()
     return [dict(r) for r in rows]
+
+
+def _stored_room_comps(conn) -> dict[tuple[str, int], dict]:
+    rows = conn.execute(f"""
+        SELECT district, size_band, sample_count, eur_per_m2 FROM rent_comps
+        WHERE source = 'live_prenajom' AND size_band LIKE 'r_'{_sk_rows(conn, "rent_comps")}
+    """).fetchall()
+    return {(r["district"], int(r["size_band"][1])): {"n": r["sample_count"] or 0,
+                                                       "median_eur_per_m2": r["eur_per_m2"] or 0}
+            for r in rows}
 
 
 def _stored_comps(conn) -> dict[str, dict]:
@@ -232,7 +332,8 @@ def load_live_rates(market: str = "sk") -> dict[str, float]:
     try:
         if not _has_table(conn, "rent_comps"):
             return {}
-        return rates_from_comps(_stored_comps(conn))
+        return {**rates_from_comps(_stored_comps(conn)),
+                **rates_by_rooms(_stored_room_comps(conn))}
     except sqlite3.Error as e:
         log.warning("Live rent comps not read, scoring uses the baseline rents: %s: %s",
                     type(e).__name__, e)
@@ -253,8 +354,11 @@ def rebuild_rent_comps(max_age_days: int = RENT_COMP_MAX_AGE_DAYS) -> dict:
     from engine.financial import match_rent_key, baseline_rent
     conn = get_conn()
     try:
-        old_rates = rates_from_comps(_stored_comps(conn))
-        comps = aggregate(_active_rentals(conn, max_age_days))
+        old_rates = {**rates_from_comps(_stored_comps(conn)),
+                     **rates_by_rooms(_stored_room_comps(conn))}
+        active = _active_rentals(conn, max_age_days)
+        comps = aggregate(active)
+        by_rooms = aggregate_by_rooms(active)
         now = datetime.now(timezone.utc).isoformat()
         conn.execute("DELETE FROM rent_comps WHERE source = 'live_prenajom'"
                      + _sk_rows(conn, "rent_comps"))
@@ -266,14 +370,24 @@ def rebuild_rent_comps(max_age_days: int = RENT_COMP_MAX_AGE_DAYS) -> dict:
                 VALUES (?,?,?,?,?,?,?,?,?,?)
             """, (f"live-{key}", key, "", "all", c["mean_rent"], c["median_rent"],
                   c["n"], "live_prenajom", now, c["median_eur_per_m2"]))
-        new_rates = rates_from_comps(comps)
+        for (key, band), c in by_rooms.items():
+            conn.execute("""
+                INSERT INTO rent_comps
+                (id, district, city, size_band, avg_rent_eur, median_rent_eur,
+                 sample_count, source, updated_at, eur_per_m2)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+            """, (f"live-{key}-r{band}", key, "", f"r{band}", None, None,
+                  c["n"], "live_prenajom", now, c["median_eur_per_m2"]))
+        new_rates = {**rates_from_comps(comps), **rates_by_rooms(by_rooms)}
 
         changed = []
         for key in set(old_rates) | set(new_rates):
-            before = old_rates.get(key) or baseline_rent(key)
-            after = new_rates.get(key) or baseline_rent(key)
+            base = baseline_rent(key.split("#")[0])
+            before = old_rates.get(key) or base
+            after = new_rates.get(key) or base
             if before and abs(after / before - 1) >= RESCORE_THRESHOLD:
-                changed.append(key)
+                changed.append(key.split("#")[0])
+        changed = sorted(set(changed))
 
         rescored = 0
         if changed:
@@ -315,3 +429,54 @@ def comps_table() -> list[dict]:
             "Source":         "live blend" if key in rates else "baseline (too few)",
         })
     return rows
+
+
+def rooms_table(max_age_days: int = RENT_COMP_MAX_AGE_DAYS) -> list[dict]:
+    """Rows for the dashboard, one per district key and flat type: the comps,
+    the unfurnished and furnished €/m² as asked, the rate scoring uses, and
+    how long such ads stay up."""
+    from database import get_conn, _has_table
+    from engine.financial import _rooms_multiplier, baseline_rent
+    conn = get_conn()
+    try:
+        if not _has_table(conn, "rental_listings"):
+            return []
+        active = _active_rentals(conn, max_age_days)
+        everyone = [dict(r) for r in conn.execute(
+            "SELECT rent_key, rooms, scraped_at, last_seen_at FROM rental_listings WHERE 1=1"
+            + _sk_rows(conn, "rental_listings")).fetchall()]
+    except sqlite3.Error as e:
+        log.warning("Rent comps by type not read: %s: %s", type(e).__name__, e)
+        return []
+    finally:
+        conn.close()
+    comps = aggregate_by_rooms(active)
+    rates = rates_by_rooms(comps)
+    days = time_to_let(everyone)
+    label = {1: "1 room", 2: "2 rooms", 3: "3 rooms", 4: "4+ rooms"}
+    rows = []
+    for (key, band), c in sorted(comps.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+        fur = c["by_furnishing"]
+        rows.append({
+            "District key": key, "Flat": label[band], "Comps": c["n"],
+            "Unfurnished €/m²": (fur.get("unfurnished") or {}).get("median_eur_per_m2"),
+            "Furnished €/m²": (fur.get("furnished") or {}).get("median_eur_per_m2"),
+            "In use €/m²": rates.get(f"{key}#r{band}",
+                                     round(baseline_rent(key) * _rooms_multiplier(band), 2)),
+            "Source": "this type's comps" if f"{key}#r{band}" in rates else "district × rooms factor",
+            "Days to let": (days.get((key, band)) or {}).get("median_days"),
+        })
+    return rows
+
+
+def type_note(district: str, rooms, table: list[dict] | None = None) -> str:
+    """One line for a card: this flat type's comps and time to let, or "".
+    `table` is rooms_table() when the caller has it already."""
+    from engine.financial import match_rent_key
+    key, band = match_rent_key(district or ""), room_band(rooms)
+    for r in (rooms_table() if table is None else table):
+        if r["District key"] == key and r["Flat"].startswith(str(band)):
+            days = f" · ads stay up ~{r['Days to let']} days" if r["Days to let"] else ""
+            return (f"{r['Flat']} in {key}: {r['Comps']} rental comps, "
+                    f"€{r['In use €/m²']:.2f}/m² in use ({r['Source']}){days}")
+    return ""

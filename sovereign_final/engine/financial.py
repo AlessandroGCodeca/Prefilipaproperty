@@ -662,7 +662,16 @@ def get_rent_estimate(district: str, size_m2: float, rooms=None,
         rate *= industrial
     # Slovakia's table is a 2-izb flat's, so the rooms multiplier applies; a
     # Czech figure is an average over every size (engine/rent_cz): none.
-    rate *= _rooms_multiplier(rooms) if _sk(market) else 1.0
+    # Where the live comps of this flat type are enough on their own
+    # (engine/rent_comps: "<key>#r<rooms>"), their rate replaces both.
+    typed = None
+    if _sk(market) and rates:
+        from engine.rent_comps import room_band
+        typed = rates.get(f"{match_rent_key(district, **_mkw(market))}#r{room_band(rooms)}")
+    if typed:
+        rate = typed
+    else:
+        rate *= _rooms_multiplier(rooms) if _sk(market) else 1.0
     # Description-derived premiums (only when the description was parsed; a
     # falsy parking/balcony flag and unfurnished/unknown furnishing leave rate
     # untouched).
@@ -736,6 +745,7 @@ def analyse(
     sro_running_cost: float | None = None,
     market: str = "sk",
     hold_years: int | None = None,
+    hoa_override: float | None = None,
 ) -> FinancialResult:
     """Score one property under both ownership structures.
 
@@ -784,7 +794,10 @@ def analyse(
     # ── Operating expenses (exclude debt service & income tax) ────
     # HOA already includes the fond opráv (building shell); the owner reserve
     # covers only in-flat capex, so the two don't double-count.
-    hoa_mo          = calc_hoa(size_m2, **_mkw(mkt))
+    # The building's real fee (správa + fond opráv) once you know it from the
+    # správca (database/building); the size band's estimate until then.
+    hoa_mo          = (hoa_override if hoa_override and hoa_override > 0
+                       else calc_hoa(size_m2, **_mkw(mkt)))
     prop_tax_mo     = property_tax_annual(price_eur, size_m2, district, **_mkw(mkt)) / 12
     vacancy_mo      = rent * VACANCY_RATE
     owner_reserve_mo = rent * OWNER_RESERVE_RATE
@@ -1217,7 +1230,8 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
                 fixation_years: int | None = None,
                 reset_rate: float | None = None,
                 loan_fees: float = 0.0,
-                monthly_loan_costs: float = 0.0) -> IrrResult:
+                monthly_loan_costs: float = 0.0,
+                hoa_override: float | None = None) -> IrrResult:
     """Buy, hold `hold_years`, sell — and the IRR of the equity cash flows.
 
     A bank's offer: `fixation_years` and `reset_rate` reset the rate when the
@@ -1282,7 +1296,8 @@ def project_irr(price_eur: float, size_m2: float, district: str, *,
     schedule = loan_schedule(loan, rate, term_years, fixation_years, reset_rate)
     loan_costs_y = (monthly_loan_costs or 0.0) * 12
     prop_tax_y = property_tax_annual(price_eur, size_m2, district, **_mkw(mkt))
-    hoa_mo = calc_hoa(size_m2, **_mkw(mkt))
+    hoa_mo = (hoa_override if hoa_override and hoa_override > 0
+              else calc_hoa(size_m2, **_mkw(mkt)))
     var_cost_rate = VACANCY_RATE + OWNER_RESERVE_RATE + PROPERTY_MGMT_RATE
 
     def personal_tax(taxable: float) -> float:
@@ -1364,11 +1379,11 @@ def deal_extras(r: FinancialResult) -> dict:
     sro = dict(sro_ltv=r.sro_ltv, sro_rate_premium=r.sro_mortgage_rate - r.mortgage_rate,
                sro_running_cost=r.sro_running_cost_monthly * 12, tax_year=r.tax_year)
     kw = dict(rent=r.estimated_rent, ltv=r.ltv, rate=r.mortgage_rate,
-              term_years=r.loan_term_years, **sro, **mk)
+              term_years=r.loan_term_years, hoa_override=r.hoa_monthly, **sro, **mk)
     shocked = rate_shock(r.price_eur, r.size_m2, r.district,
                          rent_override=r.estimated_rent, ltv=r.ltv,
                          rate=r.mortgage_rate, term_years=r.loan_term_years,
-                         rooms=r.rooms, **sro, **mk)
+                         rooms=r.rooms, hoa_override=r.hoa_monthly, **sro, **mk)
     return {
         "max_price_green":    max_offer_price(r.size_m2, r.district, "GREEN", rooms=r.rooms, **mk),
         "max_price_yellow":   max_offer_price(r.size_m2, r.district, "YELLOW", rooms=r.rooms, **mk),

@@ -428,8 +428,14 @@ def _zip_text(content: bytes) -> tuple[str, str] | None:
     return None
 
 
-def doc_from_bytes(url: str, content: bytes, content_type: str = "") -> Doc:
-    """Read a downloaded (or uploaded) file into text."""
+SCAN_PROBLEM = "a scanned PDF with no text layer — it can't be read"
+
+
+def doc_from_bytes(url: str, content: bytes, content_type: str = "",
+                   ocr: bool | None = None) -> Doc:
+    """Read a downloaded (or uploaded) file into text. A scan is sent to
+    Claude to be read (modules/doc_reader) when `ocr` is True, or — left
+    None — when TAX_SCANS_WITH_CLAUDE=1; otherwise it is reported unreadable."""
     if content[:5] == b"%PDF-":
         try:
             text, pages = _pdf_text(content)
@@ -438,7 +444,16 @@ def doc_from_bytes(url: str, content: bytes, content_type: str = "") -> Doc:
         # A scan has next to no text: a page number, a stamp. (Malacky's
         # 5 MB consolidated text gives 9 characters.)
         if len(re.sub(r"\s+", "", text)) < 50 * max(pages, 1):
-            return Doc(url, "pdf", text, problem="a scanned PDF with no text layer — it can't be read")
+            from modules import doc_reader
+            if ocr is None:
+                ocr = doc_reader.scans_in_automated_runs()
+            read = doc_reader.transcribe(content, "a municipal ordinance on local taxes") \
+                if ocr else None
+            if read:
+                return Doc(url, "pdf", read)
+            return Doc(url, "pdf", text, problem=SCAN_PROBLEM + (
+                "" if doc_reader.enabled() else
+                " (set ANTHROPIC_API_KEY and upload it: Claude reads scans)"))
         return Doc(url, "pdf", text)
     if content[:2] == b"PK":
         z = _zip_text(content)
@@ -934,7 +949,7 @@ def read_upload(name: str, content: bytes, town: Town | None = None,
                 year: int | None = None) -> tuple[Reading | None, str]:
     """A document the user saved in the browser and uploaded: (reading, why
     not) — for a site that refuses automated requests."""
-    doc = doc_from_bytes(name, content)
+    doc = doc_from_bytes(name, content, ocr=True)       # you uploaded it: read a scan
     if doc.problem:
         return None, doc.problem
     if is_draft(doc.text, name):

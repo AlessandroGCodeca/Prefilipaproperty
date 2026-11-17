@@ -176,6 +176,15 @@ def _lock_abandoned(lock: dict, now: datetime | None = None) -> bool:
     return ((now or datetime.now(beat.tzinfo)) - beat).total_seconds() >= STALE_AFTER_S
 
 
+def overdue(status: dict | None, now: datetime | None = None) -> bool:
+    """True when the last run that finished did so more than OVERDUE_AFTER
+    ago, or none ever did: the daily run isn't happening."""
+    finished = _parse((status or {}).get("finished_at"))
+    if not finished:
+        return False
+    return (now or datetime.now(finished.tzinfo)) - finished > OVERDUE_AFTER
+
+
 def summarize(status: dict | None, lock: dict | None,
               now: datetime | None = None) -> tuple[str, str]:
     """(level, text) describing the last full pipeline run, for the

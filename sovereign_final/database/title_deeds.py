@@ -88,7 +88,7 @@ def set_lv_analysis(listing_id: str, risk_level: str, summary: str = ""):
 _LV_ROW_COLUMNS = """
     id, address_raw, district, lat, lng, coords_source,
     cadastral_area, cadastral_number, cadastral_unit_code,
-    plot_lv_number, lv_number, market, lv_status
+    plot_lv_number, lv_number, market, lv_status, title
 """
 # The stages from which a tracked deal's PASS is read again weekly.
 _LATE_STAGES = ("OFFER", "NEGOTIATING", "DUE DILIGENCE", "NOTARY")

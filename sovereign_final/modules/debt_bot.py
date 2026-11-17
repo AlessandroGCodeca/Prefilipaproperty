@@ -224,12 +224,56 @@ def check_plot(row: dict) -> dict:
                        f"{_VERIFY_HINT}", parcel=captured)
 
 
+# A Slovak cooperative flat (družstevný byt): the cooperative owns it, the
+# buyer takes over a membership share (prevod členských práv). It has no LV
+# of its own, a bank rarely lends on it, and it sells below a flat in
+# personal ownership — so it can look like a bargain. Folded text: "družstevný
+# byt", "vlastníctvo: družstevné", "členský podiel", "prevod členských práv",
+# "v družstevnom vlastníctve" — not "pôvodne / bývalý družstevný", "z
+# družstevného do osobného", "nie je družstevný", nor Družstevná ulica.
+_COOP_SK_RE = re.compile(
+    r"vlastnictv\w*\s*:?\s*druzstev|"
+    r"(?<!povodne )(?<!byvaly )(?<!byvalo )(?<!z )(?<!nie je )(?<!nie )(?<!ul\. )(?<!ul\.)"
+    r"(?<!ulica )(?<!ulici )(?<!\w)druzstevn\w*(?!\w)(?!\s+ulic)(?!\s*\d)|"
+    r"(?<!\w)clensk\w*\s+(?:prav|podiel)\w*|podiel\w*\s+v\s+(?:bytov\w*\s+)?druzstv")
+_OWNERSHIP_SK_RE = re.compile(r"vlastnictv\w*\s*:\s*([a-z]+)")
+
+
+def is_cooperative_sk(text: str) -> bool:
+    """True when a Slovak ad says the flat is held in a cooperative."""
+    folded = fold(text or "")
+    m = _OWNERSHIP_SK_RE.search(folded)
+    if m:
+        return m.group(1).startswith("druzstev")
+    return bool(_COOP_SK_RE.search(folded))
+
+
+COOP_SK_NOTE = ("Cooperative flat (družstevný byt): no LV of its own — the cooperative owns "
+                "it and you take over a membership share (prevod členských práv). Banks "
+                "rarely lend on one. The cooperative's statutes, its debts and the transfer "
+                "terms are for a lawyer to check.")
+
+
+def _description(row: dict) -> str:
+    """The ad's text, for the cooperative check; "" when it can't be read
+    (a row checked outside the database)."""
+    if row.get("description") is not None:
+        return row["description"] or ""
+    try:
+        from database import get_listing_description
+        return get_listing_description(row["id"]) if row.get("id") else ""
+    except Exception:
+        return ""
+
+
 def check_listing(row: dict, refresh: bool = False) -> dict:
     """LV verdict for one listing row (a get_pending_lv() row). refresh=True
     reads the flat's own Slovak LV from the cadastre, not the cache."""
     if (row.get("market") or "sk") != "sk":
         from modules import lv_cz
         return lv_cz.check_listing(row)
+    if is_cooperative_sk(f"{row.get('title') or ''}\n{_description(row)}"):
+        return _unverified(COOP_SK_NOTE, cooperative=True)
     area = row.get("cadastral_unit_code") or row.get("cadastral_area")
     if row.get("lv_number"):
         if not area:
