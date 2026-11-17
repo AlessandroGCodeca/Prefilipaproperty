@@ -684,7 +684,7 @@ def get_rent_estimate(district: str, size_m2: float, rooms=None,
 
 
 def is_industrial_zone(district: str, market: str = "sk") -> bool:
-    key = district.lower().strip()
+    key = (district or "").lower().strip()
     return any(z in key for z in _rent_premiums(market)[0])
 
 

@@ -31,10 +31,17 @@ _DEV_PROJECT_URL_MARKERS = (
 _DEV_PROJECT_TITLE_MARKERS = (
     "developersky projekt", "developerský projekt",
     "novy projekt", "nový projekt",
-    "novostavba",
     "1. fáza", "2. fáza", "3. fáza", "1. etapa", "2. etapa", "i. etapa", "ii. etapa",
     " od €", " od eur",   # "Predaj bytov od €145 900" pattern — only with leading space
 )
+# "Novostavba" alone is a single resale flat in a new building as often as a
+# project. It flags a project only with a second sign: a project's plural
+# ("byty", "bytov", "apartmány"), a "rezidencia", or the "voľné byty" of a
+# developer's offer (the markers above are signs on their own).
+_NEW_BUILD_RE = re.compile(r"novostavb\w*")
+_NEW_BUILD_SECOND_SIGN_RE = re.compile(
+    r"(?<!\w)(?:byty|bytov|bytoch|apartm[aá]ny|apartm[aá]nov|rezidenci\w*|"
+    r"vo[lľ]n[eé]\s+byty|posledn[eé]\s+(?:voľné\s+)?byty|ponuka\s+bytov)(?!\w)")
 
 
 # A Czech project's title says "1. fáze" / "2. etapa" or quotes a starting
@@ -56,6 +63,8 @@ def detect_dev_project(url: str, title: str, market: str = "sk") -> int:
     t = (title or "").lower()
     if any(marker in t for marker in _DEV_PROJECT_TITLE_MARKERS):
         return 1
+    if _NEW_BUILD_RE.search(t) and _NEW_BUILD_SECOND_SIGN_RE.search(t):
+        return 1
     if market != "sk" and (any(m in t for m in _DEV_PROJECT_TITLE_MARKERS_CZ)
                            or _DEV_PROJECT_FROM_CZK_RE.search(t)):
         return 1
@@ -63,26 +72,30 @@ def detect_dev_project(url: str, title: str, market: str = "sk") -> int:
 
 
 def backfill_dev_project_flags() -> int:
-    """Run detect_dev_project on every active listing and update is_dev_project.
+    """Run detect_dev_project on every active listing and set is_dev_project
+    to what it says now — flagging new projects and clearing a flag whose
+    signs have gone (a title edited, or a rule that no longer applies).
     Returns the number of rows newly flagged as dev projects."""
     conn = _db.get_conn()
     try:
         _ensure_dev_project_column(conn)
         _ensure_market_columns(conn)
         rows = conn.execute(
-            "SELECT id, url, title, market FROM listings WHERE is_dev_project=0"
+            "SELECT id, url, title, market, is_dev_project FROM listings WHERE is_active=1"
         ).fetchall()
-        flagged = []
+        flagged, cleared = [], []
         for r in rows:
-            if detect_dev_project(r[1] or "", r[2] or "", r[3] or "sk"):
+            now = detect_dev_project(r[1] or "", r[2] or "", r[3] or "sk")
+            if now and not r[4]:
                 flagged.append(r[0])
-        if flagged:
-            ph = ",".join("?" * len(flagged))
-            conn.execute(
-                f"UPDATE listings SET is_dev_project=1 WHERE id IN ({ph})",
-                flagged,
-            )
-            conn.commit()
+            elif not now and r[4]:
+                cleared.append(r[0])
+        for value, ids in ((1, flagged), (0, cleared)):
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                conn.execute(f"UPDATE listings SET is_dev_project={value} WHERE id IN "
+                             f"({','.join('?' * len(chunk))})", chunk)
+        conn.commit()
     finally:
         conn.close()
     return len(flagged)
@@ -569,7 +582,7 @@ _PIN_MOVE_DEG = 0.0002
 
 # The row upsert_listing finds for a listing it is about to write. _pin_moved
 # reads lat/lng/coords_source at 2–4; the price history reads 5–6.
-_EXISTING_COLS = "id, district, lat, lng, coords_source, price_eur, scraped_at"
+_EXISTING_COLS = "id, district, lat, lng, coords_source, price_eur, scraped_at, size_m2, rooms"
 
 
 def _pin_moved(existing, lat, lng) -> bool:
@@ -594,9 +607,13 @@ def upsert_listing(data: dict):
     are set on insert and never changed after; `price_eur` is the asking price
     in that currency — EUR for a Slovak listing, CZK for a Czech one."""
     import markets
-    lat, lng = data.get("lat"), data.get("lng")
-    has_pin = lat is not None and lng is not None
     market = markets.normalize(data.get("market"))
+    # A pin outside the market's country is a portal's error (a swapped pair,
+    # a default 0,0): kept out where it is saved, not only in the scrapers.
+    from scraper.geo import as_pin
+    pin = as_pin(data.get("lat"), data.get("lng"), market)
+    lat, lng = pin if pin else (None, None)
+    has_pin = pin is not None
     data = {**data, "lat": lat if has_pin else None, "lng": lng if has_pin else None,
             "coords_source": "listing" if has_pin else None,
             "market": market,
@@ -660,7 +677,7 @@ def upsert_listing(data: dict):
                                        THEN excluded.primary_image_url ELSE primary_image_url END,
                 image_urls=CASE WHEN excluded.image_urls != '' THEN excluded.image_urls ELSE image_urls END,
                 is_active=1,
-                is_dev_project=CASE WHEN excluded.is_dev_project=1 THEN 1 ELSE is_dev_project END,
+                is_dev_project=excluded.is_dev_project,
                 lat=CASE WHEN excluded.lat IS NOT NULL THEN excluded.lat ELSE lat END,
                 lng=CASE WHEN excluded.lat IS NOT NULL THEN excluded.lng ELSE lng END,
                 coords_source=CASE WHEN excluded.lat IS NOT NULL THEN 'listing'
@@ -688,6 +705,15 @@ def upsert_listing(data: dict):
         if (existing and not (existing[1] or "").strip()
                 and (data.get("district") or "").strip()):
             _drop_cashflow_score(conn, data["id"])
+        # A corrected size or room count (a portal's 55 m² that was 65 m²):
+        # the rent, the price per m² and the grade all move with it.
+        if existing:
+            new_size, old_size = data.get("size_m2") or 0, existing[7] or 0
+            new_rooms, old_rooms = data.get("rooms"), existing[8]
+            if ((new_size > 0 and old_size > 0 and abs(new_size - old_size) > 0.5)
+                    or (new_rooms is not None and old_rooms is not None
+                        and float(new_rooms) != float(old_rooms))):
+                _drop_cashflow_score(conn, data["id"])
         # A new asking price: log it, and re-score at the new price (a cut
         # can turn a WHITE into a YELLOW — that is the alert worth having).
         new_price = data.get("price_eur") or 0

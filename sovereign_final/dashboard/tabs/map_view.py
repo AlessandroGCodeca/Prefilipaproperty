@@ -120,7 +120,11 @@ def render(v) -> None:
     data = v.data
     hidden_note = v.hidden_note
     n_hidden = v.n_hidden
-    mapped = [l for l in data if l.get("lat") and l.get("lng")]
+    # Only pins inside the listing's own country: one wrong pin (a swapped
+    # pair) used to pull the map's centre abroad.
+    from scraper.geo import as_pin
+    mapped = [l for l in data if l.get("lat") and l.get("lng")
+              and as_pin(l["lat"], l["lng"], l.get("_market") or l.get("market") or "sk")]
     if not data and n_hidden:
         st.info(hidden_note())
         return
@@ -277,7 +281,9 @@ def render(v) -> None:
     if point:
         centre, zoom = point, max(7.0, min(14.0, 14.3 - math.log2(radius_km)))
     else:
-        centre = (sum(p["lat"] for p in pts) / len(pts), sum(p["lng"] for p in pts) / len(pts))
+        # The median, not the mean: a few far pins don't move it.
+        import statistics
+        centre = (statistics.median(p["lat"] for p in pts), statistics.median(p["lng"] for p in pts))
         zoom = 7 if len(pts) > 1 else 13
     st.pydeck_chart(pdk.Deck(
         initial_view_state=pdk.ViewState(latitude=centre[0], longitude=centre[1], zoom=zoom),

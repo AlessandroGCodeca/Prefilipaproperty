@@ -36,7 +36,53 @@ from modules import risk_data
 log = logging.getLogger(__name__)
 
 GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
-PLACES_URL  = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+# Places API (New): the legacy Nearby Search (maps/api/place/nearbysearch)
+# can't be enabled for new Google Cloud projects any more. Enable "Places API
+# (New)" for the key; while it refuses (not enabled, no billing), transit and
+# amenities come from OpenStreetMap as they do without a key.
+PLACES_URL  = "https://places.googleapis.com/v1/places:searchNearby"
+PLACES_FIELDS = "places.location"
+# Each count's place types in Places API (New) (Table A).
+AMENITY_TYPES = {
+    "grocery_count":  ("grocery_store", "supermarket"),
+    "pharmacy_count": ("pharmacy",),
+    "school_count":   ("school", "primary_school", "secondary_school"),
+}
+
+
+class PlacesUnavailable(Exception):
+    """Google refused the request (the API not enabled, no billing, a bad key)."""
+
+
+def _places_nearby(lat: float, lng: float, radius: float, types) -> list[tuple[float, float]]:
+    """The points of up to 20 places of `types` within `radius` metres
+    (Places API (New) searchNearby). Raises PlacesUnavailable on a refusal."""
+    r = requests.post(PLACES_URL, json={
+        "includedTypes": list(types), "maxResultCount": 20,
+        "locationRestriction": {"circle": {"center": {"latitude": lat, "longitude": lng},
+                                           "radius": float(radius)}},
+    }, headers={"X-Goog-Api-Key": GOOGLE_API_KEY, "X-Goog-FieldMask": PLACES_FIELDS},
+        timeout=10)
+    if getattr(r, "status_code", 200) in (400, 401, 403):
+        msg = ""
+        try:
+            msg = (r.json().get("error") or {}).get("message", "")
+        except Exception:
+            pass
+        raise PlacesUnavailable(f"HTTP {r.status_code} {msg[:120]}")
+    out = []
+    for p in (r.json() or {}).get("places", []) or []:
+        try:
+            loc = p["location"]
+            out.append((float(loc["latitude"]), float(loc["longitude"])))
+        except (KeyError, TypeError, ValueError):
+            continue        # a place without a usable location
+    return out
+
+
+def _osm_counts(lat: float, lng: float) -> dict | None:
+    elements = risk_data.fetch_osm(lat, lng)
+    return risk_data.classify_osm(elements, lat, lng) if elements else None
 
 
 # ── Geocoding ─────────────────────────────────────────────────────────────────
@@ -72,54 +118,43 @@ def nearest_transit(lat: float, lng: float) -> float:
     Google's Nearby Search lists results by prominence, not distance, so the
     first result is often a main station a kilometre away while a tram stop
     sits at the door: the nearest is the shortest distance over all results."""
-    if not GOOGLE_API_KEY:
-        elements = risk_data.fetch_osm(lat, lng)
-        t = risk_data.classify_osm(elements, lat, lng)["nearest_transit_m"] if elements else None
+    def from_osm():
+        osm = _osm_counts(lat, lng)
+        t = osm["nearest_transit_m"] if osm else None
         return 9999.0 if t is None else t
+    if not GOOGLE_API_KEY:
+        return from_osm()
     try:
-        r = requests.get(PLACES_URL, params={
-            "location": f"{lat},{lng}", "radius": 2000,
-            "type": "transit_station", "key": GOOGLE_API_KEY,
-        }, timeout=10)
-        dists = []
-        for p in r.json().get("results", []):
-            try:
-                rl = p["geometry"]["location"]
-                dists.append(_haversine(lat, lng, float(rl["lat"]), float(rl["lng"])))
-            except (KeyError, TypeError, ValueError):
-                continue        # a result without a usable location
+        dists = [_haversine(lat, lng, plat, plng)
+                 for plat, plng in _places_nearby(lat, lng, 2000, ("transit_station",))]
         if dists:
             return min(dists)
+    except PlacesUnavailable as e:
+        log.warning(f"    Google Places (New) refused ({e}) — OpenStreetMap instead")
+        return from_osm()
     except Exception as e:
         log.warning(f"    Transit error: {e}")
     return 9999.0
 
 
 def count_amenities(lat: float, lng: float) -> dict:
-    types = {
-        "grocery_or_supermarket": "grocery_count",
-        "pharmacy":               "pharmacy_count",
-        "school":                 "school_count",
-    }
     counts = {"grocery_count": 0, "pharmacy_count": 0, "school_count": 0}
 
+    def from_osm():
+        osm = _osm_counts(lat, lng)
+        return {k: osm[k] for k in counts} if osm else counts
     if not GOOGLE_API_KEY:
-        elements = risk_data.fetch_osm(lat, lng)
-        if elements:
-            osm = risk_data.classify_osm(elements, lat, lng)
-            counts = {k: osm[k] for k in counts}
-        return counts
+        return from_osm()
 
-    for ptype, key in types.items():
+    for key, ptypes in AMENITY_TYPES.items():
         try:
-            r = requests.get(PLACES_URL, params={
-                "location": f"{lat},{lng}", "radius": AMENITY_RADIUS_METERS,
-                "type": ptype, "key": GOOGLE_API_KEY,
-            }, timeout=10)
-            counts[key] = len(r.json().get("results", []))
+            counts[key] = len(_places_nearby(lat, lng, AMENITY_RADIUS_METERS, ptypes))
             time.sleep(0.3)
+        except PlacesUnavailable as e:
+            log.warning(f"    Google Places (New) refused ({e}) — OpenStreetMap instead")
+            return from_osm()
         except Exception as e:
-            log.warning(f"    Amenity error ({ptype}): {e}")
+            log.warning(f"    Amenity error ({key}): {e}")
 
     return counts
 
@@ -134,7 +169,7 @@ def _haversine(lat1, lng1, lat2, lng2) -> float:
 
 
 def is_industrial(district: str, market: str = "sk") -> tuple[bool, str]:
-    key = district.lower().strip()
+    key = (district or "").lower().strip()
     if market == "sk":
         zones = INDUSTRIAL_ZONES
     else:

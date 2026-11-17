@@ -7,6 +7,7 @@ opening each card.
 from datetime import datetime
 
 import streamlit as st
+from pandas.api.types import is_numeric_dtype
 
 import markets
 
@@ -16,10 +17,26 @@ from dashboard.fmt import _features_label, _lv_state, money
 PINNED = ("", "Grade", "Title", "Price", "Surplus")
 
 
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _defuse(value):
+    """A text cell Excel would run as a formula (=, +, -, @ first: an ad's
+    title is text a stranger wrote) gets an apostrophe in front, which Excel
+    shows as plain text. Numbers are left alone."""
+    if isinstance(value, str) and value.startswith(_FORMULA_START):
+        return "'" + value
+    return value
+
+
 def triage_csv(df) -> bytes:
     """The table as a CSV file: every row and column, in the order shown.
     With a byte-order mark, so Excel reads the diacritics."""
-    return df.to_csv(index=False).encode("utf-8-sig")
+    safe = df.copy()
+    for col in safe.columns:
+        if not is_numeric_dtype(safe[col]):        # object or pandas' str columns
+            safe[col] = safe[col].map(_defuse)
+    return safe.to_csv(index=False).encode("utf-8-sig")
 
 
 def render(v) -> None:
