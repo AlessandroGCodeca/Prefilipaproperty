@@ -190,7 +190,8 @@ def requeue_scores_from_older_model(market: str | None = None) -> int:
         _ensure_market_columns(conn)
         only, params = _market_sql(conn, market, "l.")
         rows = conn.execute(f"""
-            SELECT l.id, l.market, c.model_version, c.tax_year, c.ltv_used
+            SELECT l.id, l.market, c.model_version, c.tax_year, c.ltv_used,
+                   c.mortgage_rate_used
             FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
             -- Only what get_unscored_cashflow() would score again.
             WHERE l.is_active = 1 AND l.price_eur > 0 AND l.size_m2 > 0
@@ -220,13 +221,28 @@ def requeue_scores_from_older_model(market: str | None = None) -> int:
                 except LookupError:
                     ltvs[m] = None
             return ltvs[m]
+        # ... and the mortgage rate in use: yours, or the market average read
+        # from the central bank (modules/market_rates), which moves monthly.
+        rates: dict[str, float | None] = {}
+
+        def rate_now(market):
+            from modules.market_rates import rate_in_use
+            m = markets.normalize(market)
+            if m not in rates:
+                try:
+                    rates[m] = rate_in_use(m)
+                except (LookupError, TypeError):
+                    rates[m] = None
+            return rates[m]
         n = sum(_drop_cashflow_score(conn, r["id"]) for r in rows
                 if r["model_version"] is None
                 or r["model_version"] != SCORING_MODEL_VERSION
                 or r["tax_year"] is None or r["tax_year"] != tax_year(r["market"])
                 or (ltv_now(r["market"]) is not None
                     and (r["ltv_used"] is None
-                         or abs(r["ltv_used"] - ltv_now(r["market"])) > 1e-9)))
+                         or abs(r["ltv_used"] - ltv_now(r["market"])) > 1e-9))
+                or (rate_now(r["market"]) is not None and r["mortgage_rate_used"] is not None
+                    and abs(r["mortgage_rate_used"] - rate_now(r["market"])) > 1e-9))
         conn.commit()
     finally:
         conn.close()

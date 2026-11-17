@@ -569,10 +569,13 @@ def run_all_markets(trigger: str = "06:00", holder: str | None = None,
 
     `progress(i, n, note)` hears the steps of all of them as one run, each
     note prefixed with its market."""
-    from modules import pipeline_state
+    from modules import heartbeat, pipeline_state
     todo = list(which or active_markets())
     total = sum(step_count(m) for m in todo)
     results: dict[str, bool] = {}
+    # The outside watcher (HEALTHCHECK_URL) hears the start and the outcome;
+    # a run that never reports back is late, and it e-mails you.
+    heartbeat.ping("start")
 
     def run_them():
         _refresh_fx()
@@ -583,6 +586,16 @@ def run_all_markets(trigger: str = "06:00", holder: str | None = None,
             settings.sync()
         except Exception as e:
             log.warning(f"Settings not re-read: {type(e).__name__}: {e}")
+        # The ECB's average mortgage rate (weekly at most); the scores on an
+        # older rate are redone by the scoring step (modules/market_rates).
+        try:
+            from modules import market_rates
+            moved = market_rates.refresh()
+            if moved:
+                log.info(f"🏦 Market rate in use changed for {', '.join(m.upper() for m in moved)} "
+                         f"— those scores are redone this run.")
+        except Exception as e:
+            log.warning(f"Market rates not refreshed: {type(e).__name__}: {e}")
         offset = 0
         for m in todo:
             # The scheduler's run (owed_at: the time it found m owed) may have
@@ -643,11 +656,24 @@ def run_all_markets(trigger: str = "06:00", holder: str | None = None,
                     results[m] = False
     log.info("📊 Markets: " + " | ".join(
         f"{m.upper()} {'✅' if ok else '❌'}" for m, ok in results.items()))
+    heartbeat.ping("" if results and all(results.values()) else "fail",
+                   body=f"{trigger}: " + ", ".join(
+                       f"{m.upper()} {'ok' if ok else 'FAILED'}" for m, ok in results.items()))
     # New deals, price cuts on tracked deals, failures: one Telegram message
     # (modules/alerts; off without TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID).
     # Never fails the run.
     from modules.alerts import run_quietly
     run_quietly()
+    # Each listing's class today, for the BACKTEST (engine/backtest).
+    try:
+        from engine.backtest import take_snapshot
+        take_snapshot()
+    except Exception as e:
+        log.warning(f"Class snapshot not taken: {type(e).__name__}: {e}")
+    # Slovak real-estate auctions from the notaries' register, once a day.
+    if "sk" in results:
+        from modules.auctions_sk import refresh_quietly
+        refresh_quietly()
     return results
 
 

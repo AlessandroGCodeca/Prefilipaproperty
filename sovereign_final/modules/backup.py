@@ -75,6 +75,10 @@ _USER_TABLES = {
     # The due-diligence checklist, and which documents a deal has (their
     # contents are in the .db copy, not in this readable export).
     "deal_checklist":     "SELECT * FROM deal_checklist ORDER BY listing_id, item",
+    "building_facts":     "SELECT * FROM building_facts ORDER BY listing_id",
+    "owned_flats":        "SELECT * FROM owned_flats ORDER BY id",
+    "owned_ledger":       "SELECT * FROM owned_ledger ORDER BY flat_id, month",
+    "sold_prices":        "SELECT * FROM sold_prices ORDER BY id",
     "deal_files":         "SELECT id, listing_id, kind, name, mime, size, uploaded_at "
                           "FROM deal_files ORDER BY uploaded_at",
     "alert_rules":        "SELECT * FROM alert_rules ORDER BY position",

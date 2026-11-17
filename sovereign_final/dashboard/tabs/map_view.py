@@ -158,6 +158,32 @@ def render(v) -> None:
                        f"instead, as 48.1486, 17.1077 — right-click a spot in a map app to "
                        f"copy them.")
 
+    # Travel time to the point (modules/travel): a straight line misleads
+    # across a river or a hill.
+    minutes, mode, max_min = {}, None, None
+    if point:
+        from modules import travel
+        t1, t2 = st.columns([3, 2])
+        with t1:
+            how = st.radio("Distance", ["Straight line"] + [travel.MODES[m] for m in
+                                                             travel.available_modes()],
+                           horizontal=True, key="map_how",
+                           help="On foot and by car: openrouteservice (ORS_API_KEY) or the "
+                                "public OSRM servers. Public transport needs "
+                                "GOOGLE_ROUTES_API_KEY.")
+        mode = next((m for m, label in travel.MODES.items() if label == how), None)
+        with t2:
+            max_min = st.slider("Within minutes", 5, 120, 30, step=5, key="map_min",
+                                disabled=mode is None, format="within %d min")
+        if mode:
+            near_ones = {l["id"]: (l["lat"], l["lng"]) for l in mapped
+                         if km_between(point[0], point[1], l["lat"], l["lng"]) <= radius_km}
+            near_ones = dict(list(near_ones.items())[:300])
+            with st.spinner(f"Travel times {how.lower()}…"):
+                minutes = travel.travel_times(point, near_ones, mode)
+            if len(minutes) < len(near_ones):
+                st.warning("The router didn't answer for every listing; try again in a minute.")
+
     pts = []
     for l in mapped:
         cls = (l.get("cf_class") or l.get("classification") or "PENDING").upper()
@@ -166,6 +192,9 @@ def render(v) -> None:
         km = km_between(point[0], point[1], l["lat"], l["lng"]) if point else None
         if km is not None and km > radius_km:
             continue
+        mins = minutes.get(l["id"]) if mode else None
+        if mode and (mins is None or mins > max_min):
+            continue
         approx = (l.get("geo_precision") or "") == "area"
         color = cashflow_color(surplus_eur) if by_cash else CLASS_COLOR.get(cls, NO_SCORE_COLOR)
         # The tooltip is drawn as HTML: everything a portal wrote is escaped.
@@ -173,6 +202,7 @@ def render(v) -> None:
                f"{amt(l, l.get('price_eur') or 0)} · {cls}<br/>surplus {sgn(l, surplus)}"
                f"<br/>max YELLOW {amt(l, l['max_price_yellow']) if l.get('max_price_yellow') else '—'}"
                + (f"<br/>{km:.1f} km away" if km is not None else "")
+               + (f"<br/>{mins:.0f} min {esc(travel.MODES[mode].lower())}" if mins is not None else "")
                + ("<br/><i>approximate (area centroid)</i>" if approx
                   else f"<br/><i>{esc(l.get('geo_precision') or '')}</i>"))
         pts.append({
@@ -185,7 +215,9 @@ def render(v) -> None:
             "label": "",
         })
 
-    scope = (f" within {radius_km} km (straight line) of {esc(near.strip())}" if point else "")
+    scope = ((f" within {max_min} min ({esc(travel.MODES[mode].lower())}) of {esc(near.strip())}"
+              if mode else f" within {radius_km} km (straight line) of {esc(near.strip())}")
+             if point else "")
     st.markdown(f'<div class="muted">{len(pts)} of {len(data)} filtered listings'
                 f'{scope or " have coordinates"}. '
                 + ("Green: at least +€100 a month · light green: break-even or better · "

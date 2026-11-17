@@ -37,6 +37,7 @@ from scraper import tax_coefficients_cz as cz
 
 log = logging.getLogger(__name__)
 WORKERS = 8
+SCANS_PER_RUN = 25   # scanned ordinances sent to Claude per run (TAX_SCANS_WITH_CLAUDE=1)
 
 
 def _now() -> str:
@@ -132,6 +133,17 @@ def _update(progress, year: int | None, src: Sources) -> dict:
     finally:
         conn.close()
     new = [o for o in listed if o.id not in known]
+    # Scans read earlier as unreadable, read again by Claude when you turned
+    # that on (TAX_SCANS_WITH_CLAUDE=1) — a few per run, it costs per page.
+    from modules import doc_reader
+    if doc_reader.scans_in_automated_runs() and doc_reader.enabled():
+        conn = _conn()
+        try:
+            scans = {r[0] for r in conn.execute(
+                "SELECT id FROM cz_ordinances WHERE problem LIKE 'a scanned PDF%'")}
+        finally:
+            conn.close()
+        new += [o for o in listed if o.id in scans][:SCANS_PER_RUN]
 
     def read(o):
         try:

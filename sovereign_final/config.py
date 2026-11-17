@@ -55,6 +55,34 @@ def _env_int(name: str, default: int) -> int:
     return int(float(raw)) if raw else int(default)
 
 
+# ── Market rates read from the central banks (modules/market_rates) ───────────
+# The average rate on new housing loans, kept beside the database. It is the
+# model's mortgage rate wherever you set none (YOUR SITUATION or .env).
+MARKET_RATES_PATH = (os.getenv("SOVEREIGN_MARKET_RATES_PATH")
+                     or os.path.join(os.path.dirname(os.path.abspath(__file__)), "data",
+                                     "market_rates.json"))
+
+
+def market_rates() -> dict:
+    """The stored readings ({} when none, or unreadable)."""
+    import json
+    try:
+        with open(MARKET_RATES_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def market_rate(market: str) -> float | None:
+    """The stored average rate for `market` as a fraction, or None."""
+    try:
+        rate = float((market_rates().get(market) or {}).get("rate"))
+    except (TypeError, ValueError):
+        return None
+    return rate if 0 < rate < 0.25 else None
+
+
 # ── Database ──────────────────────────────────────────────────────────────────
 # SQLite only — see SQLITE_PATH below. DATABASE_URL is ignored: the old
 # PostgreSQL mode never worked (see the database package docstring).
@@ -65,7 +93,9 @@ def _env_int(name: str, default: int) -> int:
 # representative mid-market figure for a well-qualified borrower at ≤80% LTV.
 # Your own bank's offer goes in .env (MORTGAGE_RATE_PA=0.041, LOAN_TERM_YEARS=30,
 # LTV_RATIO=0.8) or the dashboard's "Your situation" panel; then ♻️ RESCORE ALL.
-MORTGAGE_RATE_PA       = _env_float("MORTGAGE_RATE_PA", 0.038)  # 3.8% — NBS-consistent 2026 average
+# With no rate of yours, the ECB's latest Slovak average (modules/market_rates);
+# 3.8 % until it has been read once.
+MORTGAGE_RATE_PA       = _env_float("MORTGAGE_RATE_PA", market_rate("sk") or 0.038)
 LOAN_TERM_YEARS        = _env_int("LOAN_TERM_YEARS", 25)   # conservative; 30y is the more common max (NBS cap)
 LTV_RATIO              = _env_float("LTV_RATIO", 0.80)     # 80% standard NBS cap for owner-occupied/1st-2nd
 # From 1 Oct 2026 NBS tightens the LTV cap to 70% for a 3rd-and-subsequent

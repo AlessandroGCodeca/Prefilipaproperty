@@ -82,6 +82,23 @@ def _waiting_cz(comps: list[dict]) -> None:
                f"it before scoring.")
 
 
+def _by_type() -> None:
+    """The comps by flat type: rooms, furnishing, the rate in use, days to let."""
+    from engine.rent_comps import ROOMS_MIN_SAMPLE, rooms_table
+    rows = rooms_table()
+    if not rows:
+        return
+    st.markdown('<div class="muted" style="margin-top:10px">BY FLAT TYPE — €/m² as asked, '
+                'unfurnished and furnished; days an ad stays up before it is let</div>',
+                unsafe_allow_html=True)
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+                 column_config={c: st.column_config.NumberColumn(format="%.2f") for c in
+                                ("Unfurnished €/m²", "Furnished €/m²", "In use €/m²")})
+    st.caption(f"A flat type with {ROOMS_MIN_SAMPLE}+ comps of its own is scored on them; "
+               "the rest on the district's rate × a fixed rooms factor. Days to let: ads that "
+               "were first seen after tracking began and have since gone.")
+
+
 def render(v) -> None:
     """The RENT COMPS tab."""
     data = v.data
@@ -106,6 +123,7 @@ def render(v) -> None:
             st.caption(f"A district needs {RENT_COMP_MIN_SAMPLE}+ rentals; its live median is cut "
                        f"{(1 - RENT_COMP_ASKING_HAIRCUT):.0%} (asking → achieved) and weighted against "
                        f"the baseline as if the baseline were {RENT_COMP_PRIOR_WEIGHT} comps.")
+            _by_type()
     # Czechia's own comps: in its view, and in the combined one once there
     # are Czech listings.
     if view_market == "cz" or (view_market is None

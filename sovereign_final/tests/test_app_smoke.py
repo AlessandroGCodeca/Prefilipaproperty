@@ -110,9 +110,9 @@ def test_empty_database_renders_the_demo_view(db):
     assert ">None<" not in markdown_of(at)
 
 
-PAGE_TABS = ["TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER", "WHAT-IF / TAX", "COMPARE",
-             "RENT COMPS", "TAX RATES", "DEAL PIPELINE", "LV TO-DO", "REJECTED",
-             "ONE-CLICK CLOSE", "ALERTS"]
+PAGE_TABS = ["TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER", "AUCTIONS",
+             "WHAT-IF / TAX", "COMPARE", "RENT COMPS", "TAX RATES", "BACKTEST", "DEAL PIPELINE",
+             "LV TO-DO", "REJECTED", "ONE-CLICK CLOSE", "ALERTS", "PORTFOLIO"]
 GROUP_TABS = ["🎯 DEALS", "📊 ANALYSIS", "🗂 WORKFLOW"]
 
 
@@ -123,7 +123,7 @@ def tab_labels(at):
 def test_populated_database_renders_every_tab(populated_db):
     at = run_app()
     assert not at.exception, [e.value for e in at.exception]
-    # Eleven tabs in three groups (one row of eleven overflowed at 1440 px).
+    # Sixteen tabs in three groups (one row of eleven overflowed at 1440 px).
     assert sorted(tab_labels(at)) == sorted(PAGE_TABS + GROUP_TABS)
 
 
@@ -132,9 +132,9 @@ def test_the_tabs_are_grouped(populated_db):
     labels = tab_labels(at)
     # Each group's own tabs follow it.
     assert labels == ["🎯 DEALS", "TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER",
-                      "📊 ANALYSIS", "WHAT-IF / TAX", "COMPARE", "RENT COMPS", "TAX RATES",
-                      "🗂 WORKFLOW", "DEAL PIPELINE", "LV TO-DO", "REJECTED", "ONE-CLICK CLOSE",
-                      "ALERTS"]
+                      "AUCTIONS", "📊 ANALYSIS", "WHAT-IF / TAX", "COMPARE", "RENT COMPS",
+                      "TAX RATES", "BACKTEST", "🗂 WORKFLOW", "DEAL PIPELINE", "LV TO-DO",
+                      "REJECTED", "ONE-CLICK CLOSE", "ALERTS", "PORTFOLIO"]
 
 
 def test_the_sidebar_buttons_are_grouped_and_named_in_full(populated_db):

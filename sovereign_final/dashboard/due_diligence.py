@@ -80,6 +80,10 @@ def render(listing: dict, disabled: bool = False) -> None:
                 delete_deal_file(f["id"])
                 st.rerun()
 
+    _seller_checks(listing, lid, cz, disabled)
+    from dashboard.building_view import render_facts_form
+    render_facts_form(listing, disabled)
+
     # The letter to the správca / SVJ
     if st.toggle("✉️ Letter to the správca / SVJ" if not cz else "✉️ Dopis SVJ / správci",
                  key=f"ddl_{lid}",
@@ -98,3 +102,48 @@ def render(listing: dict, disabled: bool = False) -> None:
         st.download_button("⬇️ LETTER (.txt)", text.encode("utf-8"),
                            file_name=f"spravca_{lid[:8]}.txt", mime="text/plain",
                            key=f"ddld_{lid}")
+
+
+def _seller_checks(listing: dict, lid: str, cz: bool, disabled: bool) -> None:
+    """🔍 Who sells: the owners the deed names, companies checked in the
+    free registers, and the registers to search for a person by hand."""
+    from modules import seller_check
+    market = "cz" if cz else "sk"
+    st.markdown('<div class="muted" style="margin-top:10px">🔍 SELLER CHECKS — the deed shows '
+                'what is entered; the registers show an insolvency or execution that isn\'t '
+                'yet</div>', unsafe_allow_html=True)
+    text = ""
+    try:
+        from dashboard.lv_view import deed_text
+        docs = {}
+        if cz:
+            from database import get_lv_document
+            docs = {lid: get_lv_document(lid) or ""}
+        got = deed_text({**listing, "_market": market}, docs)
+        text = got[0] if got else ""
+    except Exception:
+        text = ""
+    found = seller_check.owners(text, market) if text else []
+    if not text:
+        st.caption("No deed read for this flat yet: verify its LV first (card → RE-VERIFY LV).")
+    elif not found:
+        st.caption("The deed's owner part couldn't be read — see 📜 Read part C on the card.")
+    for o in found:
+        st.markdown(f'<div class="brow"><span class="l">{esc(o["name"])}</span><span class="v">'
+                    f'{"company · IČO " + esc(o["ico"]) if o["ico"] else "company" if o["company"] else "person"}'
+                    f'</span></div>', unsafe_allow_html=True)
+    companies = [o for o in found if o["ico"]]
+    if companies and st.button("🏢 CHECK THE COMPANIES", key=f"ddsc_{lid}", disabled=disabled,
+                               help="ARES (Czechia) or the register of financial statements "
+                                    "(Slovakia): name, dissolution and, in Czechia, insolvency."):
+        st.session_state[f"ddsc_res_{lid}"] = [seller_check.check_company(o["ico"], market)
+                                              for o in companies]
+    for res in st.session_state.get(f"ddsc_res_{lid}", []):
+        line = (f"{res['ico']} {res['name'] or ''} — {res['source']}: {res['status']}")
+        if res["warnings"]:
+            st.error("⛔ " + line + " · " + " ".join(res["warnings"]))
+        else:
+            st.success("✅ " + line)
+    st.caption("A person: search these by hand (insolvency is free; executions cost a small "
+               "fee per lookup) — " + " · ".join(
+                   f"[{name}]({url})" for name, url in seller_check.links(market)))
