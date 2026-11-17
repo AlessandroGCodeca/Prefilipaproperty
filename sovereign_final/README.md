@@ -1016,8 +1016,13 @@ copy is undone by restoring that one. The JSON export also lists each deal's
 checklist, its documents (their contents are in the .db copy) and your alert
 rules.
 
-The copies are on the same disk as the database. Copy `backups/` somewhere
-else too — a cloud-synced folder or a USB disk (see the audit's manual tasks).
+The copies are on the same disk as the database. Set `BACKUP_COPY_DIR` in
+`.env` to a cloud-synced folder or a USB disk and each run copies the new
+backups there too (only the newest `BACKUP_KEEP` are kept there). On a Mac,
+iCloud Drive is `~/Library/Mobile Documents/com~apple~CloudDocs/Sovereign-backups`.
+If that folder can't be written (the disk isn't plugged in), the run says so
+and the local backup stands. Keep the folder private: the backups hold
+title-deed texts with owners' names.
 
 ---
 

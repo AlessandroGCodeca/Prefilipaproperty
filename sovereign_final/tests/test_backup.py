@@ -102,3 +102,40 @@ def test_restore_brings_an_old_backups_schema_up_to_date(db, dirs, tmp_path):
     cols = {r[1] for r in conn.execute("PRAGMA table_info(listings)")}
     conn.close()
     assert "lv_number" in cols
+
+
+# ── A copy off this disk (BACKUP_COPY_DIR) ───────────────────────────────────
+def test_the_backups_are_copied_to_the_folder_you_set(db, dirs, tmp_path, monkeypatch):
+    dest = tmp_path / "icloud"
+    monkeypatch.setenv("BACKUP_COPY_DIR", str(dest))
+    summary = backup.run_backup(date(2026, 10, 8))
+    assert "2 file(s) copied" in summary
+    assert sorted(p.name for p in dest.iterdir()) == ["sovereign-2026-10-08.db",
+                                                      "your-data-2026-10-08.json"]
+    assert backup.integrity_problem(str(dest / "sovereign-2026-10-08.db")) is None
+    # Nothing new, nothing copied again.
+    assert backup.copy_off_site() == f"0 file(s) copied to {dest}"
+
+
+def test_the_copy_keeps_only_the_newest_and_leaves_pre_restore_files_out(db, dirs, tmp_path,
+                                                                         monkeypatch):
+    dest = tmp_path / "usb"
+    monkeypatch.setattr(backup, "BACKUP_KEEP", 2)
+    for d in range(1, 5):
+        backup.backup_database(date(2026, 10, d))
+    (dirs / f"{backup.PRE_RESTORE_PREFIX}x.db").write_bytes(b"x")
+    backup.copy_off_site(str(dest))
+    assert sorted(p.name for p in dest.iterdir()) == ["sovereign-2026-10-03.db",
+                                                      "sovereign-2026-10-04.db"]
+
+
+def test_no_folder_no_copy_and_a_failure_never_fails_the_run(db, dirs, tmp_path, monkeypatch):
+    monkeypatch.delenv("BACKUP_COPY_DIR", raising=False)
+    assert backup.copy_off_site() == ""
+    assert "off-site" not in backup.run_backup(date(2026, 10, 8))
+    blocker = tmp_path / "file"
+    blocker.write_text("not a folder")
+    monkeypatch.setenv("BACKUP_COPY_DIR", str(blocker / "inside"))
+    summary = backup.run_backup(date(2026, 10, 9))
+    assert "off-site copy skipped" in summary
+    assert (dirs / "sovereign-2026-10-09.db").exists()

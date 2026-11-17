@@ -24,6 +24,11 @@ this computer (docker-compose.yml), outside the volume.
 
 Every new copy is opened and checked (SQLite's quick_check) before it counts.
 
+Off the disk: set BACKUP_COPY_DIR in .env to a synced folder (on a Mac,
+~/Library/Mobile Documents/com~apple~CloudDocs/Sovereign-backups is iCloud
+Drive) and each run copies the new backups there too. Keep it private: the
+backups hold title-deed texts with owners' names.
+
 In Docker: `docker compose stop scheduler`, then
 `docker compose exec dashboard python -m modules.backup restore backups/<file>.db`,
 then `docker compose start scheduler`. Restoring goes through SQLite, not a
@@ -169,15 +174,57 @@ def prune(keep: int = BACKUP_KEEP) -> int:
     return gone
 
 
+def copy_off_site(dest: str | None = None) -> str:
+    """Copy backups/ into `dest` (BACKUP_COPY_DIR: an iCloud Drive or other
+    synced folder, or a USB disk), so a disk failure or theft doesn't take the
+    only copies with the database. Only the newest BACKUP_KEEP of each kind
+    are kept there too. Returns a summary; "" when no folder is set. A failure
+    (the disk isn't plugged in, iCloud refuses) raises BackupError and never
+    touches the local backups."""
+    dest = os.path.expanduser((dest or os.getenv("BACKUP_COPY_DIR") or "").strip())
+    if not dest:
+        return ""
+    try:
+        os.makedirs(dest, exist_ok=True)
+        copied = 0
+        for path in sorted(glob.glob(os.path.join(BACKUP_DIR, "*"))):
+            name = os.path.basename(path)
+            if not os.path.isfile(path) or name.endswith(".part") or name.startswith(
+                    PRE_RESTORE_PREFIX):
+                continue
+            target = os.path.join(dest, name)
+            if (not os.path.exists(target)
+                    or os.path.getsize(target) != os.path.getsize(path)):
+                shutil.copy2(path, target + ".part")
+                os.replace(target + ".part", target)
+                copied += 1
+        for prefix in (DB_PREFIX, DATA_PREFIX):
+            old = sorted(glob.glob(os.path.join(dest, f"{prefix}*")))[:-BACKUP_KEEP]
+            for path in old:
+                os.remove(path)
+    except OSError as e:
+        raise BackupError(f"the copy to {dest} failed: {e}") from e
+    return f"{copied} file(s) copied to {dest}"
+
+
 def run_backup(day: date | None = None) -> str:
-    """The scheduler's backup step: copy, export, prune. Returns a summary."""
+    """The scheduler's backup step: copy, export, prune, and — with
+    BACKUP_COPY_DIR set — a copy off this disk. Returns a summary."""
     path, written = backup_database(day)
     export_user_data(day)
     pruned = prune()
     name = os.path.basename(path)
-    return (f"{name} {'written and checked' if written else 'already there (kept)'}, "
-            f"data exported"
-            + (f", {pruned} old backup(s) removed" if pruned else ""))
+    summary = (f"{name} {'written and checked' if written else 'already there (kept)'}, "
+               f"data exported"
+               + (f", {pruned} old backup(s) removed" if pruned else ""))
+    # A failed off-site copy never fails the run: the local backup stands.
+    try:
+        off = copy_off_site()
+        if off:
+            summary += f", {off}"
+    except BackupError as e:
+        summary += f", ⚠ off-site copy skipped ({e})"
+    return summary
 
 
 def save_live_copy() -> str | None:
