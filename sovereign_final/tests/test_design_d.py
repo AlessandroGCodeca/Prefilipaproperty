@@ -93,7 +93,8 @@ def test_today_is_the_first_tab_and_lists_what_changed(populated_db):
     btn = next(b for b in at.button if b.key and b.key.startswith("td_Starre_g1"))
     btn.click().run()
     assert at.session_state["card_g1"] is True and at.session_state["_pin"] == "g1"
-    assert at.session_state["tab_group"] == "🎯 DEALS"
+    assert at.session_state["_tabgen"] == 1
+    assert at.query_params["group"] == ["🎯 DEALS"] or at.query_params["group"] == "🎯 DEALS"
 
 
 def test_the_last_visit_is_remembered_across_sessions(populated_db):

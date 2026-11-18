@@ -109,10 +109,10 @@ def open_card(lid: str) -> None:
     put it first in its section."""
     st.session_state[f"card_{lid}"] = True
     st.session_state["_pin"] = lid
-    st.session_state["tab_group"] = "🎯 DEALS"
-    st.session_state["tab_in_TRIAGE TABLE"] = "ACTIVE SNAG LIST"
     st.query_params["group"] = "🎯 DEALS"
     st.query_params["tab"] = "ACTIVE SNAG LIST"
+    # New tab bars open on the tabs just put in the address (app.py).
+    st.session_state["_tabgen"] = st.session_state.get("_tabgen", 0) + 1
 
 
 def _row(l, v, section: str) -> None:

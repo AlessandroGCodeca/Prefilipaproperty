@@ -132,10 +132,15 @@ def _remember(param: str, key: str) -> None:
 st.markdown('<div id="tabs"></div>', unsafe_allow_html=True)
 _groups = [g for g, _ in TAB_GROUPS]
 _qp_group = st.query_params.get("group")
+# A tab bar opens on its default only when it is new: TODAY's Open button
+# (dashboard/tabs/today.open_card) bumps this number, so the bars are new
+# and open on the tab in the address.
+_gen = st.session_state.get("_tabgen", 0)
+_gkey = f"tab_group{_gen or ''}"
 _page_tab = {}
 for group, (_label, pages) in zip(
-        st.tabs(_groups, key="tab_group", default=_qp_group if _qp_group in _groups else None,
-                on_change=_remember, args=("group", "tab_group")),
+        st.tabs(_groups, key=_gkey, default=_qp_group if _qp_group in _groups else None,
+                on_change=_remember, args=("group", _gkey)),
         TAB_GROUPS):
     with group:
         _names = [n for n, _ in pages]
@@ -143,7 +148,7 @@ for group, (_label, pages) in zip(
             _page_tab[pages[0][1]] = group
             continue
         _qp_tab = st.query_params.get("tab")
-        _key = f"tab_in_{_names[0]}"
+        _key = f"tab_in_{_names[0]}{_gen or ''}"
         for tab, (_name, page) in zip(
                 st.tabs(_names, key=_key, default=_qp_tab if _qp_tab in _names else None,
                         on_change=_remember, args=("tab", _key)),
