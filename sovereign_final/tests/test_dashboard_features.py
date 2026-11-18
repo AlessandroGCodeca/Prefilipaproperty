@@ -234,9 +234,9 @@ def test_distance_colour_and_grouping():
     from dashboard.tabs.map_view import cashflow_color, cluster, cluster_cell, km_between
     # Bratislava to Košice, about 313 km in a straight line.
     assert km_between(48.1486, 17.1077, 48.7164, 21.2611) == pytest.approx(313, abs=5)
-    assert cashflow_color(150) == [0, 230, 118] and cashflow_color(0) == [150, 220, 130]
-    assert cashflow_color(-50) == [255, 145, 0] and cashflow_color(-400) == [255, 82, 82]
-    assert cashflow_color(None) == [96, 125, 139]
+    assert cashflow_color(150) == [61, 220, 151] and cashflow_color(0) == [150, 220, 130]
+    assert cashflow_color(-50) == [245, 184, 74] and cashflow_color(-400) == [255, 138, 138]
+    assert cashflow_color(None) == [139, 151, 176]
     pins = [{"lat": 49.2200, "lng": 18.7400, "rank": 1, "id": "a"},
             {"lat": 49.2210, "lng": 18.7410, "rank": 3, "id": "b"},
             {"lat": 49.2205, "lng": 18.7405, "rank": 2, "id": "c"},
@@ -271,7 +271,7 @@ def test_map_colours_groups_and_filters_by_distance(db):
     assert "3 of 3 filtered listings have coordinates" in markdown_of(at)
 
     at.radio(key="map_color").set_value("Cash flow").run()
-    assert "light green: break-even or better" in markdown_of(_ok(at))
+    assert "break-even or better" in markdown_of(_ok(at))          # the legend
     at.toggle(key="map_group").set_value(True).run()
     spec = _deck(_ok(at))
     assert "TextLayer" in spec and "2 listings here" in spec

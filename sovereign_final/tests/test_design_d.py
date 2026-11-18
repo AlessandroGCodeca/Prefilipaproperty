@@ -183,7 +183,7 @@ def test_picking_a_row_shows_the_flat_and_a_way_to_its_card(populated_db):
         md = " ".join(m.value for m in t.markdown)
         assert 'class="pick-k"' in md and "&lt;b&gt;Byt" in md
         assert "−€123" in md or "-€123" in md
-        assert any(b.key == "triage_open" for b in t.button) is has_button
+        assert any(b.key == "open_triage" for b in t.button) is has_button
 
 
 # ── D8 · the cash flow and the price, drawn ──────────────────────────────────
@@ -210,3 +210,19 @@ def test_an_open_card_draws_its_cash_flow(populated_db):
     assert not at.exception, [e.value for e in at.exception]
     charts = at.get("arrow_vega_lite_chart") or at.get("vega_lite_chart")
     assert charts
+
+
+# ── D9 · the map: a legend, its list, a picked pin ───────────────────────────
+def test_the_map_has_a_legend_and_a_list(populated_db):
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    md = " ".join(m.value for m in at.markdown)
+    assert 'class="lg"' in md and "faded: area, not street" in md
+    assert any("Class" in d.value.columns and "Surplus" in d.value.columns for d in at.dataframe)
+
+
+def test_the_legend_follows_the_colour_mode():
+    from dashboard.tabs.map_view import legend_html
+    assert "≥ +€100 a month" in legend_html(True) and "Green" not in legend_html(True)
+    assert "Green: ≥20% under market" in legend_html(False)
+    assert "rgb(61,220,151)" in legend_html(False)

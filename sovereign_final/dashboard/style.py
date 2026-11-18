@@ -91,6 +91,12 @@ section[data-testid="stSidebar"] {
 .pick-k b { font-family:var(--mono); font-size:1.4rem; color:var(--text); }
 .pick-k .neg { border-color:var(--bad-line); } .pick-k .neg b { color:var(--bad); }
 
+/* The map's legend (D9) */
+.lg { display:flex; flex-wrap:wrap; gap:6px 14px; margin:6px 0 10px; font-size:0.78rem; color:var(--muted); }
+.lg span { display:inline-flex; align-items:center; gap:6px; }
+.lg i { width:11px; height:11px; border-radius:50%; display:inline-block; }
+.lg i.faded { background:var(--muted); opacity:.45; }
+
 /* TODAY (D1) */
 .td-h { font-size:0.95rem; font-weight:600; color:var(--text); margin:18px 0 6px; }
 .td-row { padding:2px 0; }

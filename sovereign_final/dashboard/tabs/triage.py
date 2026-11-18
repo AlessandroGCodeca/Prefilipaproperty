@@ -39,7 +39,7 @@ def triage_csv(df) -> bytes:
     return safe.to_csv(index=False).encode("utf-8-sig")
 
 
-def render_summary(l, v) -> None:
+def render_summary(l, v, ctx: str = "triage") -> None:
     """A picked row's flat: its verdict and three key figures, and a button to
     its full card in ACTIVE SNAG LIST (a card can't be drawn twice on a page:
     its boxes would clash)."""
@@ -64,7 +64,7 @@ def render_summary(l, v) -> None:
     cls = (l.get("cf_class") or l.get("classification") or "").upper()
     if cls in ("GREEN", "YELLOW"):
         from dashboard.tabs.today import open_card
-        st.button("Open its full card", key="triage_open", on_click=open_card, args=(l["id"],))
+        st.button("Open its full card", key=f"open_{ctx}", on_click=open_card, args=(l["id"],))
     else:
         st.caption("A WHITE flat has no card: ANALYSIS → WHAT-IF / TAX gives its full breakdown.")
 
