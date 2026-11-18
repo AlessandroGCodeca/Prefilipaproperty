@@ -54,3 +54,27 @@ def test_a_flat_can_be_starred_and_unstarred(populated_db):
     assert at.button(key="star_g1").label == "★ Starred"
     at.button(key="star_g1").click().run()
     assert "g1" not in populated_db.get_starred()
+
+
+# ── D5 · filters and order beside the list ───────────────────────────────────
+def _snag_titles(at):
+    return [e.label for e in at.expander if e.label.startswith(("🟢", "🟡"))]
+
+
+def test_quick_filters_narrow_the_list_and_the_order_changes(populated_db):
+    at = run_app()
+    every = _snag_titles(at)
+    assert every
+    at.pills(key="quick_filters").set_value(["Cash-flow positive"]).run()
+    assert not at.exception, [e.value for e in at.exception]
+    positive = _snag_titles(at)
+    assert len(positive) <= len(every)
+    assert all("+€" in t or "+" in t.split("·")[-1] for t in positive)
+    at.pills(key="quick_filters").set_value(["Starred"]).run()
+    assert _snag_titles(at) == []
+    populated_db.set_starred("g1", True)
+    at.run()
+    assert len(_snag_titles(at)) == 1
+    at.pills(key="quick_filters").set_value([]).run()
+    at.selectbox(key="list_order").set_value("Lowest price").run()
+    assert not at.exception, [e.value for e in at.exception]

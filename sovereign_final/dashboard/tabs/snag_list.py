@@ -51,6 +51,46 @@ def render_white_table(whites, v) -> None:
                "the full breakdown, or track it from WORKFLOW → DEAL PIPELINE.")
 
 
+QUICK_FILTERS = ("Starred", "Cash-flow positive", "Price cut", "Grade A–B", "LV clean")
+SORTS = ("Best value", "Biggest discount", "Highest surplus", "Lowest price", "Newest")
+
+
+def quick_filter(listings, picked, v, starred=frozenset()):
+    """The chips above the list (D5), on top of the sidebar's filters: each
+    one picked narrows the list."""
+    from engine.financial import compute_deal_score
+    out = []
+    for l in listings:
+        if "Starred" in picked and l.get("id") not in starred:
+            continue
+        if "Cash-flow positive" in picked and (v.surplus(l) is None or v.cf_negative(l)):
+            continue
+        if "Price cut" in picked and not (((l.get("_ph") or {}).get("change_pct") or 0) < 0):
+            continue
+        if "Grade A–B" in picked and compute_deal_score(l)[1] not in ("A", "B"):
+            continue
+        if "LV clean" in picked and (l.get("lv_status") or "").upper() not in ("PASS", "CLEAN"):
+            continue
+        out.append(l)
+    return out
+
+
+def sort_listings(listings, how, v):
+    """The list in the order picked; "Best value" keeps the page's own order
+    (deepest sensible discount first)."""
+    if how == "Biggest discount":
+        return sorted(listings, key=lambda l: l.get("market_discount") or -9, reverse=True)
+    if how == "Highest surplus":
+        return sorted(listings, key=lambda l: v.surplus(l) if v.surplus(l) is not None
+                      else -1e12, reverse=True)
+    if how == "Lowest price":
+        return sorted(listings, key=lambda l: l.get("_price_eur") or l.get("price_eur") or 9e12)
+    if how == "Newest":
+        return sorted(listings, key=lambda l: l.get("scraped_at") or "",
+                      reverse=True)
+    return listings
+
+
 def render(v) -> None:
     """The ACTIVE SNAG LIST tab."""
     _cf_negative = v.cf_negative
@@ -79,6 +119,27 @@ def render(v) -> None:
             "📱 Compact cards", key="compact_cards",
             help="For a phone: each deal as its title, price, class and monthly surplus, "
                  "with one button that opens the listing. Switch it off for the full cards.")
+        # D5: filters and the order right above the cards, not only in the
+        # sidebar (hidden on a phone).
+        f1, f2 = st.columns([3, 1])
+        with f1:
+            picked = st.pills("Show only", QUICK_FILTERS, selection_mode="multi",
+                              key="quick_filters", label_visibility="collapsed") or []
+        with f2:
+            how = st.selectbox("Order", SORTS, key="list_order", label_visibility="collapsed")
+        if picked or how != SORTS[0]:
+            starred = frozenset()
+            if "Starred" in picked and not v.using_demo:
+                from database import get_starred
+                starred = frozenset(get_starred())
+            before = len(greens) + len(yellows)
+            greens = sort_listings(quick_filter(greens, picked, v, starred), how, v)
+            yellows = sort_listings(quick_filter(yellows, picked, v, starred), how, v)
+            if picked:
+                whites = quick_filter(whites, picked, v, starred)
+                shown = len(greens) + len(yellows)
+                st.caption(f"{shown} of {before} green and yellow deals match "
+                           f"{', '.join(picked).lower()}.")
         if greens:
             st.markdown(f'<div class="muted" style="margin:14px 0 8px">🟢 GREEN — ≥20% BELOW MARKET ({len(greens)}){_neg_note(greens)}</div>', unsafe_allow_html=True)
             render_cards(greens, "green", v, compact)
