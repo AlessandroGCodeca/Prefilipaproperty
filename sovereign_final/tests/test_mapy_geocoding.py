@@ -5,8 +5,13 @@ documented shape, and the providers are tried in the right order."""
 
 import pytest
 
+import tests.test_app_smoke as smoke
 from modules import location_iq as liq
 from modules import risk_data as rd
+
+db = smoke.db
+populated_db = smoke.populated_db
+_isolated_runs = smoke._isolated_runs
 
 TYNSKA = {"items": [{
     "name": "Týnská ulička 610/7", "label": "Adresa",
@@ -154,13 +159,38 @@ def test_the_key_is_masked_like_the_others(monkeypatch):
     assert "mapy-key-0123456789" not in redact.redact("x apikey=mapy-key-0123456789")
 
 
+def test_the_credit_is_the_clickable_green_logo_at_least_20px(monkeypatch):
+    from dashboard import legal
+    monkeypatch.delenv("MAPY_API_KEY", raising=False)
+    assert legal.mapy_credit_html() == ""
+    monkeypatch.setenv("MAPY_API_KEY", "mapy-key-0123456789")
+    html = legal.mapy_credit_html(height=8)               # never smaller than the terms allow
+    assert 'href="https://mapy.com/"' in html
+    assert 'src="https://api.mapy.com/img/api/logo_green.svg"' in html
+    assert "height:20px" in html and "Search by Mapy.com" in html
+    assert "mapy-key-0123456789" not in html
+    assert "height:30px" in legal.mapy_credit_html(height=30)
+
+
 def test_the_page_credits_mapy_when_its_key_is_set(monkeypatch):
     import tests.test_app_smoke as smoke
     monkeypatch.setenv("MAPY_API_KEY", "mapy-key-0123456789")
     at = smoke.AppTest.from_file(smoke.APP, default_timeout=120).run()
     md = " ".join(m.value for m in at.markdown)
-    assert "Address search by" in md and "https://mapy.com" in md
+    assert "logo_green.svg" in md and "Powered by Mapy.com" in md
     assert "mapy-key-0123456789" not in md
     monkeypatch.delenv("MAPY_API_KEY")
     at = smoke.AppTest.from_file(smoke.APP, default_timeout=120).run()
-    assert "Address search by" not in " ".join(m.value for m in at.markdown)
+    assert "logo_green.svg" not in " ".join(m.value for m in at.markdown)
+
+
+def test_the_map_search_shows_the_credit_beside_its_results(populated_db, monkeypatch):
+    import tests.test_app_smoke as smoke
+    monkeypatch.setenv("MAPY_API_KEY", "mapy-key-0123456789")
+    from dashboard.tabs import map_view
+    monkeypatch.setattr(map_view, "_find_point", lambda text, market: ((48.15, 17.11), ""))
+    at = smoke.AppTest.from_file(smoke.APP, default_timeout=120).run()
+    at.text_input(key="map_near").input("Týnská 7, Praha").run()
+    assert not at.exception, [e.value for e in at.exception]
+    md = [m.value for m in at.markdown if "logo_green.svg" in m.value]
+    assert len(md) >= 2                                   # the map's search and the footer
