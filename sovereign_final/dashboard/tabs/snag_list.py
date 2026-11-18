@@ -140,6 +140,11 @@ def render(v) -> None:
                 shown = len(greens) + len(yellows)
                 st.caption(f"{shown} of {before} green and yellow deals match "
                            f"{', '.join(picked).lower()}.")
+        # A card opened from TODAY comes first in its section.
+        pin = st.session_state.get("_pin")
+        if pin:
+            greens = sorted(greens, key=lambda l: l.get("id") != pin)
+            yellows = sorted(yellows, key=lambda l: l.get("id") != pin)
         if greens:
             st.markdown(f'<div class="muted" style="margin:14px 0 8px">🟢 GREEN — ≥20% BELOW MARKET ({len(greens)}){_neg_note(greens)}</div>', unsafe_allow_html=True)
             render_cards(greens, "green", v, compact)

@@ -45,7 +45,7 @@ from dashboard import actions, diagnostics, legal, overview, sidebar, style, vie
 from dashboard.login import logout_button, require_password  # noqa: E402
 from dashboard.tabs import (  # noqa: E402
     alert_rules, auctions, backtest, close, compare, deal_pipeline, lv_todo, map_view, portfolio,
-    rejected, rent_comps, satellite, snag_list, tax_rates, triage, what_if,
+    rejected, rent_comps, satellite, snag_list, tax_rates, today, triage, what_if,
 )
 
 st.set_page_config(
@@ -104,6 +104,8 @@ overview.render(v, sb)
 # Three groups, each with its own tabs: a dozen in one row overflowed at
 # 1440 px and hid the last behind an arrow.
 TAB_GROUPS = (
+    # D1: what changed and what needs you, first.
+    ("🏠 TODAY",    (("TODAY", today),)),
     ("🎯 DEALS",    (("TRIAGE TABLE", triage), ("ACTIVE SNAG LIST", snag_list),
                      ("MAP", map_view), ("SATELLITE VIEWER", satellite),
                      ("AUCTIONS", auctions))),
@@ -115,7 +117,7 @@ TAB_GROUPS = (
                      ("ALERTS", alert_rules), ("PORTFOLIO", portfolio))),
 )
 # Drawn in the order the tabs were always drawn in, whatever group holds them.
-DRAW_ORDER = (triage, snag_list, map_view, what_if, deal_pipeline, rejected, lv_todo,
+DRAW_ORDER = (today, triage, snag_list, map_view, what_if, deal_pipeline, rejected, lv_todo,
               rent_comps, tax_rates, satellite, close, compare, alert_rules, auctions, portfolio,
               backtest)
 
@@ -137,6 +139,9 @@ for group, (_label, pages) in zip(
         TAB_GROUPS):
     with group:
         _names = [n for n, _ in pages]
+        if len(pages) == 1:                     # TODAY: one page, no inner tabs
+            _page_tab[pages[0][1]] = group
+            continue
         _qp_tab = st.query_params.get("tab")
         _key = f"tab_in_{_names[0]}"
         for tab, (_name, page) in zip(

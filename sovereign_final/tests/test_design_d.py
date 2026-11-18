@@ -78,3 +78,67 @@ def test_quick_filters_narrow_the_list_and_the_order_changes(populated_db):
     at.pills(key="quick_filters").set_value([]).run()
     at.selectbox(key="list_order").set_value("Lowest price").run()
     assert not at.exception, [e.value for e in at.exception]
+
+
+# ── D1 · TODAY first; D11 · the setup checklist ──────────────────────────────
+def test_today_is_the_first_tab_and_lists_what_changed(populated_db):
+    populated_db.set_starred("g1", True)
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.tabs[0].label == "🏠 TODAY"
+    md = " ".join(m.value for m in at.markdown)
+    assert "Since your last visit" in md
+    assert 'class="td-h">Starred' in md
+    # Each green or yellow line opens its card in DEALS.
+    btn = next(b for b in at.button if b.key and b.key.startswith("td_Starre_g1"))
+    btn.click().run()
+    assert at.session_state["card_g1"] is True and at.session_state["_pin"] == "g1"
+    assert at.session_state["tab_group"] == "🎯 DEALS"
+
+
+def test_the_last_visit_is_remembered_across_sessions(populated_db):
+    from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 11, 18, 10, 0, tzinfo=timezone.utc)
+    conn = populated_db.get_conn()
+    conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)")
+    conn.execute("INSERT OR REPLACE INTO app_state VALUES ('last_visit', ?)",
+                 ((now - timedelta(days=2)).isoformat(),))
+    conn.commit()
+    conn.close()
+    at = run_app()
+    assert at.session_state["_since"] == now - timedelta(days=2)
+
+
+def test_sections_pick_new_deals_cuts_on_followed_flats_and_stale_lv():
+    from datetime import datetime, timezone
+    from dashboard.tabs.today import sections
+
+    class V:
+        surplus = staticmethod(lambda l: l.get("s"))
+        cf_negative = staticmethod(lambda l: (l.get("s") or 0) < 0)
+
+    since = datetime(2026, 11, 10, tzinfo=timezone.utc)
+    ls = [
+        {"id": "new", "classification": "GREEN", "scraped_at": "2026-11-15T08:00:00+00:00"},
+        {"id": "old", "classification": "GREEN", "scraped_at": "2026-10-01T08:00:00+00:00"},
+        {"id": "cut", "classification": "WHITE", "scraped_at": "2026-10-01",
+         "_stage": {"stage": "OFFER"}, "lv_status": "PASS", "lv_checked_at": None,
+         "_ph": {"change_pct": -0.05, "history": [("2026-11-01", 1), ("2026-11-12", 0.95)]}},
+    ]
+    got = {t: [l["id"] for l in s] for t, _h, s in sections(ls, V(), since, {"old"})}
+    assert got["Starred"] == ["old"]
+    assert got["New deals"] == ["new"]
+    assert got["Price cuts on flats you follow"] == ["cut"]
+    assert got["Title deed to check"] == ["cut"]          # no check date on record
+
+
+def test_the_setup_checklist_lists_what_is_missing(populated_db, monkeypatch):
+    for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "ANTHROPIC_API_KEY", "MAPY_API_KEY",
+              "HEALTHCHECK_URL", "BACKUP_COPY_DIR", "GOOGLE_PLACES_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    at = run_app()
+    setup = next(e for e in at.expander if e.label.startswith("Setup ·"))
+    assert "of 9 done" in setup.label
+    from dashboard.tabs.today import setup_items
+    names = {w for w, ok, _ in setup_items() if not ok}
+    assert {"Telegram alerts", "Daily-run watcher", "Mapy.com addresses"} <= names

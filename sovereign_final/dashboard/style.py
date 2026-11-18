@@ -83,6 +83,13 @@ section[data-testid="stSidebar"] {
 /* The card's quiet line of facts under its action chips (D2). */
 .facts { font-size:0.8rem; color:var(--muted); margin-top:6px; }
 
+/* TODAY (D1) */
+.td-h { font-size:0.95rem; font-weight:600; color:var(--text); margin:18px 0 6px; }
+.td-row { padding:2px 0; }
+.td-t { color:var(--text); font-size:0.92rem; }
+.td-m { color:var(--muted); font-size:0.8rem; font-family:var(--mono); margin-top:2px; }
+.td-good { color:var(--good); } .td-bad { color:var(--bad); }
+
 /* Breakdown rows */
 .brow { display:flex; justify-content:space-between; padding:6px 0;
         border-bottom:1px solid var(--line-soft);

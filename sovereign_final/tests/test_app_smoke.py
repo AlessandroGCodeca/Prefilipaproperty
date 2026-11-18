@@ -113,7 +113,7 @@ def test_empty_database_renders_the_demo_view(db):
 PAGE_TABS = ["TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER", "AUCTIONS",
              "WHAT-IF / TAX", "COMPARE", "RENT COMPS", "TAX RATES", "BACKTEST", "DEAL PIPELINE",
              "LV TO-DO", "REJECTED", "ONE-CLICK CLOSE", "ALERTS", "PORTFOLIO"]
-GROUP_TABS = ["🎯 DEALS", "📊 ANALYSIS", "🗂 WORKFLOW"]
+GROUP_TABS = ["🏠 TODAY", "🎯 DEALS", "📊 ANALYSIS", "🗂 WORKFLOW"]
 
 
 def tab_labels(at):
@@ -131,7 +131,7 @@ def test_the_tabs_are_grouped(populated_db):
     at = run_app()
     labels = tab_labels(at)
     # Each group's own tabs follow it.
-    assert labels == ["🎯 DEALS", "TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER",
+    assert labels == ["🏠 TODAY", "🎯 DEALS", "TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER",
                       "AUCTIONS", "📊 ANALYSIS", "WHAT-IF / TAX", "COMPARE", "RENT COMPS",
                       "TAX RATES", "BACKTEST", "🗂 WORKFLOW", "DEAL PIPELINE", "LV TO-DO",
                       "REJECTED", "ONE-CLICK CLOSE", "ALERTS", "PORTFOLIO"]
