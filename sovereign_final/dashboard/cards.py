@@ -141,75 +141,100 @@ def render_card(l, v):
     if not card.open:
         return
     with card:
-        # Row 1: key metrics
-        c1,c2,c3,c4,c5,c6 = st.columns(6)
-        with c1:
-            st.metric(T("Price"),    amt(l, price),
-                      help=(f"≈ {markets.format_money(l.get('_price_eur'))} "
-                            f"({markets.fx_note()})" if cz else None))
-            st.metric(T("Size"),     f"{size:.0f} m²")
-        with c2:
-            if cz:
-                rent_help = (("Živé srovnání z pronájmů" if l.get("rent_source") == "live"
-                              else "Výchozí Kč/m² (engine.rent_cz)")
-                             + (f" pro '{l['rent_key']}'" if l.get("rent_key") else ""))
-            else:
-                rent_help = (("Live prenájom comps" if l.get("rent_source") == "live"
-                              else "Published baseline €/m² (config.RENT_PER_M2)")
-                             + (f" for '{l['rent_key']}'" if l.get("rent_key") else ""))
-            st.metric(T("Est. Rent"),  amt(l, rent, "/mo"), help=rent_help)
-            st.metric(T("Total Costs"), amt(l, total_c, "/mo") if total_c else "—")
-        with c3:
-            surplus_str = sgn(l, surplus)
-            st.metric(T("Surplus/mo"),   surplus_str)
-            st.metric(T("Self-Fund"),    fp(ratio))
-        with c4:
-            st.metric(T("Cap Rate"),   fp(l.get("cap_rate")))
-            st.metric(T("CoC Return"), fp(l.get("cash_on_cash")),
-                      help=(f"Výnos na vložený kapitál při doporučené struktuře ({opt})."
-                            if cz else
-                            f"Cash-on-cash under the structure recommended ({opt})."))
-            st.metric(T("IRR 10y"),    _pct_or_dash(l.get("irr_sro") if show_sro else l.get("irr_personal")),
-                      help=("IRR za dobu držení se zhodnocením, náklady prodeje a daní ze "
-                            "zisku — viz záložka WHAT-IF." if cz else
-                            "Hold-period IRR with appreciation, exit costs and tax on the "
-                            "gain — see the WHAT-IF tab."))
-        with c5:
-            my, mg = l.get("max_price_yellow"), l.get("max_price_green")
-            st.metric(T("Max offer 🟡"), amt(l, my) if my else "—",
-                      delta=(f"{my / price - 1:+.1%} vs ask" if my and price else None),
-                      help=("Nejvyšší cena, při které je byt stále YELLOW (≥10 % pod "
-                            "regionálním mediánem Kč/m²)." if cz else
-                            "Highest price at which this is still YELLOW "
-                            "(≥10% below the regional median €/m²)."))
-            st.metric(T("Max offer 🟢"), amt(l, mg) if mg else "—",
-                      help=("Nejvyšší cena, při které je byt GREEN (≥20 % pod regionálním "
-                            "mediánem Kč/m²)." if cz else
-                            "Highest price at which this is GREEN "
-                            "(≥20% below the regional median €/m²)."))
-        with c6:
-            median_m2 = l.get("regional_median_m2")
-            from engine.regional_prices import benchmark_note
-            # Direction in the label, number in the value: "45% below market"
-            # doesn't fit a 6-column metric and was cut to "45% b…".
-            unit = "Kč/m²" if cz else "€/m²"
-            st.metric(T("vs Market") if disc is None else
-                      (T("Below market") if disc >= 0 else T("Above market")),
-                      "—" if disc is None else f"{abs(disc) * 100:.0f}%",
-                      help=(f"Asking {unit} vs {amt(l, median_m2)}/m² "
-                            f"(≈ {amt(l, median_m2 * size)} for {size:.0f} m²) — "
-                            f"{benchmark_note(district or '', l.get('rooms'), **mkw(l))}")
-                      if median_m2 and size else "No regional median for this district.")
-            st.metric(T("Days tracked"), "—" if l.get("_dom") is None else f"{l['_dom']}",
-                      help="Days since this dashboard first saw the flat on any "
-                           "portal — not the portal's posting date, so a listing "
-                           "that was up long before the first scrape reads young.")
-            st.metric(T("Location"),   _of100(l.get("location_score")))
-
         # Composite deal grade (financial + location + energy + risk)
         from engine.financial import compute_deal_score
         deal_score, deal_grade = compute_deal_score(l)
         grade_css = {"A": "bg", "B": "bs", "C": "by", "D": "bw"}.get(deal_grade, "bw")
+
+        # The verdict first: what the flat is, in a sentence (dashboard/verdict.py).
+        from dashboard.verdict import days_between, verdict_html
+        cut_days = (days_between(ph["history"][0][0], ph["history"][-1][0])
+                    if ph and ph.get("history") else None)
+        st.markdown(verdict_html(deal_grade, deal_score, disc, surplus, struct,
+                                 lambda v: amt(l, v), cz,
+                                 cut_pct=ph.get("change_pct") if ph else None,
+                                 cut_days=cut_days), unsafe_allow_html=True)
+
+        lid = l.get("id")
+        # Key figures: price, surplus and the highest offer, big.
+        my, mg = l.get("max_price_yellow"), l.get("max_price_green")
+        with st.container(key=f"kf_{lid}"):
+            k1, k2, k3 = st.columns(3)
+            with k1:
+                st.metric(T("Price"), amt(l, price),
+                          help=(f"≈ {markets.format_money(l.get('_price_eur'))} "
+                                f"({markets.fx_note()})" if cz else None))
+            with k2:
+                with st.container(key=f"kfneg_{lid}" if (surplus or 0) < 0 else f"kfpos_{lid}"):
+                    st.metric(T("Surplus/mo"), sgn(l, surplus))
+            with k3:
+                st.metric(T("Max offer 🟡"), amt(l, my) if my else "—",
+                          delta=(f"{my / price - 1:+.1%} vs ask" if my and price else None),
+                          help=("Nejvyšší cena, při které je byt stále YELLOW (≥10 % pod "
+                                "regionálním mediánem Kč/m²)." if cz else
+                                "Highest price at which this is still YELLOW "
+                                "(≥10% below the regional median €/m²)."))
+
+        if cz:
+            rent_help = (("Živé srovnání z pronájmů" if l.get("rent_source") == "live"
+                          else "Výchozí Kč/m² (engine.rent_cz)")
+                         + (f" pro '{l['rent_key']}'" if l.get("rent_key") else ""))
+        else:
+            rent_help = (("Live prenájom comps" if l.get("rent_source") == "live"
+                          else "Published baseline €/m² (config.RENT_PER_M2)")
+                         + (f" for '{l['rent_key']}'" if l.get("rent_key") else ""))
+        median_m2 = l.get("regional_median_m2")
+        from engine.regional_prices import benchmark_note
+        unit = "Kč/m²" if cz else "€/m²"
+        # Every other figure, smaller, in two rows.
+        with st.container(key=f"sf_{lid}"):
+            r1 = st.columns(6)
+            with r1[0]:
+                st.metric(T("Est. Rent"), amt(l, rent, "/mo"), help=rent_help)
+            with r1[1]:
+                st.metric(T("Total Costs"), amt(l, total_c, "/mo") if total_c else "—")
+            with r1[2]:
+                st.metric(T("Self-Fund"), fp(ratio))
+            with r1[3]:
+                st.metric(T("Cap Rate"), fp(l.get("cap_rate")))
+            with r1[4]:
+                st.metric(T("CoC Return"), fp(l.get("cash_on_cash")),
+                          help=(f"Výnos na vložený kapitál při doporučené struktuře ({opt})."
+                                if cz else
+                                f"Cash-on-cash under the structure recommended ({opt})."))
+            with r1[5]:
+                st.metric(T("IRR 10y"),
+                          _pct_or_dash(l.get("irr_sro") if show_sro else l.get("irr_personal")),
+                          help=("IRR za dobu držení se zhodnocením, náklady prodeje a daní ze "
+                                "zisku — viz záložka WHAT-IF." if cz else
+                                "Hold-period IRR with appreciation, exit costs and tax on the "
+                                "gain — see the WHAT-IF tab."))
+            r2 = st.columns(6)
+            with r2[0]:
+                st.metric(T("Max offer 🟢"), amt(l, mg) if mg else "—",
+                          help=("Nejvyšší cena, při které je byt GREEN (≥20 % pod regionálním "
+                                "mediánem Kč/m²)." if cz else
+                                "Highest price at which this is GREEN "
+                                "(≥20% below the regional median €/m²)."))
+            with r2[1]:
+                # Direction in the label, number in the value: "45% below market"
+                # doesn't fit a metric and was cut to "45% b…".
+                st.metric(T("vs Market") if disc is None else
+                          (T("Below market") if disc >= 0 else T("Above market")),
+                          "—" if disc is None else f"{abs(disc) * 100:.0f}%",
+                          help=(f"Asking {unit} vs {amt(l, median_m2)}/m² "
+                                f"(≈ {amt(l, median_m2 * size)} for {size:.0f} m²) — "
+                                f"{benchmark_note(district or '', l.get('rooms'), **mkw(l))}")
+                          if median_m2 and size else "No regional median for this district.")
+            with r2[2]:
+                st.metric(T("Days tracked"), "—" if l.get("_dom") is None else f"{l['_dom']}",
+                          help="Days since this dashboard first saw the flat on any "
+                               "portal — not the portal's posting date, so a listing "
+                               "that was up long before the first scrape reads young.")
+            with r2[3]:
+                st.metric(T("Location"), _of100(l.get("location_score")))
+            with r2[4]:
+                st.metric(T("Size"), f"{size:.0f} m²")
 
         # Badges
         lv_risk = (l.get("lv_risk_level") or "").upper()
@@ -276,7 +301,7 @@ def render_card(l, v):
                 why = (f"the national default €{_RENT['default']:.2f}/m² — this town is in no rent table"
                        if fallback == "default" else
                        f"the {esc(l['rent_key'].title())} median of its towns — no figure for this town")
-            st.markdown(f'<div class="muted" style="margin-top:6px;color:#ffd740">⚠ Rent uses '
+            st.markdown(f'<div class="muted" style="margin-top:6px;color:#f5b84a">⚠ Rent uses '
                         f'{why}. Check local rents before trusting the surplus.</div>',
                         unsafe_allow_html=True)
         # This flat type's own rental comps and how long such ads stay up
