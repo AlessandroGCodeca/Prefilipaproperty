@@ -15,3 +15,24 @@ textColor = "#bcc8e0"
 # options; the menu keeps Rerun, Settings and Print.
 [client]
 toolbarMode = "minimal"
+# Errors: the browser shows the kind of error and a generic message, never its
+# text or traceback (they can carry a URL with a key, a file path or a
+# person's name from a deed); the terminal keeps the full error. No "Ask
+# Google / ChatGPT" links, which would send an error's text to them.
+showErrorDetails = "type"
+showErrorLinks = false
+
+[browser]
+# Streamlit's own usage statistics stay off: a visitor's browser would report
+# to a third party, which needs consent under the ePrivacy rules once other
+# people use the dashboard.
+gatherUsageStats = false
+
+[server]
+# Uploads: a deal document is at most 15 MB and a scan Claude reads at most
+# 20 MB, so nothing larger is accepted (Streamlit's default is 200 MB, held in
+# memory while it uploads).
+maxUploadSize = 25
+# Both on by default; set here so they can't be switched off by accident.
+enableXsrfProtection = true
+enableCORS = true

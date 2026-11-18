@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.fmt import (
-    _lv_state, _pct_or_dash, _risk_label, amt, esc, last_seen_label, sgn,
+    _lv_state, _pct_or_dash, _risk_label, amt, esc, last_seen_label, safe_href, sgn,
 )
 
 MAX_COMPARED = 4
@@ -120,6 +120,6 @@ def render(v) -> None:
                                 **{c: st.column_config.TextColumn(width="medium")
                                    for c in df.columns[1:]}})
     st.markdown('<div class="muted">' + " · ".join(
-        f'<a href="{esc(l.get("url") or "")}" target="_blank">'
+        f'<a href="{safe_href(l.get("url"))}" target="_blank">'
         f'{esc((l.get("title") or l.get("district") or "?")[:34])} ↗</a>'
         for l in chosen if l.get("url")) + "</div>", unsafe_allow_html=True)

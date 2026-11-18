@@ -2,10 +2,14 @@
 dashboard/login.py — the password gate (DASHBOARD_PASSWORD).
 """
 
+import logging
+import os
 import threading
 import time
 
 import streamlit as st
+
+log = logging.getLogger("sovereign")
 
 # Wrong passwords allowed within LOCKOUT_S before the gate locks for
 # LOCKOUT_S. Counted for the whole dashboard process, not per browser tab: a
@@ -15,6 +19,14 @@ MAX_TRIES = 5
 LOCKOUT_S = 15 * 60
 # Every wrong password also waits this long before the page answers.
 WRONG_PASSWORD_DELAY_S = 1.0
+
+# A session that has been idle this long asks for the password again
+# (SESSION_IDLE_MINUTES; 0 = never): a phone or laptop left unlocked with the
+# dashboard open doesn't stay logged in for good.
+DEFAULT_IDLE_MIN = 60
+# Shorter passwords get a warning after login: the gate slows guessing to five
+# tries in 15 minutes, which a short or common password doesn't survive long.
+MIN_PASSWORD_LEN = 12
 
 _lock = threading.Lock()
 _fails: list[float] = []          # times of the recent wrong passwords
@@ -54,6 +66,32 @@ def _record_failure(now: float) -> None:
             _fails.clear()
 
 
+def idle_limit_s() -> float:
+    """Seconds of inactivity before the password is asked again; 0 = never."""
+    try:
+        minutes = float(os.getenv("SESSION_IDLE_MINUTES", DEFAULT_IDLE_MIN))
+    except ValueError:
+        minutes = DEFAULT_IDLE_MIN
+    return max(minutes, 0.0) * 60
+
+
+def weak_password(password: str) -> bool:
+    return 0 < len(password or "") < MIN_PASSWORD_LEN
+
+
+def log_out() -> None:
+    """End this browser session's login."""
+    for k in ("_authed", "_last_active"):
+        st.session_state.pop(k, None)
+
+
+def logout_button() -> None:
+    """🔒 LOG OUT in the sidebar, shown only when a password is set."""
+    from config import DASHBOARD_PASSWORD
+    if DASHBOARD_PASSWORD and st.session_state.get("_authed"):
+        st.sidebar.button("🔒 LOG OUT", key="logout", on_click=log_out, width="stretch")
+
+
 def require_password() -> None:
     """Gate the page behind DASHBOARD_PASSWORD when one is set. Without one the
     dashboard is open to anyone who can reach its port — fine on 127.0.0.1,
@@ -61,9 +99,24 @@ def require_password() -> None:
     notes and the buyer names in contract drafts."""
     import hmac
     from config import DASHBOARD_PASSWORD
-    if not DASHBOARD_PASSWORD or st.session_state.get("_authed"):
+    if not DASHBOARD_PASSWORD:
         return
+    if st.session_state.get("_authed"):
+        limit, now = idle_limit_s(), _now()
+        last = st.session_state.get("_last_active", now)
+        if limit and now - last > limit:
+            log_out()
+            st.session_state["_timed_out"] = True
+        else:
+            st.session_state["_last_active"] = now
+            if weak_password(DASHBOARD_PASSWORD) and not st.session_state.get("_weak_warned"):
+                st.session_state["_weak_warned"] = True
+                st.warning(f"DASHBOARD_PASSWORD is shorter than {MIN_PASSWORD_LEN} characters. "
+                           "Use a longer one in .env (a few unrelated words), then restart.")
+            return
     st.markdown('<div class="wordmark">SOVEREIGN</div>', unsafe_allow_html=True)
+    if st.session_state.pop("_timed_out", False):
+        st.info("Logged out after a while without activity. Enter the password again.")
     with st.form("login"):
         typed = st.text_input("Password", type="password", key="login_pw")
         entered = st.form_submit_button("ENTER")
@@ -76,10 +129,16 @@ def require_password() -> None:
             with _lock:
                 _fails.clear()
             st.session_state["_authed"] = True
+            st.session_state["_last_active"] = _now()
             st.rerun()
         _record_failure(_now())
+        # The attempt is logged, never what was typed.
+        log.warning("Dashboard login: wrong password")
         time.sleep(WRONG_PASSWORD_DELAY_S)      # slows guessing
         wait = _locked_for(_now())
         st.error(f"Wrong password. Too many tries: locked for {_minutes(wait)} min."
                  if wait else "Wrong password.")
+    # Who runs the dashboard and what happens to data: readable before login.
+    from dashboard import legal
+    legal.render_footer()
     st.stop()

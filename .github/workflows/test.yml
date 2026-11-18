@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# The jobs only read the code: the token GitHub hands them can't push, open
+# releases or change settings, even if a dependency's install script tried.
+permissions:
+  contents: read
+
 jobs:
   test:
     # Windows too: the project is run from a Windows PC (START.bat), and a

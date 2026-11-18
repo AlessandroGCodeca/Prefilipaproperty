@@ -88,3 +88,23 @@ def render_part_c(l, lv_docs=None) -> None:
     when = (f" · fetched {fetched[:10]}" + (f" ({age} days ago)" if age else "")) if fetched else ""
     st.markdown(f'<div class="muted">{LEGEND_CZ if cz else LEGEND}{esc(when)}</div>{html}',
                 unsafe_allow_html=True)
+
+
+def render_erase(l, disabled: bool = False) -> None:
+    """🗑 Erase the owners' data of one flat: the deed text, the cadastre's
+    answer, Claude's reading and a draft's seller name (database.
+    erase_owner_data). For a request from an owner or seller, or a deal you
+    dropped; the LV verdict stays."""
+    lid = l.get("id")
+    # A toggle, not an expander: the card itself is one, and they don't nest.
+    if st.toggle("🗑 Erase owners' data for this flat (GDPR)", key=f"erase_t_{lid}"):
+        st.caption("Deletes the stored deed text, the cadastre's answer, Claude's reading of it, "
+                   "the execution and court details, and the seller's name in a contract draft. "
+                   "The LV verdict stays. Backups keep the old data until they are pruned "
+                   "(BACKUP_KEEP days). An owner who asks you to erase their data: do this, "
+                   "then reply within a month.")
+        sure = st.checkbox("I want to erase it", key=f"erase_ok_{lid}", disabled=disabled)
+        if st.button("ERASE", key=f"erase_{lid}", disabled=disabled or not sure):
+            from database import erase_owner_data
+            got = erase_owner_data(lid)
+            st.success(f"Erased: {sum(got.values())} record(s).")

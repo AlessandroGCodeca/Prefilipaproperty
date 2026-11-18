@@ -7,7 +7,7 @@ import streamlit as st
 
 import markets
 
-from dashboard.fmt import _tag_market, esc, mkw, money
+from dashboard.fmt import _tag_market, esc, mkw, money, safe_href
 from dashboard.listing_cache import price_drops
 
 
@@ -271,5 +271,5 @@ def render(v, sb) -> None:
                     f'<div class="brow"><span class="l">{esc((d.get("title") or d.get("district") or "—")[:60])}</span>'
                     f'<span class="v">{money(d, d["price_eur"])} ({d["last_change_pct"]:+.1%}, '
                     f'{str(d["last_change_at"])[:10]}){reach} · '
-                    f'<a href="{esc(d["url"])}" target="_blank">open ↗</a></span></div>',
+                    f'<a href="{safe_href(d["url"])}" target="_blank">open ↗</a></span></div>',
                     unsafe_allow_html=True)

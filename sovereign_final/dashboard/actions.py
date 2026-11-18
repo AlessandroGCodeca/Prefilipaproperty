@@ -12,6 +12,7 @@ import sys
 import streamlit as st
 
 from modules import jobs
+from modules.redact import redact
 
 
 # The project folder: the subprocess imports the scrapers from there.
@@ -188,7 +189,7 @@ def _czech_rentals_if_stale() -> str:
         summary = rentals_cz(max_pages=5)
     except Exception as e:
         logging.getLogger("sovereign").exception("Czech rent comps failed")
-        return f" Czech rent comps couldn't be read ({type(e).__name__}: {e})."
+        return f" Czech rent comps couldn't be read ({type(e).__name__}: {redact(e)})."
     return (f" Read {summary.get('rentals', 0)} Czech rentals first "
             f"({summary.get('keys', 0)} towns).")
 
@@ -310,7 +311,7 @@ def _rent_step(progress):
             summary = import_module(module).run(max_pages=5)
         except Exception as e:
             logging.getLogger("sovereign").exception(f"{flag} rent comps failed")
-            failed.append(f"{flag} rent comps failed: {type(e).__name__}: {e}")
+            failed.append(f"{flag} rent comps failed: {type(e).__name__}: {redact(e)}")
             continue
         parts.append(f"{flag} {summary.get('rentals', 0)} rentals across "
                      f"{summary.get('keys', 0)} {label} · "
@@ -334,7 +335,7 @@ def _tax_step(progress):
         cz, cz_error = tax_rates_cz.update(progress=progress), ""
     except Exception as e:                     # Slovakia's result still stands
         logging.getLogger("sovereign").exception("Czech tax coefficients failed")
-        cz, cz_error = None, f"{type(e).__name__}: {e}"
+        cz, cz_error = None, f"{type(e).__name__}: {redact(e)}"
     if sk["requeued"] or (cz and cz["requeued"]):
         run_scoring()
     review = sk["counts"].get("review")

@@ -105,6 +105,12 @@ fi
 # first start it runs at once if none has run since the last 06:00. Its
 # lines go to logs/scheduler.log. SOVEREIGN_NO_SCHEDULER=1 leaves it out.
 mkdir -p logs
+# The keys in .env, and the deeds, deal files and backups, are readable by
+# this Mac's user only (not other accounts on it, not a shared folder's
+# guests). Harmless when already so; a failure changes nothing.
+chmod 600 .env 2>/dev/null
+mkdir -p data backups
+chmod 700 data backups logs 2>/dev/null
 SCHED_PIDFILE="logs/scheduler.pid"
 SCHED_PID=""
 scheduler_running() {

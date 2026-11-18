@@ -109,19 +109,23 @@ def test_an_open_card_says_when_it_was_last_seen(db):
 
 # ── The portal health strip ───────────────────────────────────────────────────
 def test_portal_health_counts_each_day_and_the_last_good_run(db):
+    # A fixed noon, not the clock: "an hour ago" just after midnight UTC
+    # is yesterday, which put each run on the day before.
+    noon = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
+    at = lambda days_ago: (noon - timedelta(days=days_ago, hours=1)).isoformat()  # noqa: E731
     conn = db.get_conn()
     try:
         for days_ago, n, err in ((6, 400, ""), (2, 380, ""), (2, 420, ""), (1, 0, ""),
                                  (0, 0, "HTTP 403")):
             conn.execute("INSERT INTO portal_runs (market, source, run_at, listings, error) "
-                         "VALUES ('sk', 'bazos', ?, ?, ?)", (_iso(days_ago, hours_ago=1), n, err))
+                         "VALUES ('sk', 'bazos', ?, ?, ?)", (at(days_ago), n, err))
         conn.commit()
     finally:
         conn.close()
-    h = db.portal_health(days=7)[("sk", "bazos")]
+    h = db.portal_health(days=7, now=noon)[("sk", "bazos")]
     assert h["daily"] == [400, None, None, None, 420, 0, 0]      # the day's best run
     assert h["last"]["error"] == "HTTP 403" and h["last"]["listings"] == 0
-    assert h["last_good_at"][:10] == _iso(2, hours_ago=1)[:10]
+    assert h["last_good_at"][:10] == at(2)[:10]
 
 
 def test_sparkline():

@@ -7,6 +7,7 @@ to the building's správca (database/deal_docs, modules/spravca_letter).
 import streamlit as st
 
 from dashboard.fmt import _local_stamp, esc
+from modules.redact import redact
 
 
 def render(listing: dict, disabled: bool = False) -> None:
@@ -62,7 +63,7 @@ def render(listing: dict, disabled: bool = False) -> None:
             add_deal_file(lid, kind, up.name, up.getvalue(), up.type)
             st.success(f"Kept {up.name}.")
         except ValueError as e:
-            st.warning(f"Not kept: {e}.")
+            st.warning(f"Not kept: {redact(e)}.")
     files = list_deal_files(lid)
     for f in files:
         d1, d2, d3 = st.columns([5, 1, 1])

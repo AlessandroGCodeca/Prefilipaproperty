@@ -68,6 +68,9 @@ def _setup_logging() -> None:
         ],
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)   # one line per Claude call
+    # No key from .env reaches the log file, even inside an error's URL.
+    from modules import redact
+    redact.install()
 
 
 def last_slot(now: datetime) -> datetime:

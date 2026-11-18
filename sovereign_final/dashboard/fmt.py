@@ -23,6 +23,19 @@ def esc(v) -> str:
     return _html_escape("" if v is None else str(v), quote=True)
 
 
+def safe_url(url) -> str:
+    """A scraped link only when it is an http(s) URL, else "#". Escaping
+    alone lets a "javascript:" link through, which runs in the dashboard's
+    origin when clicked."""
+    u = "" if url is None else str(url).strip()
+    return u if u.lower().startswith(("http://", "https://")) else "#"
+
+
+def safe_href(url) -> str:
+    """safe_url(), escaped for an href attribute."""
+    return esc(safe_url(url))
+
+
 def _tag_market(l: dict) -> dict:
     """Mark a row with its market, its currency and its price in EUR."""
     l["_market"] = markets.of_row(l)

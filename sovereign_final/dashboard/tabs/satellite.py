@@ -3,11 +3,40 @@ dashboard/tabs/satellite.py — SATELLITE VIEWER: satellite and Street View of
 a listing, and its vibe notes.
 """
 
+import logging
 import os
 
 import streamlit as st
 
 from dashboard.fmt import _local_stamp, amt, esc
+
+log = logging.getLogger("sovereign")
+
+STATIC_MAP_URL = "https://maps.googleapis.com/maps/api/staticmap"
+
+
+@st.cache_data(ttl=7 * 24 * 3600, max_entries=200, show_spinner=False)
+def satellite_image(lat: float, lng: float) -> bytes | None:
+    """The satellite picture of a point, fetched here on the server. The key
+    goes in this request only: put in an <img> link, it would sit in every
+    viewer's browser, free to copy, and it also works for Geocoding and Places
+    on your bill. None when Google refuses or can't be reached."""
+    import requests
+    key = os.getenv("GOOGLE_PLACES_API_KEY", "")
+    if not key:
+        return None
+    try:
+        r = requests.get(STATIC_MAP_URL, params={
+            "center": f"{lat},{lng}", "zoom": 17, "size": "640x400", "maptype": "satellite",
+            "markers": f"color:red|{lat},{lng}", "key": key}, timeout=10)
+    except requests.RequestException as e:
+        from modules.redact import redact
+        log.warning(f"Satellite image: {redact(e)}")
+        return None
+    if r.status_code != 200 or not r.headers.get("content-type", "").startswith("image/"):
+        log.warning(f"Satellite image: HTTP {r.status_code}")
+        return None
+    return r.content
 
 
 def render(v) -> None:
@@ -40,11 +69,22 @@ def render(v) -> None:
 
         with c2:
             st.markdown('<div class="muted">SATELLITE VIEW</div>', unsafe_allow_html=True)
-            if lat and lng and GMAPS_KEY:
-                sat = (f"https://maps.googleapis.com/maps/api/staticmap"
-                       f"?center={lat},{lng}&zoom=17&size=640x400&maptype=satellite"
-                       f"&markers=color:red%7C{lat},{lng}&key={GMAPS_KEY}")
-                st.image(sat, width="stretch")
+            sat = satellite_image(float(lat), float(lng)) if lat and lng and GMAPS_KEY else None
+            shown = False
+            if sat:
+                try:
+                    st.image(sat, width="stretch")
+                    shown = True
+                except Exception:                 # not a picture after all
+                    log.warning("Satellite image: Google's answer isn't a picture")
+            if shown:
+                pass
+            elif lat and lng and GMAPS_KEY:
+                st.link_button("📡 OPEN SATELLITE (Google Maps)",
+                               f"https://www.google.com/maps?q={lat},{lng}&z=17&t=k",
+                               width="stretch")
+                st.markdown('<div class="muted">Google didn\'t send the picture: check that the '
+                            'Maps Static API is enabled for the key.</div>', unsafe_allow_html=True)
             elif lat and lng:
                 st.link_button("📡 OPEN SATELLITE (Google Maps)",
                                f"https://www.google.com/maps?q={lat},{lng}&z=17&t=k",

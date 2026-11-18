@@ -6,7 +6,8 @@ announcement says once Claude has read it.
 
 import streamlit as st
 
-from dashboard.fmt import esc
+from dashboard.fmt import esc, safe_url
+from modules.redact import redact
 
 REGISTER = "https://www.notar.sk/drazba/?actId="
 
@@ -35,7 +36,7 @@ def render(v) -> None:
                     st.success(f"{got['seen']} announcement(s), {got['new']} new, "
                                f"{got['details']} record(s) read.")
                 except Exception as e:
-                    st.warning(f"The register couldn't be read: {type(e).__name__}: {e}")
+                    st.warning(f"The register couldn't be read: {type(e).__name__}: {redact(e)}")
     rows = [] if v.using_demo else get_auctions()
     with c2:
         flats_only = st.checkbox("Flats only (once read)", value=False, key="auct_flats")
@@ -89,11 +90,11 @@ def render(v) -> None:
                         try:
                             got = auctions_sk.read_announcement(r["act_id"])
                         except Exception as e:
-                            got, why = None, f"{type(e).__name__}: {e}"
+                            got, why = None, f"{type(e).__name__}: {redact(e)}"
                         else:
                             why = "not readable"
                     if got:
                         st.rerun()
                     st.warning(f"Not read ({why}).")
                 elif r.get("doc_url") and not doc_reader.enabled():
-                    st.link_button("ANNOUNCEMENT (PDF)", r["doc_url"], width="stretch")
+                    st.link_button("ANNOUNCEMENT (PDF)", safe_url(r["doc_url"]), width="stretch")
