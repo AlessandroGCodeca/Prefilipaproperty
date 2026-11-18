@@ -56,6 +56,8 @@ st.set_page_config(
     initial_sidebar_state="auto",
 )
 style.inject()
+# Keyboard users jump past the header and sidebar to the tabs (D13).
+st.markdown('<a class="skip" href="#tabs">Skip to the deals</a>', unsafe_allow_html=True)
 require_password()
 
 # ── Init ──────────────────────────────────────────────────────────────────────
@@ -125,6 +127,7 @@ def _remember(param: str, key: str) -> None:
         st.query_params[param] = value
 
 
+st.markdown('<div id="tabs"></div>', unsafe_allow_html=True)
 _groups = [g for g, _ in TAB_GROUPS]
 _qp_group = st.query_params.get("group")
 _page_tab = {}
