@@ -11,7 +11,7 @@ from pandas.api.types import is_numeric_dtype
 
 import markets
 
-from dashboard.fmt import _features_label, _lv_state, money
+from dashboard.fmt import _features_label, _lv_state, esc, money
 
 # Always shown, first and pinned; the column chooser hides any other.
 PINNED = ("", "Grade", "Title", "Price", "Surplus")
@@ -32,11 +32,41 @@ def _defuse(value):
 def triage_csv(df) -> bytes:
     """The table as a CSV file: every row and column, in the order shown.
     With a byte-order mark, so Excel reads the diacritics."""
-    safe = df.copy()
+    safe = df.drop(columns=[c for c in ("_id",) if c in df.columns]).copy()   # internal
     for col in safe.columns:
         if not is_numeric_dtype(safe[col]):        # object or pandas' str columns
             safe[col] = safe[col].map(_defuse)
     return safe.to_csv(index=False).encode("utf-8-sig")
+
+
+def render_summary(l, v) -> None:
+    """A picked row's flat: its verdict and three key figures, and a button to
+    its full card in ACTIVE SNAG LIST (a card can't be drawn twice on a page:
+    its boxes would clash)."""
+    from dashboard.fmt import amt, sgn
+    from dashboard.verdict import verdict_html
+    from engine.financial import compute_deal_score
+    score, grade = compute_deal_score(l)
+    surplus = v.surplus(l)
+    my = l.get("max_price_yellow")
+    cz = l.get("_market") == "cz"
+    struct = "s.r.o." if v.sro(l) else "Personal"
+    st.markdown(
+        f'<div class="pick-t">{esc((l.get("title") or l.get("district") or "—")[:80])}</div>'
+        + verdict_html(grade, score, l.get("market_discount"), surplus, struct,
+                       lambda x: amt(l, x), cz)
+        + '<div class="pick-k">'
+        + f'<div><span>Price</span><b>{amt(l, l.get("price_eur") or 0)}</b></div>'
+        + f'<div class="{"neg" if v.cf_negative(l) else ""}"><span>Surplus</span>'
+          f'<b>{sgn(l, surplus)}</b></div>'
+        + f'<div><span>Max offer</span><b>{amt(l, my) if my else "—"}</b></div></div>',
+        unsafe_allow_html=True)
+    cls = (l.get("cf_class") or l.get("classification") or "").upper()
+    if cls in ("GREEN", "YELLOW"):
+        from dashboard.tabs.today import open_card
+        st.button("Open its full card", key="triage_open", on_click=open_card, args=(l["id"],))
+    else:
+        st.caption("A WHITE flat has no card: ANALYSIS → WHAT-IF / TAX gives its full breakdown.")
 
 
 def render(v) -> None:
@@ -121,6 +151,7 @@ def render(v) -> None:
                             + (f" · {l['lv_risk_level']}" if l.get("lv_risk_level") else ""),
                 "Src":      (l.get("source") or "").upper()[:5],
                 "URL":      l.get("url") or "",
+                "_id":      l.get("id"),               # not shown: the row's listing
             })
         df = pd.DataFrame(triage_rows).sort_values(
             ["Score", "Below%"], ascending=[False, False]
@@ -158,7 +189,7 @@ def render(v) -> None:
                 file_name=f"sovereign_triage_{datetime.now():%Y-%m-%d}.csv", key="triage_csv",
                 help=f"Every row and column of this table as filtered — for your bank, "
                      f"adviser or partner. Money in {v_cur}; opens in Excel.")
-        st.dataframe(
+        picked = st.dataframe(
             df,
             width="stretch",
             hide_index=True,
@@ -195,4 +226,12 @@ def render(v) -> None:
                 "Vibe":    st.column_config.NumberColumn(format="%d/10"),
                 "URL":     st.column_config.LinkColumn(display_text="open ↗"),
             },
+            # D3: a click on a row shows that flat's summary under the table.
+            on_select="rerun", selection_mode="single-row", key="triage_pick",
         )
+        rows = (picked.selection.rows if picked else []) or []
+        if rows:
+            lid = df.iloc[rows[0]]["_id"]
+            chosen = next((l for l in v.data if l.get("id") == lid), None)
+            if chosen:
+                render_summary(chosen, v)

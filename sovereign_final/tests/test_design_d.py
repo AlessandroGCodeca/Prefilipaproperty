@@ -151,3 +151,36 @@ def test_the_card_is_a_fragment():
     from dashboard import cards
     src = inspect.getsource(cards)
     assert "@st.fragment\ndef render_card(l, v):" in src
+
+
+# ── D3 · a row in the triage table opens its flat ────────────────────────────
+def test_picking_a_row_shows_the_flat_and_a_way_to_its_card(populated_db):
+    import pandas as pd
+    from streamlit.testing.v1 import AppTest
+    from dashboard.tabs.triage import triage_csv
+    at = run_app()
+    df = next(d for d in at.dataframe if "Grade" in d.value.columns)
+    assert "_id" in df.value.columns                       # kept for the pick, not shown
+    assert "_id" not in triage_csv(pd.DataFrame({"Title": ["x"], "_id": ["g1"]})).decode("utf-8-sig")
+
+    def panel(cls):
+        import sys
+        sys.path.insert(0, ".")
+        from dashboard.tabs.triage import render_summary
+
+        class V:
+            sro = staticmethod(lambda l: True)
+            surplus = staticmethod(lambda l: -123.0)
+            cf_negative = staticmethod(lambda l: True)
+        render_summary({"id": "g1", "title": "<b>Byt</b> Martin", "price_eur": 83600,
+                        "classification": cls, "market_discount": 0.4,
+                        "max_price_yellow": 125000, "_market": "sk"}, V())
+
+    for cls, has_button in (("GREEN", True), ("WHITE", False)):
+        t = AppTest.from_function(panel, args=(cls,), default_timeout=60)
+        t.run()
+        assert not t.exception, [e.value for e in t.exception]
+        md = " ".join(m.value for m in t.markdown)
+        assert 'class="pick-k"' in md and "&lt;b&gt;Byt" in md
+        assert "−€123" in md or "-€123" in md
+        assert any(b.key == "triage_open" for b in t.button) is has_button

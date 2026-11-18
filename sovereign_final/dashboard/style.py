@@ -83,6 +83,14 @@ section[data-testid="stSidebar"] {
 /* The card's quiet line of facts under its action chips (D2). */
 .facts { font-size:0.8rem; color:var(--muted); margin-top:6px; }
 
+/* A picked row's summary under the triage table (D3) */
+.pick-t { font-size:1rem; font-weight:600; color:var(--text); margin:14px 0 8px; }
+.pick-k { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:10px; }
+.pick-k > div { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:12px 16px; }
+.pick-k span { display:block; color:var(--muted); font-size:0.78rem; }
+.pick-k b { font-family:var(--mono); font-size:1.4rem; color:var(--text); }
+.pick-k .neg { border-color:var(--bad-line); } .pick-k .neg b { color:var(--bad); }
+
 /* TODAY (D1) */
 .td-h { font-size:0.95rem; font-weight:600; color:var(--text); margin:18px 0 6px; }
 .td-row { padding:2px 0; }
