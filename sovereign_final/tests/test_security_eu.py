@@ -6,7 +6,6 @@ every page; an owner's data can be erased on request."""
 
 import logging
 import os
-import sqlite3
 import stat
 import sys
 
@@ -377,10 +376,16 @@ def test_the_start_file_locks_down_env_and_data():
     assert "chmod 600 .env" in text and "chmod 700 data backups logs" in text
 
 
-def test_sqlite_is_untouched_by_the_erase_of_an_unknown_flat(full_db):
+def test_the_erase_of_an_unknown_flat_changes_nothing(full_db):
     import database
+    database.upsert_listing(make_listing("k1"))
+    database.set_lv_document("k1", "LIST VLASTNÍCTVA 7")
     assert sum(database.erase_owner_data("nope").values()) == 0
-    assert isinstance(database.get_conn(), sqlite3.Connection)
+    conn = database.get_conn()
+    try:                       # closed: Windows can't delete an open database file
+        assert conn.execute("SELECT COUNT(*) FROM lv_documents").fetchone()[0] == 1
+    finally:
+        conn.close()
 
 
 def test_ad_texts_of_long_gone_flats_are_cleared(full_db):
