@@ -156,6 +156,11 @@ def render(v) -> None:
 
     point = None
     if near.strip():
+        # Mapy.com's credit, beside the results of its address search.
+        from dashboard.legal import mapy_credit_html
+        credit = mapy_credit_html()
+        if credit:
+            st.markdown(credit, unsafe_allow_html=True)
         point, why = _find_point(near, v.market)
         if point is None:
             st.warning(f"Couldn't place “{near.strip()}” ({why}). Type its coordinates "

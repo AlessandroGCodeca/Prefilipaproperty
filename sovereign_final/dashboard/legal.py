@@ -38,6 +38,25 @@ FIELDS = (
 OPTIONAL = {"OPERATOR_VAT_ID", "OPERATOR_PHONE"}
 
 
+MAPY_LOGO = "https://api.mapy.com/img/api/logo_green.svg"
+MAPY_URL = "https://mapy.com/"
+
+
+def mapy_credit_html(height: int = 24, words: str = "Search by Mapy.com") -> str:
+    """Mapy.com's required credit for its geocoder: the logo, clickable, at
+    least 20 px high (the green variant; the black one disappears on the dark
+    theme), with its words. Empty without a MAPY_API_KEY. Terms and logos:
+    developer.mapy.com/rest-api-mapy-cz/atribution/. The logo loads from
+    Mapy.com's server, as the terms describe, so the privacy notice names it."""
+    if not os.getenv("MAPY_API_KEY"):
+        return ""
+    return (f'<a href="{MAPY_URL}" target="_blank" rel="noopener" '
+            f'style="text-decoration:none;color:inherit;display:inline-flex;align-items:center;'
+            f'gap:8px"><img src="{MAPY_LOGO}" alt="Mapy.com" '
+            f'style="height:{max(height, 20)}px;vertical-align:middle">'
+            f'<span class="muted" style="font-size:.7rem">{esc(words)}</span></a>')
+
+
 def operator() -> dict[str, str]:
     return {k: os.getenv(k, "").strip() for k, _ in FIELDS}
 
@@ -84,14 +103,17 @@ def privacy_md() -> str:
 - Anthropic (USA): an ad's text, an uploaded scan or deed, an auction announcement — to read them.
   Under Anthropic's data processing addendum with the EU Standard Contractual Clauses; not used to
   train models.
+- Mapy.com, Seznam.cz, a.s. (Czechia): the address of a listing, to find its coordinates.
+  Used only when a Mapy.com key is set. Inside the EU.
 - Google Maps Platform (USA): addresses and coordinates, for location, amenities, satellite
   pictures and travel times. Under Google's data processing terms.
 - Telegram: alert messages to the operator's own chat.
 - Healthchecks.io: only whether the daily run happened, no personal data.
 - Apple iCloud (if backups are copied there): encrypted at rest by Apple.
 
-**What your browser loads from others.** Map tiles (CARTO) and listing photos from the portals'
-servers: they see your IP address, as with any website you open.
+**What your browser loads from others.** Map tiles (CARTO), listing photos from the portals'
+servers and, when a Mapy.com key is set, the Mapy.com logo from Mapy.com's server (Seznam.cz,
+Czechia — its terms require the logo): they see your IP address, as with any website you open.
 
 **How long.** Deed texts: until the flat has been off the market for LV_TEXT_RETENTION_DAYS
 (180 by default) and is not a deal you track. Daily backups: the newest BACKUP_KEEP (14).
@@ -132,6 +154,9 @@ def render_footer() -> None:
     expander, at the foot of the page."""
     st.markdown(f'<hr class="div"><div class="muted" style="font-size:.7rem">'
                 f'⚖️ {esc(DISCLAIMER)}</div>', unsafe_allow_html=True)
+    credit = mapy_credit_html(words="Powered by Mapy.com · address search")
+    if credit:
+        st.markdown(f'<div style="margin:6px 0">{credit}</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     with c1, st.expander("Imprint"):
         st.markdown(imprint_html(), unsafe_allow_html=True)

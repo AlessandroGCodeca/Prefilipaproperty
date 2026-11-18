@@ -315,6 +315,9 @@ OVERPASS_URL      = os.getenv("OVERPASS_URL", "https://overpass-api.de/api/inter
 NOMINATIM_URL     = os.getenv("NOMINATIM_URL", "https://nominatim.openstreetmap.org/search")
 # Nominatim's usage policy asks for a contact address in the request.
 NOMINATIM_EMAIL   = os.getenv("NOMINATIM_EMAIL", "")
+# Mapy.com (Seznam) REST API: its geocoder knows Czech addresses to the house
+# number (RUIAN) and Slovak ones too. A free key from developer.mapy.com.
+MAPY_API_KEY      = os.getenv("MAPY_API_KEY", "")
 # SVP (Slovenský vodohospodársky podnik) flood hazard maps, cycle II —
 # "Hranica záplavy Q100" (the 100-year flood extent). An ArcGIS MapServer
 # identify endpoint plus the layer id(s) to test. Override if SVP moves it.

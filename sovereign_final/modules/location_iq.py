@@ -2,8 +2,10 @@
 modules/location_iq.py — Sovereign Investor Dashboard
 Module C: Location IQ — transit, amenities and noise/flood/construction risk.
 
-Geocoding, transit and amenities come from Google when GOOGLE_PLACES_API_KEY
-is set, and from OpenStreetMap (Nominatim + Overpass) when it isn't. The risk
+Transit and amenities come from Google when GOOGLE_PLACES_API_KEY is set,
+and from OpenStreetMap (Overpass) when it isn't. Addresses are geocoded by
+Mapy.com (MAPY_API_KEY; first for Czech addresses), Google, then OpenStreetMap
+(Nominatim) — see providers(). The risk
 flags always come from open data via modules/risk_data — never invented.
 
 Each listing is located in its own market's country (listings.market): a
@@ -86,14 +88,7 @@ def _osm_counts(lat: float, lng: float) -> dict | None:
 
 
 # ── Geocoding ─────────────────────────────────────────────────────────────────
-def geocode_precise(address: str, market: str = "sk") -> tuple[float | None, float | None, str]:
-    """(lat, lng, precision) — precision is "address", "street" or "area"
-    (see modules/risk_data). Google when a key is set, else Nominatim; in
-    the market's country (Slovakia by default)."""
-    if not GOOGLE_API_KEY:
-        if market == "sk":
-            return risk_data.geocode_nominatim(address)
-        return risk_data.geocode_nominatim(address, market=market)
+def _geocode_google(address: str, market: str) -> tuple[float | None, float | None, str]:
     import markets
     try:
         r = requests.get(GEOCODE_URL, params={
@@ -110,6 +105,36 @@ def geocode_precise(address: str, market: str = "sk") -> tuple[float | None, flo
         # The request's URL carries the key; requests puts it in the error.
         from modules.redact import redact
         log.warning(f"    Geocode error: {redact(e)}")
+    return None, None, ""
+
+
+def providers(market: str = "sk") -> list[str]:
+    """The geocoders to try, in order, for a market. A Czech address goes to
+    Mapy.com first (it knows every house number from the register of
+    addresses, RUIAN, and is free), then Google; a Slovak one to Google first,
+    then Mapy.com. Nominatim, which needs no key, is always last."""
+    from config import MAPY_API_KEY
+    mapy = ["mapy"] if (MAPY_API_KEY or os.getenv("MAPY_API_KEY")) else []
+    google = ["google"] if GOOGLE_API_KEY else []
+    return (mapy + google if market == "cz" else google + mapy) + ["nominatim"]
+
+
+def geocode_precise(address: str, market: str = "sk") -> tuple[float | None, float | None, str]:
+    """(lat, lng, precision) — precision is "address", "street" or "area"
+    (see modules/risk_data). The first of providers(market) that finds the
+    address, in the market's country (Slovakia by default); (None, None, "")
+    when none does."""
+    for name in providers(market):
+        if name == "mapy":
+            got = risk_data.geocode_mapy(address, market)
+        elif name == "google":
+            got = _geocode_google(address, market)
+        elif market == "sk":
+            got = risk_data.geocode_nominatim(address)
+        else:
+            got = risk_data.geocode_nominatim(address, market=market)
+        if got[0] is not None:
+            return got
     return None, None, ""
 
 
@@ -240,7 +265,8 @@ def run_location_scoring(progress_callback=None, limit: int | None = 200,
     if limit:
         listings = listings[:limit]
 
-    provider = "Google" if GOOGLE_API_KEY else "OpenStreetMap"
+    provider = {"mapy": "Mapy.com", "google": "Google", "nominatim": "OpenStreetMap"}[
+        providers(market="sk")[0]]
     log.info(f"📍 Scoring {len(listings)} locations ({provider})...")
     scored = 0
     tier_emoji = {"PRIME":"⭐","SOLID":"✅","STANDARD":"🟡","POOR":"🔴"}

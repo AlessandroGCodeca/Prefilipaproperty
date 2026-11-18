@@ -34,11 +34,12 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import time
 
 import requests
 
-import sys, os
+import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
     OVERPASS_URL, NOMINATIM_URL, NOMINATIM_EMAIL,
@@ -114,6 +115,59 @@ def geocode_nominatim(address: str, market: str = "sk") -> tuple[float | None, f
         return None, None, ""
     top = results[0]
     return float(top["lat"]), float(top["lon"]), nominatim_precision(top)
+
+
+MAPY_GEOCODE_URL = "https://api.mapy.com/v1/geocode"
+# Only places an address can be: not shops or other points of interest, which
+# a listing's text can happen to name.
+MAPY_TYPES = ("regional.address", "regional.street",
+              "regional.municipality_part", "regional.municipality")
+
+
+def mapy_precision(item: dict) -> str:
+    """Precision of a Mapy.com geocoder item, by what it matched."""
+    kind = item.get("type") or ""
+    if kind == "regional.address":
+        return "address"
+    if kind == "regional.street":
+        return "street"
+    return "area"
+
+
+def geocode_mapy(address: str, market: str = "sk", api_key: str | None = None,
+                 get=None) -> tuple[float | None, float | None, str]:
+    """(lat, lng, precision) from the Mapy.com geocoder, restricted to the
+    market's country, or (None, None, "") without a key, an answer or a
+    result in that country. The key travels in a header, never the URL, so no
+    error text can carry it."""
+    import markets
+    key = api_key if api_key is not None else os.getenv("MAPY_API_KEY", "")
+    query = (address or "").strip()[:150]            # the API's limit
+    if not key or not query:
+        return None, None, ""
+    cc = markets.get(market).country_code
+    try:
+        r = (get or requests.get)(
+            MAPY_GEOCODE_URL, timeout=10, headers={"X-Mapy-Api-Key": key},
+            params={"query": query, "lang": "cs" if market == "cz" else "sk",
+                    "limit": 3, "type": list(MAPY_TYPES), "locality": cc.lower()})
+        if r.status_code != 200:
+            log.warning(f"    Mapy.com geocoder: HTTP {r.status_code}")
+            return None, None, ""
+        items = r.json().get("items") or []
+    except Exception as e:
+        log.warning(f"    Mapy.com geocoder error: {type(e).__name__}")
+        return None, None, ""
+    for it in items:
+        country = next((x.get("isoCode") for x in it.get("regionalStructure") or []
+                        if x.get("type") == "regional.country"), None)
+        pos = it.get("position") or {}
+        if country and country.lower() != cc.lower():
+            continue
+        if pos.get("lat") is None or pos.get("lon") is None:
+            continue
+        return float(pos["lat"]), float(pos["lon"]), mapy_precision(it)
+    return None, None, ""
 
 
 def google_precision(result: dict) -> str:
