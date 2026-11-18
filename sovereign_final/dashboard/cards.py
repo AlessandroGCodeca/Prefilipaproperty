@@ -331,6 +331,24 @@ def render_card(l, v):
             if _tn:
                 st.markdown(f'<div class="muted" style="margin-top:6px">🏘 {esc(_tn)}</div>',
                             unsafe_allow_html=True)
+        # D8: the month's cash flow and the price over time, drawn.
+        from dashboard.charts import cost_rows, price_spec, waterfall_spec
+        unit = "Kč" if (l.get("_cur") or "EUR") == "CZK" else "€"
+        wf = waterfall_spec(rent, cost_rows(l, show_sro, T), surplus, unit)
+        pr = price_spec(ph["history"], unit) if ph else None
+        if wf or pr:
+            g1, g2 = st.columns(2) if wf and pr else (st.container(), None)
+            if wf:
+                with g1:
+                    title = "MĚSÍČNÍ CASH FLOW" if cz else "CASH FLOW, A MONTH"
+                    st.markdown(f'<div class="muted">{title} — {esc(struct)}</div>',
+                                unsafe_allow_html=True)
+                    st.vega_lite_chart(wf, width="stretch")
+            if pr:
+                with (g2 or g1):
+                    st.markdown(f'<div class="muted">{"CENA V ČASE" if cz else "ASKING PRICE"} · '
+                                f'{ph["change_pct"]:+.1%}</div>', unsafe_allow_html=True)
+                    st.vega_lite_chart(pr, width="stretch")
         if ph:
             steps = " → ".join(f"{amt(l, p)} ({str(w)[:10]})" for w, p in ph["history"])
             st.markdown(f'<div class="muted" style="margin-top:6px">📉 Price: {steps} '

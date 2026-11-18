@@ -184,3 +184,29 @@ def test_picking_a_row_shows_the_flat_and_a_way_to_its_card(populated_db):
         assert 'class="pick-k"' in md and "&lt;b&gt;Byt" in md
         assert "−€123" in md or "-€123" in md
         assert any(b.key == "triage_open" for b in t.button) is has_button
+
+
+# ── D8 · the cash flow and the price, drawn ──────────────────────────────────
+def test_the_waterfall_steps_down_from_the_rent_to_the_surplus():
+    from dashboard.charts import cost_rows, price_spec, waterfall_spec
+    costs = cost_rows({"mortgage_monthly": 335, "hoa_monthly": 60, "property_tax_monthly": 7,
+                       "management_monthly": 0, "income_tax_personal": None}, sro=False)
+    assert costs == [("Mortgage", 335.0), ("HOA (incl. fond opráv)", 60.0), ("Property Tax", 7.0)]
+    spec = waterfall_spec(421, costs, -123)
+    rows = spec["data"]["values"]
+    assert [r["step"] for r in rows] == ["Rent", "Mortgage", "HOA (incl. fond opráv)",
+                                         "Property Tax", "Surplus"]
+    assert rows[1]["start"] == 421 and rows[1]["end"] == 86
+    assert rows[-1] == {"step": "Surplus", "start": 0.0, "end": -123.0, "kind": "net-",
+                        "amount": -123.0}
+    assert waterfall_spec(0, costs, 1) is None
+    assert price_spec([("2026-11-03", 89900)]) is None
+    pts = price_spec([("2026-11-03T08:00", 89900), ("2026-11-12", 83600)])["data"]["values"]
+    assert pts == [{"date": "2026-11-03", "price": 89900.0}, {"date": "2026-11-12", "price": 83600.0}]
+
+
+def test_an_open_card_draws_its_cash_flow(populated_db):
+    at = run_app(open_cards=("g1",))
+    assert not at.exception, [e.value for e in at.exception]
+    charts = at.get("arrow_vega_lite_chart") or at.get("vega_lite_chart")
+    assert charts
