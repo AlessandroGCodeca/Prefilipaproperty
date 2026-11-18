@@ -68,7 +68,7 @@ def missing() -> list[str]:
 
 def _v(key: str) -> str:
     val = operator()[key]
-    return esc(val) if val else f'<span style="color:#ff9100">not set ({key})</span>'
+    return esc(val) if val else f'<span style="color:#f5b84a">not set ({key})</span>'
 
 
 def imprint_html() -> str:

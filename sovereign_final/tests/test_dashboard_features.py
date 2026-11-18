@@ -148,7 +148,10 @@ def test_the_strip_shows_each_portal_and_flags_a_bad_or_late_one():
     }
     html = portal_strip(health, "sk", now)
     chips = html.split('<span class="phc ')[1:]
-    assert [c.split('"')[0] for c in chips] == ["ok", "bad", "old"]
+    # The first chip is the phone's summary of all of them (hidden on a desktop).
+    assert [c.split('"')[0] for c in chips] == ["ph-sum", "ok", "bad", "old"]
+    assert "3 portals · 1 failed · 1 late" in chips[0]
+    chips = chips[1:]
     assert "Nehnutelnosti.sk <b>310</b>" in chips[0]
     assert "failed" in chips[1] and "last good" in chips[1]
     assert "<b>403</b>" not in chips[1] and "&lt;b&gt;403" in chips[1]   # escaped

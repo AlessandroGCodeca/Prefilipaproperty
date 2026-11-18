@@ -86,7 +86,18 @@ def portal_strip(health: dict, view_market, now=None) -> str:
             chips.append(f'<span class="phc {cls}" title="{esc(tip[:300])}">{flag} {esc(name)} '
                          f'<b>{last["listings"]}</b> <span class="spk">{sparkline(daily)}</span> '
                          f'{esc(tail)}</span>')
-    return f'<div class="ph">{"".join(chips)}</div>' if any_run else ""
+    if not any_run:
+        return ""
+    # On a phone the healthy portals fold into this one chip (the stylesheet
+    # hides the others), so the tabs aren't pushed down by a column of chips.
+    n_bad = sum('class="phc bad"' in c for c in chips)
+    n_old = sum('class="phc old"' in c for c in chips)
+    n_all = sum('class="phc none"' not in c for c in chips)
+    state = " · ".join(
+        ([f"{n_bad} failed"] if n_bad else []) + ([f"{n_old} late"] if n_old else [])
+    ) or "all ran"
+    chips.insert(0, f'<span class="phc ph-sum">{n_all} portals · {state}</span>')
+    return f'<div class="ph">{"".join(chips)}</div>'
 
 
 def quiet_portal_note(q: dict) -> str:

@@ -5,7 +5,7 @@
 # /app in Docker).
 [theme]
 base = "dark"
-primaryColor = "#00e676"
+primaryColor = "#3ddc97"
 backgroundColor = "#07090e"
 secondaryBackgroundColor = "#0b0d14"
 textColor = "#bcc8e0"

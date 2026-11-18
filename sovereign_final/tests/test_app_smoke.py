@@ -757,7 +757,7 @@ def test_test_sites_fetches_the_scrapers_own_urls(db, monkeypatch):
 def test_theme_file_is_dark_and_the_grid_wraps():
     root = os.path.dirname(APP)
     cfg = _read(os.path.join(root, ".streamlit", "config.toml"))
-    assert 'base = "dark"' in cfg and 'primaryColor = "#00e676"' in cfg
+    assert 'base = "dark"' in cfg and 'primaryColor = "#3ddc97"' in cfg
     src = _dashboard_src()
     assert "repeat(6,1fr)" not in src and "auto-fit" in src
     assert "#2a3450" not in src                   # 1.6:1 muted text
