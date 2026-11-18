@@ -144,6 +144,16 @@ def render_card(l, v):
         from engine.financial import compute_deal_score
         deal_score, deal_grade = compute_deal_score(l)
 
+        # D10: a star, lighter than a deal stage — "look at this again".
+        lid = l.get("id")
+        if not using_demo:
+            from database import get_starred, set_starred
+            starred = lid in get_starred()
+            if st.button("★ Starred" if starred else "☆ Star", key=f"star_{lid}",
+                         help="Starred flats are listed first in TODAY."):
+                set_starred(lid, not starred)
+                st.rerun()
+
         # The verdict first: what the flat is, in a sentence (dashboard/verdict.py).
         from dashboard.verdict import days_between, verdict_html
         cut_days = (days_between(ph["history"][0][0], ph["history"][-1][0])
@@ -153,7 +163,6 @@ def render_card(l, v):
                                  cut_pct=ph.get("change_pct") if ph else None,
                                  cut_days=cut_days), unsafe_allow_html=True)
 
-        lid = l.get("id")
         # Key figures: price, surplus and the highest offer, big.
         my, mg = l.get("max_price_yellow"), l.get("max_price_green")
         with st.container(key=f"kf_{lid}"):

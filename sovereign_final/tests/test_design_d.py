@@ -43,3 +43,14 @@ def test_a_card_shows_chips_only_for_what_needs_action(populated_db):
     chips = md.split('<div class="facts">')[0]
     assert "GRADE" not in chips and ">PERSONAL<" not in chips    # no longer chips
     assert chips.count('class="badge') <= 6
+
+
+# ── D10 · star a flat ────────────────────────────────────────────────────────
+def test_a_flat_can_be_starred_and_unstarred(populated_db):
+    at = run_app(open_cards=("g1",))
+    at.button(key="star_g1").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "g1" in populated_db.get_starred()
+    assert at.button(key="star_g1").label == "★ Starred"
+    at.button(key="star_g1").click().run()
+    assert "g1" not in populated_db.get_starred()
