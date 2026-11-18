@@ -80,6 +80,9 @@ section[data-testid="stSidebar"] {
 .bs { background:rgba(110,168,255,.08);color:var(--info); }
 .bo { background:rgba(245,184,74,.12); color:var(--caution); }
 
+/* The card's quiet line of facts under its action chips (D2). */
+.facts { font-size:0.8rem; color:var(--muted); margin-top:6px; }
+
 /* Breakdown rows */
 .brow { display:flex; justify-content:space-between; padding:6px 0;
         border-bottom:1px solid var(--line-soft);

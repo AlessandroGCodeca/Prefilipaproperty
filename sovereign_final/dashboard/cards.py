@@ -12,7 +12,7 @@ from dashboard.listing_cache import clear_listing_cache
 from modules.redact import redact
 from dashboard.fmt import (
     _floor_label, _labels, _lv_link, _lv_state_t, _of100, _pct_or_dash,
-    _quick_cadastre, _rent_fallback, _risk_label, amt, badge, esc, fp, last_seen_label,
+    _quick_cadastre, _rent_fallback, _risk_label, amt, esc, fp, last_seen_label,
     lv_checked_label, market_badge,
     mkw, safe_href, safe_url, sgn, tier_badge,
 )
@@ -96,7 +96,6 @@ def render_card(l, v):
     T        = _labels(l)
     cz       = l.get("_market") == "cz"
     cls      = (l.get("cf_class") or l.get("classification") or "PENDING").upper()
-    css_cls  = {"GREEN":"g","YELLOW":"y","WHITE":"w","PENDING":"w"}.get(cls,"w")
     emoji    = {"GREEN":"🟢","YELLOW":"🟡","WHITE":"⚪"}.get(cls,"")
 
     surplus  = l.get("surplus_sro") if show_sro else l.get("surplus_personal")
@@ -144,7 +143,6 @@ def render_card(l, v):
         # Composite deal grade (financial + location + energy + risk)
         from engine.financial import compute_deal_score
         deal_score, deal_grade = compute_deal_score(l)
-        grade_css = {"A": "bg", "B": "bs", "C": "by", "D": "bw"}.get(deal_grade, "bw")
 
         # The verdict first: what the flat is, in a sentence (dashboard/verdict.py).
         from dashboard.verdict import days_between, verdict_html
@@ -240,29 +238,35 @@ def render_card(l, v):
         lv_risk = (l.get("lv_risk_level") or "").upper()
         lv_css  = {"LOW": "bg", "MEDIUM": "by", "HIGH": "br"}.get(lv_risk, "bw")
         lv_label, lv_badge_css = _lv_state_t(l)
-        badges = (
-            market_badge(l) + " " +
-            badge(css_cls, cls) + " " +
-            (f'<span class="badge {grade_css}">GRADE {deal_grade} · {deal_score}</span> '
-             if deal_grade != "—" else "") +
-            f'<span class="badge bo">{"s.r.o." if opt=="SRO" else T("PERSONAL")}</span>' + " " +
-            (tier_badge(loc_tier) if loc_tier else "") +
-            (' <span class="badge bg">⚙️ INDUSTRIAL</span>' if ind else "") +
-            f' <span class="badge {lv_badge_css}">{lv_label}</span>' +
-            (f' <span class="badge {lv_css}">⚖️ LV {lv_risk}</span>' if lv_risk else "") +
-            (' <span class="badge by">⚑ LV SOFT FLAG</span>' if l.get("lv_soft_flags") else "") +
-            (f' <span class="badge bp">📡 {l["_portals"]} PORTALS</span>' if l.get("_portals", 1) > 1 else "") +
-            (' <span class="badge br">⛔ A COPY FAILED LV</span>' if l.get("dup_lv_failed") else "") +
-            (' <span class="badge br">🏘 COOPERATIVE · NO OWN LV</span>'
+        # D2: chips only for what needs action; everything else is one quiet
+        # line of facts. A dozen chips in six colours meant none stood out.
+        lv_ok = (l.get("lv_status") or "").upper() in ("PASS", "CLEAN")
+        action = (
+            ([] if lv_ok else [f'<span class="badge {lv_badge_css}">{lv_label}</span>']) +
+            ([f'<span class="badge {lv_css}">⚖️ LV {lv_risk}</span>']
+             if lv_risk in ("MEDIUM", "HIGH") else []) +
+            (['<span class="badge by">⚑ LV SOFT FLAG</span>'] if l.get("lv_soft_flags") else []) +
+            (['<span class="badge br">⛔ A COPY FAILED LV</span>'] if l.get("dup_lv_failed") else []) +
+            (['<span class="badge br">🏘 COOPERATIVE · NO OWN LV</span>']
              if (l.get("lv_detail") or "").startswith(("Cooperative flat", "LV: Cooperative"))
-             else "") +
-            (' <span class="badge br">🌊 FLOOD Q100</span>' if l.get("flood_zone") else "") +
-            (f' <span class="badge br">⛔ CASH-FLOW NEGATIVE · {struct}</span>'
-             if _cf_negative(l) else "") +
-            (f' <span class="badge by">⚠ {"DEFAULT" if _rent_fallback(l) == "default" else "KRAJ"} RENT</span>'
-             if _rent_fallback(l) else "") +
-            (f' <span class="badge bs">{stage["stage"]}</span>' if stage else "")
+             else []) +
+            (['<span class="badge br">🌊 FLOOD Q100</span>'] if l.get("flood_zone") else []) +
+            (['<span class="badge by">⚙️ INDUSTRIAL</span>'] if ind else []) +
+            ([tier_badge("POOR")] if loc_tier == "POOR" else []) +
+            ([f'<span class="badge br">⛔ CASH-FLOW NEGATIVE · {struct}</span>']
+             if _cf_negative(l) else []) +
+            ([f'<span class="badge by">⚠ {"DEFAULT" if _rent_fallback(l) == "default" else "KRAJ"} RENT</span>']
+             if _rent_fallback(l) else [])
         )
+        facts = [cls.title() if cls != "PENDING" else "Not scored",
+                 f"grade {deal_grade} · {deal_score}" if deal_grade != "—" else "",
+                 "s.r.o." if opt == "SRO" else T("Personal").lower(),
+                 f"{loc_tier.title()} location" if loc_tier and loc_tier != "POOR" else "",
+                 lv_label.replace("✅ ", "") if lv_ok else "",
+                 f"on {l['_portals']} portals" if l.get("_portals", 1) > 1 else "",
+                 f"stage {stage['stage']}" if stage else ""]
+        badges = (market_badge(l) + " " + " ".join(action)
+                  + f'<div class="facts">{" · ".join(esc(f) for f in facts if f)}</div>')
         st.markdown(badges, unsafe_allow_html=True)
         if deal_grade != "—":
             with st.popover(f"Why grade {deal_grade}?" if not cz else f"Proč známka {deal_grade}?"):
