@@ -224,6 +224,16 @@ _SYSTEM = (
     "extinguished, tenants, occupants), or an empty string.")
 
 
+def register_document(url: str) -> bool:
+    """The announcement's link points into the register (notar.sk), over
+    https. The link is read from the register's page; one that leads anywhere
+    else — another site, this computer's own network — is not fetched."""
+    from urllib.parse import urlparse
+    u = urlparse(url or "")
+    host = (u.hostname or "").lower()
+    return u.scheme == "https" and (host == "notar.sk" or host.endswith(".notar.sk"))
+
+
 def read_announcement(act_id: str, get=None) -> dict | None:
     """The auction's announcement read by Claude and stored; None when there
     is none, Claude is off, or it couldn't be read."""
@@ -232,7 +242,12 @@ def read_announcement(act_id: str, get=None) -> dict | None:
     row = get_auction(act_id)
     if not row or not row.get("doc_url") or not doc_reader.enabled():
         return None
+    if not register_document(row["doc_url"]):
+        log.warning(f"Auction {act_id}: announcement not on notar.sk, not fetched")
+        return None
     content = _get(row["doc_url"], get=get).content
+    if len(content) > doc_reader.MAX_BYTES:
+        return None
     got = doc_reader.ask(content, _SYSTEM, "Read this auction announcement.", _SCHEMA)
     if not got:
         return None

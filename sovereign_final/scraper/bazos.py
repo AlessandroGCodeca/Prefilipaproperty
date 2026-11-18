@@ -23,7 +23,8 @@ BASE         = "https://reality.bazos.sk"
 CATEGORY     = "/predam/byt/"
 # Bazos paginates with an offset number appended to the path: /predam/byt/20/
 PAGE_URL     = BASE + CATEGORY + "{offset}/"
-PAGE_URL_QS  = BASE + CATEGORY + "?hledat=&rubriky=byt&hlokalita=&humkreis=25&cenaod=&cenado=&Submit=Hledat&kitems=20&offset={offset}"
+# No query-string fallback (?hledat=…&cenaod=…): Bazoš's robots.txt disallows
+# those search URLs for every crawler, so only the path-based pages are read.
 PAGE_SIZE    = 20
 
 # Plausible apartment sale prices — anything outside this range is treated as
@@ -165,9 +166,8 @@ def _build_listing_from_link(link) -> dict | None:
 
 
 def scrape_page(offset: int, session=None) -> list[dict]:
-    # Try the path-based URL first, fall back to query-string URL
-    for url in [PAGE_URL.format(offset=offset) if offset else BASE + CATEGORY,
-                PAGE_URL_QS.format(offset=offset)]:
+    # The path-based listing pages only: robots.txt allows these.
+    for url in [PAGE_URL.format(offset=offset) if offset else BASE + CATEGORY]:
         try:
             r = get(url, session=session, timeout=20)
             if r.status_code == 200:

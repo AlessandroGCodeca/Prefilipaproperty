@@ -29,6 +29,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s",
                     datefmt="%Y-%m-%d %H:%M:%S")
 logging.getLogger("httpx").setLevel(logging.WARNING)   # one line per Claude call
+from modules import redact as _redact  # noqa: E402
+_redact.install()        # no key from .env in the terminal's log, even inside a URL
 
 from modules import market_rates as _market_rates  # noqa: E402
 from modules import settings as _settings  # noqa: E402
@@ -39,8 +41,8 @@ from modules import settings as _settings  # noqa: E402
 _settings.sync()
 _market_rates.sync()
 
-from dashboard import actions, diagnostics, overview, sidebar, style, view  # noqa: E402
-from dashboard.login import require_password  # noqa: E402
+from dashboard import actions, diagnostics, legal, overview, sidebar, style, view  # noqa: E402
+from dashboard.login import logout_button, require_password  # noqa: E402
 from dashboard.tabs import (  # noqa: E402
     alert_rules, auctions, backtest, close, compare, deal_pipeline, lv_todo, map_view, portfolio,
     rejected, rent_comps, satellite, snag_list, tax_rates, triage, what_if,
@@ -85,6 +87,7 @@ _startup_backfill()
 
 # ── Sidebar, market, the buttons clicked ──────────────────────────────────────
 sb = sidebar.render()
+logout_button()
 view_market = view.pick_market()
 actions.dispatch(sb)
 diagnostics.render(sb)
@@ -141,3 +144,6 @@ for group, (_label, pages) in zip(
 for page in DRAW_ORDER:
     with _page_tab[page]:
         page.render(v)
+
+# The disclaimer, and the imprint, privacy notice and terms (dashboard/legal.py).
+legal.render_footer()

@@ -22,7 +22,9 @@ services:
     # This computer only. The dashboard has no login unless DASHBOARD_PASSWORD
     # is set in .env, and its buttons spend paid API credits and show your
     # deal notes and contract drafts. To open it from another device, set
-    # DASHBOARD_PASSWORD first, then change this to "8501:8501".
+    # DASHBOARD_PASSWORD first and use Tailscale (README, "Who can open it"):
+    # HTTPS and your devices only. "8501:8501" would serve it to the whole
+    # network over plain HTTP, the password readable by anyone on the Wi-Fi.
     ports:
       - "127.0.0.1:8501:8501"
     volumes:

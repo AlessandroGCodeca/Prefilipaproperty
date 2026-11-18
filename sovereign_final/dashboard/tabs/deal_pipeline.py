@@ -8,7 +8,7 @@ import streamlit as st
 from database import DEAL_STAGES
 
 from dashboard.cards import _load_stage
-from dashboard.fmt import _local_stamp, _tag_market, amt, esc, market_badge
+from dashboard.fmt import _local_stamp, _tag_market, amt, esc, market_badge, safe_href
 
 
 def render(v) -> None:
@@ -55,7 +55,7 @@ def render(v) -> None:
                     st.markdown(
                         f'<div class="sc" style="margin-bottom:6px;padding:8px">'
                         f'<div class="mono" style="font-size:.7rem;color:#e4eaf5">'
-                        f'<a href="{esc(t["url"])}" target="_blank">{name}</a></div>'
+                        f'<a href="{safe_href(t["url"])}" target="_blank">{name}</a></div>'
                         f'<div class="muted">{market_badge(t)} {amt(t, t.get("price_eur") or 0)}{maxy}'
                         f' · {_local_stamp(t.get("updated_at"))[0][:10]}{gone}</div>{note}</div>',
                         unsafe_allow_html=True)

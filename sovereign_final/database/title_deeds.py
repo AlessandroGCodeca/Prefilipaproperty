@@ -296,7 +296,9 @@ def purge_old_lv_texts(days: int) -> dict[str, int]:
       after its own 30-day limit anyway);
     - pasted LV texts (lv_documents) and raw LV responses (lv_checks) of
       listings off the market since before then — not a deal you still
-      track (any stage but PASSED).
+      track (any stage but PASSED);
+    - the ad texts (listings.description) of those listings: they can name
+      an agent or a seller and give a phone number.
 
     Each listing keeps its LV verdict and reason. {table: rows}; {} for
     days <= 0."""
@@ -318,6 +320,39 @@ def purge_old_lv_texts(days: int) -> dict[str, int]:
             out["lv_checks"] = conn.execute(
                 "UPDATE lv_checks SET raw_response = NULL WHERE raw_response IS NOT NULL "
                 f"AND listing_id IN ({gone})", (cutoff,)).rowcount
+        # The ad's own text can name the agent or seller and give a phone
+        # number; long off the market, the price history doesn't need it.
+        out["listings"] = conn.execute(
+            "UPDATE listings SET description = NULL WHERE description IS NOT NULL "
+            f"AND description != '' AND id IN ({gone})", (cutoff,)).rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return out
+
+
+def erase_owner_data(listing_id: str) -> dict[str, int]:
+    """Remove what names this flat's owners, creditors and seller (a GDPR
+    erasure or objection request, or simply data no longer needed): the deed
+    text on file, the cadastre's raw answer and Claude's reading of it, the
+    execution and court details, and the seller's name and text of a contract
+    draft. The LV verdict and its reason stay, so the deal's history still
+    reads. {table: rows changed}."""
+    out = {}
+    conn = _db.get_conn()
+    try:
+        if _has_table(conn, "lv_documents"):
+            out["lv_documents"] = conn.execute(
+                "DELETE FROM lv_documents WHERE listing_id = ?", (listing_id,)).rowcount
+        if _has_table(conn, "lv_checks"):
+            out["lv_checks"] = conn.execute(
+                "UPDATE lv_checks SET raw_response = NULL, llm_analysis = NULL, "
+                "exekucia_detail = NULL, sudny_spor_detail = NULL WHERE listing_id = ?",
+                (listing_id,)).rowcount
+        if _has_table(conn, "contract_drafts"):
+            out["contract_drafts"] = conn.execute(
+                "UPDATE contract_drafts SET seller_name = NULL, draft_text = NULL "
+                "WHERE listing_id = ?", (listing_id,)).rowcount
         conn.commit()
     finally:
         conn.close()

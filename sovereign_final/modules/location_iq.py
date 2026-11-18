@@ -107,7 +107,9 @@ def geocode_precise(address: str, market: str = "sk") -> tuple[float | None, flo
             loc = top["geometry"]["location"]
             return loc["lat"], loc["lng"], risk_data.google_precision(top)
     except Exception as e:
-        log.warning(f"    Geocode error: {e}")
+        # The request's URL carries the key; requests puts it in the error.
+        from modules.redact import redact
+        log.warning(f"    Geocode error: {redact(e)}")
     return None, None, ""
 
 

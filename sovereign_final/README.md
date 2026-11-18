@@ -80,7 +80,11 @@ Tunnel, Tailscale) — the password alone travels in the clear over plain HTTP.
 
 After 5 wrong passwords within 15 minutes the login locks for 15 minutes, for
 every browser at once (a guesser just opens new sessions) — the right
-password included. Restarting the dashboard lifts the lock.
+password included. Restarting the dashboard lifts the lock. Each wrong
+password is logged (never what was typed). Use at least 12 characters; a
+shorter password shows a warning after login. A session idle for
+`SESSION_IDLE_MINUTES` (60 by default, 0 = never) asks for the password
+again, and 🔒 LOG OUT in the sidebar ends it at once.
 
 **From your phone, away from home (Mac):** don't open the port. Use
 Tailscale, a private network between your own devices:
@@ -1051,6 +1055,16 @@ volume `docker volume ls` lists as `<this folder's name>_model_cache`.
 ---
 
 ## Legal
+
+Under every page, and on the login page, are the disclaimer and three
+expanders: **Imprint**, **Privacy notice** and **Terms of use**
+(`dashboard/legal.py`). The imprint reads `OPERATOR_NAME`,
+`OPERATOR_ADDRESS`, `OPERATOR_ID`, `OPERATOR_REGISTER`, `OPERATOR_EMAIL`
+(and `OPERATOR_VAT_ID`, `OPERATOR_PHONE`) from `.env`; a missing one shows as
+"not set". The texts are a draft for this code: have a lawyer read them
+before anyone else uses the dashboard. A card's **🗑 Erase owners' data**
+removes one flat's deed text, the cadastre's answer, Claude's reading and a
+draft's seller (an owner's erasure request); the LV verdict stays.
 
 - Contract drafts are **DRAFT ONLY** — no legal validity
 - Always use **Notárska úschova** for fund transfers

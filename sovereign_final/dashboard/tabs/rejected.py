@@ -8,6 +8,7 @@ import streamlit as st
 
 from dashboard.fmt import _digest, _lv_state, _quick_cadastre, _tag_market, esc
 from dashboard.listing_cache import clear_listing_cache
+from modules.redact import redact
 
 
 def render(v) -> None:
@@ -113,7 +114,7 @@ def render(v) -> None:
                     else:
                         msg = ("warning", f"Re-verify: {res.get('detail', res['status'])}")
                 except Exception as e:
-                    msg = ("warning", f"Re-verify: {e}")
+                    msg = ("warning", f"Re-verify: {redact(e)}")
                 # Redraw whatever the outcome: the table above, the stats and
                 # the deal lists were drawn before the check changed the row.
                 st.session_state["rej_rv_msg"] = msg

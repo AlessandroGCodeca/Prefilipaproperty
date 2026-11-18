@@ -9,11 +9,12 @@ import markets
 from database import DEAL_STAGES
 
 from dashboard.listing_cache import clear_listing_cache
+from modules.redact import redact
 from dashboard.fmt import (
     _floor_label, _labels, _lv_link, _lv_state_t, _of100, _pct_or_dash,
     _quick_cadastre, _rent_fallback, _risk_label, amt, badge, esc, fp, last_seen_label,
     lv_checked_label, market_badge,
-    mkw, sgn, tier_badge,
+    mkw, safe_href, safe_url, sgn, tier_badge,
 )
 
 
@@ -293,7 +294,7 @@ def render_card(l, v):
                         f'[{ph["change_pct"]:+.1%}]</div>', unsafe_allow_html=True)
         if len(l.get("_copies") or []) > 1:
             links = " · ".join(
-                f'<a href="{esc(c.get("url"))}" target="_blank">{esc((c.get("source") or "").upper())} '
+                f'<a href="{safe_href(c.get("url"))}" target="_blank">{esc((c.get("source") or "").upper())} '
                 f'{amt(l, c.get("price_eur") or 0)}</a>'
                 for c in sorted(l["_copies"], key=lambda c: c.get("price_eur") or 0))
             st.markdown(f'<div class="muted" style="margin-top:6px">📡 Same flat on: {links}</div>',
@@ -442,7 +443,7 @@ def render_card(l, v):
 
         # Action buttons
         a1,a2,a3,a4,a5,a6 = st.columns(6)
-        with a1: st.link_button(T("VIEW LISTING"), l.get("url","#"), width="stretch")
+        with a1: st.link_button(T("VIEW LISTING"), safe_url(l.get("url")), width="stretch")
         with a2:
             lat, lng = l.get("lat"), l.get("lng")
             if lat and lng:
@@ -520,10 +521,11 @@ def render_card(l, v):
                 else:
                     st.warning(f"Re-verify: {r.get('detail', r['status'])}")
             except Exception as e:
-                st.warning(f"Re-verify: {e}")
+                st.warning(f"Re-verify: {redact(e)}")
 
-        from dashboard.lv_view import render_part_c
+        from dashboard.lv_view import render_erase, render_part_c
         render_part_c(l, _LV_DOCS)
+        render_erase(l, disabled=using_demo)
         if not using_demo:
             from dashboard.building_view import render_building, render_short_let
             render_building(l, cz)
@@ -588,7 +590,7 @@ def render_memo_button(l, key):
             ready[key] = (sig, pdf, made)
             st.rerun()
         except Exception as e:
-            st.warning(f"Memo: {e}")
+            st.warning(f"Memo: {redact(e)}")
 
 
 def render_offer_sheet_button(l, key):
@@ -617,7 +619,7 @@ def render_offer_sheet_button(l, key):
             ready[key] = (sig, build_offer_sheet(l, comps, days_listed=l.get("_dom")))
             st.rerun()
         except Exception as e:
-            st.warning(f"Offer sheet: {e}")
+            st.warning(f"Offer sheet: {redact(e)}")
 
 
 CARDS_PER_PAGE = 25
@@ -643,7 +645,7 @@ def compact_cards_html(listings, v) -> str:
             f'</div><div class="ccm">{amt(l, l.get("price_eur") or 0)} · {cls}{below} · '
             f'<span class="{tone}">{sgn(l, surplus)}</span>'
             + (f" · [{esc(stage)}]" if stage else "") + "</div>"
-            + (f'<a class="ccb" href="{esc(l["url"])}" target="_blank">OPEN LISTING ↗</a>'
+            + (f'<a class="ccb" href="{safe_href(l["url"])}" target="_blank">OPEN LISTING ↗</a>'
                if l.get("url") else "") + "</div>")
     return "".join(out)
 

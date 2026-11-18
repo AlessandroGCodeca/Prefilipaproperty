@@ -56,6 +56,16 @@ class BackupError(Exception):
     pass
 
 
+def _private(path: str) -> None:
+    """Readable and writable by this computer's user only: a backup holds the
+    deeds' texts with owners' names, deal files and your notes. Ignored where
+    the system has no such permissions (Windows) or refuses."""
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
 def integrity_problem(path: str) -> str | None:
     """None when SQLite reads the file at `path` as a sound database
     (PRAGMA quick_check); else what is wrong with it."""
@@ -128,6 +138,7 @@ def backup_database(day: date | None = None) -> tuple[str, bool]:
     part = target + ".part"
     shutil.copyfile(tmp, part)
     os.replace(part, target)
+    _private(target)
     os.remove(tmp)
     return target, True
 
@@ -159,6 +170,7 @@ def export_user_data(day: date | None = None) -> str:
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=1, default=str)
     os.replace(tmp, path)
+    _private(path)
     return path
 
 
@@ -197,6 +209,7 @@ def copy_off_site(dest: str | None = None) -> str:
                     or os.path.getsize(target) != os.path.getsize(path)):
                 shutil.copy2(path, target + ".part")
                 os.replace(target + ".part", target)
+                _private(target)
                 copied += 1
         for prefix in (DB_PREFIX, DATA_PREFIX):
             old = sorted(glob.glob(os.path.join(dest, f"{prefix}*")))[:-BACKUP_KEEP]
@@ -248,6 +261,7 @@ def save_live_copy() -> str | None:
     finally:
         src.close()
     os.replace(target + ".part", target)
+    _private(target)
     return target
 
 
