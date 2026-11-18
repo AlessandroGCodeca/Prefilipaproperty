@@ -143,3 +143,11 @@ def test_the_setup_checklist_lists_what_is_missing(populated_db, monkeypatch):
     from dashboard.tabs.today import setup_items
     names = {w for w, ok, _ in setup_items() if not ok}
     assert {"Telegram alerts", "Daily-run watcher", "Mapy.com addresses"} <= names
+
+
+# ── D4 · a card redraws on its own ───────────────────────────────────────────
+def test_the_card_is_a_fragment():
+    import inspect
+    from dashboard import cards
+    src = inspect.getsource(cards)
+    assert "@st.fragment\ndef render_card(l, v):" in src

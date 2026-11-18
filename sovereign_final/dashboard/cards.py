@@ -89,6 +89,11 @@ def _save_stage(lid):
     st.session_state[f"card_{lid}"] = True
 
 
+# D4: each card is a fragment: a click inside it (a toggle, a box, the
+# card's own open/close) redraws that card only, not the whole page with its
+# hundreds of listings. A button that changes what other parts show still
+# calls st.rerun(), which redraws everything.
+@st.fragment
 def render_card(l, v):
     # This run's page state (dashboard/view.py).
     show_sro, using_demo = v.sro(l), v.using_demo
