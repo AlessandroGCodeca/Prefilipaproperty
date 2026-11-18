@@ -304,7 +304,7 @@ def test_missing_operator_details_are_listed(monkeypatch):
 def test_the_privacy_notice_names_each_processor_and_the_regulator():
     from dashboard import legal
     text = legal.privacy_md()
-    for name in ("Anthropic", "Google Maps Platform", "Telegram", "Healthchecks.io",
+    for name in ("Anthropic", "Google Maps Platform", "Mapy.com", "Telegram", "Healthchecks.io",
                  "Úrad na ochranu osobných údajov", "_streamlit_xsrf", "LV_TEXT_RETENTION_DAYS"):
         assert name in text
 

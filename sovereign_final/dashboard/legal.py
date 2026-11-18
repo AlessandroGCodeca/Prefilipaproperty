@@ -84,6 +84,8 @@ def privacy_md() -> str:
 - Anthropic (USA): an ad's text, an uploaded scan or deed, an auction announcement — to read them.
   Under Anthropic's data processing addendum with the EU Standard Contractual Clauses; not used to
   train models.
+- Mapy.com, Seznam.cz, a.s. (Czechia): the address of a listing, to find its coordinates.
+  Used only when a Mapy.com key is set. Inside the EU.
 - Google Maps Platform (USA): addresses and coordinates, for location, amenities, satellite
   pictures and travel times. Under Google's data processing terms.
 - Telegram: alert messages to the operator's own chat.
@@ -132,6 +134,12 @@ def render_footer() -> None:
     expander, at the foot of the page."""
     st.markdown(f'<hr class="div"><div class="muted" style="font-size:.7rem">'
                 f'⚖️ {esc(DISCLAIMER)}</div>', unsafe_allow_html=True)
+    if os.getenv("MAPY_API_KEY"):
+        # Mapy.com's terms: its logo or "Search by Mapy.com" wherever its
+        # geocoder is used (developer.mapy.com/rest-api-mapy-cz/atribution/).
+        st.markdown('<div class="muted" style="font-size:.7rem">Address search by '
+                    '<a href="https://mapy.com" target="_blank" rel="noopener">Mapy.com</a> '
+                    '© Seznam.cz, a.s.</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     with c1, st.expander("Imprint"):
         st.markdown(imprint_html(), unsafe_allow_html=True)
