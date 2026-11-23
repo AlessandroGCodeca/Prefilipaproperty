@@ -174,6 +174,11 @@ section[data-testid="stSidebar"] {
 .brow.tot { border-top:1px solid var(--line); border-bottom:none; }
 .brow.tot .l { color:var(--muted); } .brow.tot .v { color:var(--text); font-weight:700; }
 .brow.pos .v { color:var(--good); } .brow.neg .v { color:var(--bad); }
+/* TODAY's setup list: on a phone, what to do goes under the item. */
+@media (max-width: 640px) {
+    .setup .brow { flex-direction:column; gap:2px; }
+    .setup .brow .v { font-size:.85em; }
+}
 
 /* Portal health strip: one chip per portal */
 .ph { display:flex; flex-wrap:wrap; gap:4px; margin:0 0 8px; }

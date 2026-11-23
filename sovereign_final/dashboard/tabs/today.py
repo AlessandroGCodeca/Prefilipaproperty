@@ -175,7 +175,7 @@ def render_setup() -> None:
             f'<div class="brow"><span class="l">{"✓" if ok else "○"} {esc(what)}</span>'
             f'<span class="v" style="font-family:var(--sans)">{"" if ok else esc(how)}</span></div>'
             for what, ok, how in items)
-        st.markdown(rows, unsafe_allow_html=True)
+        st.markdown(f'<div class="setup">{rows}</div>', unsafe_allow_html=True)
         st.caption("Change .env, then restart the dashboard. This box goes away once all is done.")
 
 
