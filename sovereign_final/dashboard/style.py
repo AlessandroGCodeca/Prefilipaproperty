@@ -7,10 +7,42 @@ same two themes; THEME_JS keeps them and the tokens in step.
 import streamlit as st
 
 
+# D15: IBM Plex Sans and Mono come with the app (static/fonts, SIL Open Font
+# License 1.1, from the Fontsource packages) and are served by this
+# dashboard itself (config.toml enableStaticServing): the same look on every
+# device, and no request to a font server such as fonts.googleapis.com.
+# Latin and Latin Extended (Slovak and Czech letters), four weights each; a
+# browser fetches only the files its text needs (unicode-range).
+FONT_RANGES = {
+    "latin": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,"
+             "U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,"
+             "U+FEFF,U+FFFD",
+    "latin-ext": "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,"
+                 "U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,"
+                 "U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF",
+}
+FONT_WEIGHTS = (400, 500, 600, 700)
+FONT_FAMILIES = {"sans": "IBM Plex Sans", "mono": "IBM Plex Mono"}
+
+
+def font_faces() -> str:
+    """The @font-face rules for the fonts in static/fonts (the same files
+    on every device, even where IBM Plex is installed)."""
+    out = []
+    for fam, name in FONT_FAMILIES.items():
+        for w in FONT_WEIGHTS:
+            for sub, rng in FONT_RANGES.items():
+                out.append(
+                    f"@font-face {{ font-family: '{name}'; font-style: normal; "
+                    f"font-weight: {w}; font-display: swap; "
+                    f"src: url('app/static/fonts/ibm-plex-{fam}-{sub}-{w}-normal.woff2') format('woff2'); "
+                    f"unicode-range: {rng}; }}")
+    return "\n".join(out)
+
+
 CSS = """
 <style>
-/* No web-font import: it asked fonts.googleapis.com on every page view and fell
-   back silently when offline. IBM Plex is used if installed locally. */
+/*FONTS*/
 :root {
     --bg: #07090e;
     --panel: #0b0d14;
@@ -350,6 +382,9 @@ THEME_JS = """<script>
   if (!window.svThemeSync) window.svThemeSync = window.setInterval(sync, 400);
 })();
 </script>"""
+
+
+CSS = CSS.replace("/*FONTS*/", font_faces(), 1)
 
 
 def inject() -> None:

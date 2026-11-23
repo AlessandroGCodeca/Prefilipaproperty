@@ -47,3 +47,7 @@ maxUploadSize = 25
 # Both on by default; set here so they can't be switched off by accident.
 enableXsrfProtection = true
 enableCORS = true
+# D15: serves ./static at app/static/ — only the IBM Plex fonts and their
+# licence (static/fonts). Anything put there is public, without a login, so
+# nothing else goes in that folder.
+enableStaticServing = true

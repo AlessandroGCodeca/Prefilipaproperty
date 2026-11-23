@@ -352,3 +352,29 @@ def test_charts_take_the_light_palette():
     wf = waterfall_spec(800, [("Mortgage", 500)], 300, theme="light")
     assert "#0a6b43" in wf["encoding"]["color"]["scale"]["range"]
     assert price_spec([("2026-01-01", 1), ("2026-02-01", 2)], theme="light")["mark"]["color"] == "#1a56c4"
+
+
+# ── D15: the fonts come with the app ────────────────────────────────────────
+def test_every_font_the_css_asks_for_is_in_static_with_its_licence():
+    from dashboard.style import CSS
+    root = os.path.join(os.path.dirname(__file__), "..")
+    urls = re.findall(r"url\('app/static/(fonts/[^']+)'\)", CSS)
+    assert len(urls) == 16
+    for u in urls:
+        with open(os.path.join(root, "static", u), "rb") as f:
+            assert f.read(4) == b"wOF2", u
+    for lic in ("OFL-IBM-Plex-Sans.txt", "OFL-IBM-Plex-Mono.txt"):
+        text = open(os.path.join(root, "static", "fonts", lic), encoding="utf-8").read()
+        assert "SIL Open Font License" in text and "IBM Corp" in text
+    # Nothing but the fonts, their licences and the note is served publicly.
+    served = os.listdir(os.path.join(root, "static", "fonts"))
+    assert all(n.endswith((".woff2", ".txt", ".md")) for n in served)
+    assert os.listdir(os.path.join(root, "static")) == ["fonts"]
+
+
+def test_static_serving_is_on_and_no_font_server_is_asked():
+    import tomllib
+    from dashboard.style import CSS
+    with open(os.path.join(os.path.dirname(__file__), "..", ".streamlit", "config.toml"), "rb") as f:
+        assert tomllib.load(f)["server"]["enableStaticServing"] is True
+    assert "googleapis" not in CSS and "@import" not in CSS
