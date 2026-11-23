@@ -36,13 +36,13 @@ def _lv_photo(lid: str, cz: bool, disabled: bool) -> None:
     from modules import doc_reader
     if not doc_reader.enabled():
         return
-    with st.expander("📷 Fotka nebo sken LV" if cz else "📷 LV photo or scan"):
+    with st.expander("Fotka nebo sken LV" if cz else "LV photo or scan", icon=":material/photo_camera:"):
         up = st.file_uploader(
             "Photo (JPEG, PNG, WebP) or PDF", type=["pdf", "jpg", "jpeg", "png", "webp"],
             key=f"lvph_{lid}", disabled=disabled,
             help="Claude copies the deed; nothing is stored until you press RE-VERIFY LV. "
                  "An iPhone photo: share it as JPEG (Settings → Camera → Most Compatible).")
-        if up is not None and st.button("📖 READ IT", key=f"lvphb_{lid}", disabled=disabled):
+        if up is not None and st.button("READ IT", icon=":material/menu_book:", key=f"lvphb_{lid}", disabled=disabled):
             with st.spinner("Claude is reading the deed…"):
                 got = doc_reader.read_title_deed(up.getvalue())
             if not got:
@@ -636,10 +636,10 @@ def render_memo_button(l, key):
         kept = None
     if kept is not None:
         _, pdf, made = kept
-        st.download_button("⬇️ MEMO PDF", pdf,
+        st.download_button("MEMO PDF", pdf, icon=":material/download:",
                            file_name=f"memo_{(l.get('id') or 'x')[:8]}_{made:%Y%m%d}.pdf",
                            mime="application/pdf", key=f"{key}_dl", width="stretch")
-    elif st.button("📄 MEMO", key=key, width="stretch"):
+    elif st.button("MEMO", icon=":material/description:", key=key, width="stretch"):
         from modules.memo import build_memo_pdf
         from modules.contract_draft import local_now
         from database import get_annotations
@@ -665,10 +665,10 @@ def render_offer_sheet_button(l, key):
         ready.pop(key, None)
         kept = None
     if kept is not None:
-        st.download_button("⬇️ OFFER PDF", kept[1],
+        st.download_button("OFFER PDF", kept[1], icon=":material/download:",
                            file_name=f"offer_{(l.get('id') or 'x')[:8]}.pdf",
                            mime="application/pdf", key=f"{key}_dl", width="stretch")
-    elif st.button("📑 OFFER SHEET", key=key, width="stretch",
+    elif st.button("OFFER SHEET", icon=":material/request_quote:", key=key, width="stretch",
                    help="One page for the viewing: your max offer, flats like it listed now, "
                         "time on the market and price cuts."):
         import markets

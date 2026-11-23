@@ -93,7 +93,7 @@ def test_your_situation_saves_and_rescores(populated_db, tmp_path, monkeypatch):
     at = run_app()
     box = next(n for n in at.sidebar.number_input if n.label == "Loan term (years)")
     box.set_value(30)
-    next(b for b in at.sidebar.button if b.label == "💾 SAVE AND RE-SCORE").click()
+    next(b for b in at.sidebar.button if b.label == "SAVE AND RE-SCORE").click()
     at.run()
     _ok(at)
     assert config.LOAN_TERM_YEARS == 30

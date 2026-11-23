@@ -109,7 +109,7 @@ def open_card(lid: str) -> None:
     put it first in its section."""
     st.session_state[f"card_{lid}"] = True
     st.session_state["_pin"] = lid
-    st.query_params["group"] = "🎯 DEALS"
+    st.query_params["group"] = "deals"
     st.query_params["tab"] = "ACTIVE SNAG LIST"
     # New tab bars open on the tabs just put in the address (app.py).
     st.session_state["_tabgen"] = st.session_state.get("_tabgen", 0) + 1
@@ -149,7 +149,7 @@ def setup_items() -> list[tuple[str, bool, str]]:
     situation = os.path.exists(getattr(config, "SETTINGS_PATH", ""))
     return [
         ("Your financing and income", situation,
-         "👤 YOUR SITUATION in the sidebar: your rate, loan share and income."),
+         "YOUR SITUATION in the sidebar: your rate, loan share and income."),
         ("Telegram alerts", bool(env("TELEGRAM_BOT_TOKEN") and env("TELEGRAM_CHAT_ID")),
          "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env."),
         ("Claude reads ads and scans", bool(env("ANTHROPIC_API_KEY")), "ANTHROPIC_API_KEY in .env."),
@@ -198,7 +198,7 @@ def render(v) -> None:
                 unsafe_allow_html=True)
     if failed:
         st.warning(f"{', '.join(failed)}: the latest run failed or found nothing. "
-                   "Open 🩺 DIAGNOSTICS → TEST SITES in the sidebar to see why.")
+                   "Open DIAGNOSTICS → TEST SITES in the sidebar to see why.")
     if not secs:
         st.success("Nothing new needs you. The full list is in DEALS → ACTIVE SNAG LIST.")
         return

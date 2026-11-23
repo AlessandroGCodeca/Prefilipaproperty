@@ -35,7 +35,7 @@ _redact.install()        # no key from .env in the terminal's log, even inside a
 from modules import market_rates as _market_rates  # noqa: E402
 from modules import settings as _settings  # noqa: E402
 
-# Your own figures (👤 YOUR SITUATION), when another process — or another
+# Your own figures (YOUR SITUATION), when another process — or another
 # browser tab — saved a change since this one last looked: one stat() a run.
 # The same for the market rate the scheduler last read from the ECB.
 _settings.sync()
@@ -105,14 +105,14 @@ overview.render(v, sb)
 # 1440 px and hid the last behind an arrow.
 TAB_GROUPS = (
     # D1: what changed and what needs you, first.
-    ("🏠 TODAY",    (("TODAY", today),)),
-    ("🎯 DEALS",    (("TRIAGE TABLE", triage), ("ACTIVE SNAG LIST", snag_list),
+    (":material/home: TODAY",     (("TODAY", today),)),
+    (":material/sell: DEALS",    (("TRIAGE TABLE", triage), ("ACTIVE SNAG LIST", snag_list),
                      ("MAP", map_view), ("SATELLITE VIEWER", satellite),
                      ("AUCTIONS", auctions))),
-    ("📊 ANALYSIS", (("WHAT-IF / TAX", what_if), ("COMPARE", compare),
+    (":material/analytics: ANALYSIS", (("WHAT-IF / TAX", what_if), ("COMPARE", compare),
                      ("RENT COMPS", rent_comps), ("TAX RATES", tax_rates),
                      ("BACKTEST", backtest))),
-    ("🗂 WORKFLOW", (("DEAL PIPELINE", deal_pipeline), ("LV TO-DO", lv_todo),
+    (":material/checklist: WORKFLOW", (("DEAL PIPELINE", deal_pipeline), ("LV TO-DO", lv_todo),
                      ("REJECTED", rejected), ("ONE-CLICK CLOSE", close),
                      ("ALERTS", alert_rules), ("PORTFOLIO", portfolio))),
 )
@@ -123,15 +123,23 @@ DRAW_ORDER = (today, triage, snag_list, map_view, what_if, deal_pipeline, reject
 
 # The tab you were on comes back after a reload (and in a bookmark): kept in
 # the address as ?group=…&tab=….
+def group_slug(label: str) -> str:
+    """A tab group's short name in the address: "deals" for its label."""
+    return label.split()[-1].lower()
+
+
 def _remember(param: str, key: str) -> None:
     value = st.session_state.get(key)
     if value:
-        st.query_params[param] = value
+        st.query_params[param] = group_slug(value) if param == "group" else value
 
 
 st.markdown('<div id="tabs"></div>', unsafe_allow_html=True)
 _groups = [g for g, _ in TAB_GROUPS]
-_qp_group = st.query_params.get("group")
+# The address names a group by its short name ("deals"); an old bookmark with
+# the whole label still works.
+_qp = st.query_params.get("group") or ""
+_qp_group = next((g for g in _groups if _qp in (g, group_slug(g))), None)
 # A tab bar opens on its default only when it is new: TODAY's Open button
 # (dashboard/tabs/today.open_card) bumps this number, so the bars are new
 # and open on the tab in the address.

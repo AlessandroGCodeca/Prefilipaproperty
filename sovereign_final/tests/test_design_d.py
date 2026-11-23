@@ -85,7 +85,7 @@ def test_today_is_the_first_tab_and_lists_what_changed(populated_db):
     populated_db.set_starred("g1", True)
     at = run_app()
     assert not at.exception, [e.value for e in at.exception]
-    assert at.tabs[0].label == "🏠 TODAY"
+    assert at.tabs[0].label == ":material/home: TODAY"
     md = " ".join(m.value for m in at.markdown)
     assert "Since your last visit" in md
     assert 'class="td-h">Starred' in md
@@ -94,7 +94,7 @@ def test_today_is_the_first_tab_and_lists_what_changed(populated_db):
     btn.click().run()
     assert at.session_state["card_g1"] is True and at.session_state["_pin"] == "g1"
     assert at.session_state["_tabgen"] == 1
-    assert at.query_params["group"] == ["🎯 DEALS"] or at.query_params["group"] == "🎯 DEALS"
+    assert at.query_params["group"] in (["deals"], "deals")
 
 
 def test_the_last_visit_is_remembered_across_sessions(populated_db):
@@ -226,3 +226,16 @@ def test_the_legend_follows_the_colour_mode():
     assert "≥ +€100 a month" in legend_html(True) and "Green" not in legend_html(True)
     assert "Green: ≥20% under market" in legend_html(False)
     assert "rgb(61,220,151)" in legend_html(False)
+
+
+# ── D6: one icon set ────────────────────────────────────────────────────────
+def test_tabs_and_buttons_use_material_icons_not_emoji(populated_db):
+    """The tab groups and the sidebar's buttons carry Material icons; the
+    address keeps a plain word for the group."""
+    at = run_app()
+    assert not at.exception
+    tabs = {t.label for t in at.tabs}
+    for g in ("home: TODAY", "sell: DEALS", "analytics: ANALYSIS", "checklist: WORKFLOW"):
+        assert f":material/{g}" in tabs, tabs
+    labels = [b.label for b in at.button] + [t.label for t in at.tabs]
+    assert not any(ch in l for l in labels for ch in "🔻👤📸🧪🩺▶🔗")

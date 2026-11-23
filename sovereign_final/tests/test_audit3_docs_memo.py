@@ -228,7 +228,7 @@ def test_a_kept_memo_is_rebuilt_once_the_listing_changes(app_db):
     db.add_annotation("sk1", "synthetic note after the memo", 9)   # … and a note
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    assert any(b.key == "memo_sk1" for b in at.button)          # 📄 MEMO again
+    assert any(b.key == "memo_sk1" for b in at.button)          # MEMO again
     assert "memo_sk1" not in at.session_state["memo_ready"]
     next(b for b in at.button if b.key == "memo_sk1").click().run()
     assert not at.exception, [e.value for e in at.exception]

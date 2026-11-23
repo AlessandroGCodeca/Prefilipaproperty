@@ -456,7 +456,7 @@ class TestEnrichPendingSettle:
 
 
 class TestEnrichPendingRun:
-    """run() is what the dashboard's 🔎 FILL MISSING DETAILS button and the
+    """run() is what the dashboard's FILL MISSING DETAILS button and the
     pipeline's "Fill missing details" step call: main() minus the argv and
     the closing summary."""
 
