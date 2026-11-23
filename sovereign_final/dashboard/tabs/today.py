@@ -192,7 +192,10 @@ def render(v) -> None:
     listings = v.greens + v.yellows + v.whites
     secs = sections(listings, v, since, get_starred())
     failed = failed_portals(portal_health(days=2))
-    when = since.astimezone().strftime("%-d %b, %H:%M")
+    local = since.astimezone()
+    # "23 Nov, 12:35". The day without its zero comes from .day: strftime's
+    # no-padding flag is a Linux and Mac extension that Windows rejects.
+    when = f"{local.day} {local:%b, %H:%M}"
     st.markdown(f'<div class="vd-head" style="margin:4px 0 2px">Since your last visit</div>'
                 f'<div class="muted" style="margin-bottom:10px">{esc(when)}</div>',
                 unsafe_allow_html=True)

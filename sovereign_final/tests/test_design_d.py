@@ -378,3 +378,28 @@ def test_static_serving_is_on_and_no_font_server_is_asked():
     with open(os.path.join(os.path.dirname(__file__), "..", ".streamlit", "config.toml"), "rb") as f:
         assert tomllib.load(f)["server"]["enableStaticServing"] is True
     assert "googleapis" not in CSS and "@import" not in CSS
+
+
+def test_no_strftime_code_that_only_works_on_linux_and_mac():
+    """%-d, %-m … (no zero padding) are glibc and BSD extensions: Windows'
+    strftime raises ValueError on them, which crashed the whole page there."""
+    root = os.path.join(os.path.dirname(__file__), "..")
+    bad = []
+    for d in ("dashboard", "modules", "engine", "scraper", "database"):
+        for dirpath, _dirs, files in os.walk(os.path.join(root, d)):
+            for f in files:
+                if f.endswith(".py"):
+                    text = open(os.path.join(dirpath, f), encoding="utf-8").read()
+                    bad += [f"{f}: {m}" for m in re.findall(r"%[-#][a-zA-Z]", text)]
+    for f in ("app.py", "scheduler.py"):
+        bad += [f"{f}: {m}" for m in re.findall(r"%[-#][a-zA-Z]",
+                                               open(os.path.join(root, f), encoding="utf-8").read())]
+    assert not bad, bad
+
+
+def test_today_says_when_the_last_visit_was(populated_db):
+    at = run_app()
+    assert not at.exception
+    md = " ".join(m.value for m in at.markdown)
+    when = re.search(r'Since your last visit</div><div class="muted"[^>]*>([^<]+)<', md)
+    assert when and re.fullmatch(r"\d{1,2} [A-Z][a-z]{2}, \d{2}:\d{2}", when.group(1)), when
