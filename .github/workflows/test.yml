@@ -90,8 +90,8 @@ jobs:
           pip install -r requirements.txt pytest
 
       - name: Install Chromium
-        # The browser build this Playwright pin needs (1248 for 1.64.1), plus
-        # its system libraries, as the Dockerfile does.
+        # The Chromium build this Playwright pin needs (each release has its
+        # own), plus its system libraries, as the Dockerfile does.
         run: python -m playwright install --with-deps chromium
 
       - name: Run browser tests
