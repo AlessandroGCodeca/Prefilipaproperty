@@ -85,11 +85,12 @@ def _situation_panel(busy: bool) -> bool:
 
 
 LANG_NAMES = {"auto": "By the flat's country", "en": "English on every card"}
+THEME_NAMES = {"dark": "Dark", "light": "Light", "auto": "Like this device"}
 
 
 def _display_panel() -> None:
-    """DISPLAY: the cards' language (D7), kept in the database
-    (dashboard/prefs.py)."""
+    """DISPLAY: the cards' language (D7) and the theme (D14), kept in the
+    database (dashboard/prefs.py)."""
     from dashboard import prefs
     with st.expander("DISPLAY", icon=":material/tune:", expanded=False):
         prefs.get("card_lang")
@@ -98,6 +99,12 @@ def _display_panel() -> None:
                  help="By the flat's country: a Czech flat's card in Czech, a Slovak one's "
                       "in English. The listing's own text stays as written, and amounts "
                       "stay in the flat's currency.")
+        prefs.get("theme")
+        st.radio("Theme", tuple(THEME_NAMES), key="theme", horizontal=True,
+                 format_func=THEME_NAMES.get, on_change=prefs.save, args=("theme",),
+                 help="Light is easier to read in daylight and on a projector. "
+                      "Like this device follows your phone's or computer's setting. "
+                      "The page reloads once to switch.")
 
 
 def render() -> SimpleNamespace:

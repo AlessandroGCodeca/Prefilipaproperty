@@ -325,7 +325,7 @@ def render_card(l, v):
                 why = (f"the national default €{_RENT['default']:.2f}/m² — this town is in no rent table"
                        if fallback == "default" else
                        f"the {esc(l['rent_key'].title())} median of its towns — no figure for this town")
-            st.markdown(f'<div class="muted" style="margin-top:6px;color:#f5b84a">⚠ Rent uses '
+            st.markdown(f'<div class="muted" style="margin-top:6px;color:var(--caution)">⚠ Rent uses '
                         f'{why}. Check local rents before trusting the surplus.</div>',
                         unsafe_allow_html=True)
         # This flat type's own rental comps and how long such ads stay up
@@ -340,8 +340,9 @@ def render_card(l, v):
         # D8: the month's cash flow and the price over time, drawn.
         from dashboard.charts import cost_rows, price_spec, waterfall_spec
         unit = "Kč" if (l.get("_cur") or "EUR") == "CZK" else "€"
-        wf = waterfall_spec(rent, cost_rows(l, show_sro, T), surplus, unit)
-        pr = price_spec(ph["history"], unit) if ph else None
+        from dashboard.prefs import theme_now
+        wf = waterfall_spec(rent, cost_rows(l, show_sro, T), surplus, unit, theme_now())
+        pr = price_spec(ph["history"], unit, theme_now()) if ph else None
         if wf or pr:
             g1, g2 = st.columns(2) if wf and pr else (st.container(), None)
             if wf:

@@ -4,12 +4,16 @@ flow as a waterfall (the rent in, each cost out, ending on the surplus) and
 the asking price over time. Vega-Lite specs, drawn by st.vega_lite_chart.
 
 Colours are the palette's (dashboard/style.py tokens), written out: a chart
-can't read the page's CSS variables.
+can't read the page's CSS variables. Dark is palette 1, light palette 3 (D14).
 """
 
 from __future__ import annotations
 
 GOOD, BAD, MUTED, INFO, TEXT = "#3ddc97", "#ff8a8a", "#8b97b0", "#6ea8ff", "#bcc8e0"
+PALETTES = {
+    "dark": {"good": GOOD, "bad": BAD, "muted": MUTED, "info": INFO},
+    "light": {"good": "#0a6b43", "bad": "#b3261e", "muted": "#8b95a7", "info": "#1a56c4"},
+}
 
 
 def cost_rows(l: dict, sro: bool, T=lambda s: s) -> list[tuple[str, float]]:
@@ -32,7 +36,7 @@ def cost_rows(l: dict, sro: bool, T=lambda s: s) -> list[tuple[str, float]]:
 
 
 def waterfall_spec(rent: float, costs: list[tuple[str, float]], surplus: float | None,
-                   unit: str = "€") -> dict | None:
+                   unit: str = "€", theme: str = "dark") -> dict | None:
     """A waterfall: rent up from 0, each cost down from where the last ended,
     the surplus as the last bar from 0. None without a rent."""
     if not rent:
@@ -47,6 +51,7 @@ def waterfall_spec(rent: float, costs: list[tuple[str, float]], surplus: float |
     rows.append({"step": "Surplus", "start": 0.0, "end": end,
                  "kind": "net+" if end >= 0 else "net-", "amount": end})
     order = [r["step"] for r in rows]
+    c = PALETTES.get(theme, PALETTES["dark"])
     # Sideways, one row per item: every label stays readable at any width.
     return {
         "data": {"values": rows},
@@ -59,14 +64,14 @@ def waterfall_spec(rent: float, costs: list[tuple[str, float]], surplus: float |
             "x2": {"field": "end"},
             "color": {"field": "kind", "type": "nominal", "legend": None,
                       "scale": {"domain": ["in", "out", "net+", "net-"],
-                                "range": [GOOD, MUTED, GOOD, BAD]}},
+                                "range": [c["good"], c["muted"], c["good"], c["bad"]]}},
             "tooltip": [{"field": "step", "title": "Item"},
                         {"field": "amount", "title": unit, "format": ",.0f"}],
         },
     }
 
 
-def price_spec(history, unit: str = "€") -> dict | None:
+def price_spec(history, unit: str = "€", theme: str = "dark") -> dict | None:
     """The asking price over time, a step line; None with fewer than two points."""
     pts = [{"date": str(when)[:10], "price": float(p)} for when, p in (history or []) if p]
     if len(pts) < 2:
@@ -74,7 +79,8 @@ def price_spec(history, unit: str = "€") -> dict | None:
     return {
         "data": {"values": pts},
         "height": 220,
-        "mark": {"type": "line", "interpolate": "step-after", "point": True, "color": INFO},
+        "mark": {"type": "line", "interpolate": "step-after", "point": True,
+                 "color": PALETTES.get(theme, PALETTES["dark"])["info"]},
         "encoding": {
             "x": {"field": "date", "type": "temporal", "title": None},
             "y": {"field": "price", "type": "quantitative", "title": unit,

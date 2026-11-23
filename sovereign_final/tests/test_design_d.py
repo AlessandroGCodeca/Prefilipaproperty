@@ -307,3 +307,48 @@ def test_the_backtest_table_takes_missing_numbers(populated_db, monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     shown = next(df.value for df in at.dataframe if col in df.value.columns)
     assert shown[col].dtype.kind == "f"
+
+
+# ── D14: a light theme ──────────────────────────────────────────────────────
+def test_both_themes_are_configured_and_light_tokens_exist():
+    import tomllib
+    with open(os.path.join(os.path.dirname(__file__), "..", ".streamlit", "config.toml"), "rb") as f:
+        cfg = tomllib.load(f)
+    assert cfg["theme"]["dark"]["base"] == "dark" and cfg["theme"]["light"]["base"] == "light"
+    from dashboard.style import CSS
+    light = CSS[CSS.index('html[data-theme="light"]'):]
+    for token in ("--bg", "--text", "--good", "--bad", "--caution", "--info"):
+        assert token + ":" in light[:light.index("}")]
+
+
+def test_the_theme_slot_is_the_one_streamlit_reads():
+    """THEME_JS writes Streamlit's own localStorage slot. Its name and values
+    are Streamlit internals: if an upgrade changes them, this fails rather
+    than the switch silently doing nothing."""
+    import glob
+    import streamlit
+    from dashboard.style import ST_THEME_NAMES, THEME_JS
+    js = "".join(open(p, encoding="utf-8").read() for p in glob.glob(os.path.join(
+        os.path.dirname(streamlit.__file__), "static", "static", "js", "*.js")))
+    assert re.search(r"\w+=2,\w+=`stActiveTheme-\$\{window\.location\.pathname\}`", js)
+    assert "e===`System`||e===`Light`||e===`Dark`" in js
+    assert set(ST_THEME_NAMES.values()) == {"System", "Light", "Dark"}
+    assert '"stActiveTheme-" + window.location.pathname + "-v2"' in THEME_JS
+
+
+def test_the_theme_setting_is_kept_and_sent_to_the_page(populated_db):
+    at = run_app()
+    assert not at.exception
+    assert at.sidebar.radio(key="theme").value == "dark"
+    at.sidebar.radio(key="theme").set_value("light").run()
+    from dashboard import prefs
+    assert prefs._read("theme") == "light"
+    again = run_app()
+    assert again.sidebar.radio(key="theme").value == "light"
+
+
+def test_charts_take_the_light_palette():
+    from dashboard.charts import price_spec, waterfall_spec
+    wf = waterfall_spec(800, [("Mortgage", 500)], 300, theme="light")
+    assert "#0a6b43" in wf["encoding"]["color"]["scale"]["range"]
+    assert price_spec([("2026-01-01", 1), ("2026-02-01", 2)], theme="light")["mark"]["color"] == "#1a56c4"

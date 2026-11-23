@@ -1,6 +1,7 @@
 """
-dashboard/style.py — the page's dark theme (.streamlit/config.toml sets
-Streamlit's own to match).
+dashboard/style.py — the page's look: palette 1 (dark) and palette 3 (light,
+D14) as CSS tokens. .streamlit/config.toml gives Streamlit's own widgets the
+same two themes; THEME_JS keeps them and the tokens in step.
 """
 
 import streamlit as st
@@ -27,6 +28,35 @@ CSS = """
     --bad: #ff8a8a;
     --info: #6ea8ff;
     --bad-line: #4a2326;
+    --lv-hard-bg: #5c1f1f; --lv-hard: #ffb4ab;
+    --lv-soft-bg: #4d3f00; --lv-soft: #ffe082;
+    --lv-bank-bg: #12381f; --lv-bank: #a5d6a7;
+    --lv-unk-bg: #2a2350;  --lv-unk: #d1c4e9; --lv-unk-line: #7e57c2;
+}
+/* D14: palette 3, "paper light". html[data-theme] is set by THEME_JS (below,
+   in Python) from the theme Streamlit is showing. Every text colour passes
+   4.5:1 on the white card (WCAG). */
+html[data-theme="light"] {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --surface: #ffffff;
+    --hover: #eef0f4;
+    --line-soft: #e6e9ef;
+    --line: #d5dae3;
+    --line-strong: #b7bfcc;
+    --text: #141a26;
+    --body: #2a3342;
+    --muted: #566075;
+    --faint: #5b667b;
+    --good: #0a6b43;
+    --caution: #7a4a00;
+    --bad: #b3261e;
+    --info: #1a56c4;
+    --bad-line: #efc2bf;
+    --lv-hard-bg: #fbe3e1; --lv-hard: #8c1d16;
+    --lv-soft-bg: #fdf0cf; --lv-soft: #6b4100;
+    --lv-bank-bg: #dcf2e6; --lv-bank: #0a5a39;
+    --lv-unk-bg: #ece8f8;  --lv-unk: #4a3a8c; --lv-unk-line: #7e57c2;
 }
 :root {
     --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Consolas, Menlo, monospace;
@@ -135,10 +165,10 @@ section[data-testid="stSidebar"] {
 .lvc { font-family:var(--mono); font-size:0.72rem; line-height:1.7; color:var(--body);
        background:var(--panel); border:1px solid var(--line); border-radius:3px; padding:10px 12px;
        margin-top:6px; max-height:420px; overflow:auto; white-space:pre-wrap; word-break:break-word; }
-.lvh { background:#5c1f1f; color:#ffb4ab; padding:0 3px; border-radius:2px; }
-.lvs { background:#4d3f00; color:#ffe082; padding:0 3px; border-radius:2px; }
-.lvb { background:#12381f; color:#a5d6a7; padding:0 3px; border-radius:2px; }
-.lvu { background:#2a2350; color:#d1c4e9; padding:0 3px; border-radius:2px; outline:1px dashed #7e57c2; }
+.lvh { background:var(--lv-hard-bg); color:var(--lv-hard); padding:0 3px; border-radius:2px; }
+.lvs { background:var(--lv-soft-bg); color:var(--lv-soft); padding:0 3px; border-radius:2px; }
+.lvb { background:var(--lv-bank-bg); color:var(--lv-bank); padding:0 3px; border-radius:2px; }
+.lvu { background:var(--lv-unk-bg); color:var(--lv-unk); padding:0 3px; border-radius:2px; outline:1px dashed var(--lv-unk-line); }
 .cc { background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--line-strong);
       border-radius:3px; padding:10px 12px; margin-bottom:8px; }
 .cc.g { border-left-color:var(--good); } .cc.y { border-left-color:var(--caution); }
@@ -281,5 +311,50 @@ a:focus-visible, input:focus-visible, textarea:focus-visible, [role="radio"]:foc
 """
 
 
+# D14: the theme. Streamlit keeps the one a browser shows in localStorage,
+# under "stActiveTheme-<path>-v2", as one of these names (Streamlit 1.66;
+# tests/test_design_d.py checks the installed frontend still uses them).
+ST_THEME_NAMES = {"dark": "Dark", "light": "Light", "auto": "System"}
+
+# Puts the theme chosen in DISPLAY (dashboard/prefs.py, kept in the database)
+# into Streamlit's slot and reloads once if it wasn't there; then marks <html>
+# with the theme Streamlit is showing (its header's color-scheme), which the
+# CSS tokens above follow. No data in it but the theme's name.
+THEME_JS = """<script>
+(() => {
+  const want = __WANT__;
+  const key = "stActiveTheme-" + window.location.pathname + "-v2";
+  let have = null;
+  try { have = JSON.parse(window.localStorage.getItem(key)); } catch (e) {}
+  if (have !== want) {
+    let tries = 0;
+    try { tries = Number(window.sessionStorage.getItem("svThemeTries") || 0); } catch (e) {}
+    if (tries < 2) {
+      try {
+        window.localStorage.setItem(key, JSON.stringify(want));
+        window.sessionStorage.setItem("svThemeTries", String(tries + 1));
+        window.location.reload();
+        return;
+      } catch (e) {}
+    }
+  } else {
+    try { window.sessionStorage.removeItem("svThemeTries"); } catch (e) {}
+  }
+  const sync = () => {
+    const h = document.querySelector('header[data-testid="stHeader"]');
+    if (!h) return;
+    const t = window.getComputedStyle(h).colorScheme === "light" ? "light" : "dark";
+    if (document.documentElement.dataset.theme !== t) document.documentElement.dataset.theme = t;
+  };
+  sync();
+  if (!window.svThemeSync) window.svThemeSync = window.setInterval(sync, 400);
+})();
+</script>"""
+
+
 def inject() -> None:
+    import json
+    from dashboard import prefs
     st.markdown(CSS, unsafe_allow_html=True)
+    want = ST_THEME_NAMES[prefs.get("theme")]
+    st.html(THEME_JS.replace("__WANT__", json.dumps(want)), unsafe_allow_javascript=True)

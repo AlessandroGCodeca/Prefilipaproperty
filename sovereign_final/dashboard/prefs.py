@@ -17,7 +17,8 @@ CHOICES = {
     # "auto": a Czech flat's card in Czech, a Slovak one's in English.
     # "en": every card in English. The listing's own text stays as written.
     "card_lang": ("auto", "en"),
-    "theme": ("dark", "light"),
+    # "auto": light or dark as the device is set (a phone in the sun, say).
+    "theme": ("dark", "light", "auto"),
 }
 
 
@@ -51,6 +52,18 @@ def get(name: str) -> str:
     except Exception:
         pass
     return val
+
+
+def theme_now() -> str:
+    """"dark" or "light": the theme on screen, for what CSS can't colour
+    (the charts). With "auto", the one Streamlit reports, else dark."""
+    chosen = get("theme")
+    if chosen != "auto":
+        return chosen
+    try:
+        return "light" if st.context.theme.type == "light" else "dark"
+    except Exception:
+        return "dark"
 
 
 def save(name: str) -> None:
