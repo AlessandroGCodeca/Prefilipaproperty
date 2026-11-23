@@ -84,6 +84,22 @@ def _situation_panel(busy: bool) -> bool:
     return False
 
 
+LANG_NAMES = {"auto": "By the flat's country", "en": "English on every card"}
+
+
+def _display_panel() -> None:
+    """DISPLAY: the cards' language (D7), kept in the database
+    (dashboard/prefs.py)."""
+    from dashboard import prefs
+    with st.expander("DISPLAY", icon=":material/tune:", expanded=False):
+        prefs.get("card_lang")
+        st.radio("Card language", tuple(LANG_NAMES), key="card_lang",
+                 format_func=LANG_NAMES.get, on_change=prefs.save, args=("card_lang",),
+                 help="By the flat's country: a Czech flat's card in Czech, a Slovak one's "
+                      "in English. The listing's own text stays as written, and amounts "
+                      "stay in the flat's currency.")
+
+
 def render() -> SimpleNamespace:
     """Draw the sidebar: the pipeline status and buttons, the filters and
     the scoring settings. Returns what the rest of the page reads from it:
@@ -355,6 +371,8 @@ def render() -> SimpleNamespace:
         # fetched from the ČNB when the saved one is over 6 h old, at most hourly.
         # It is shown, and its age warned about, where Czech listings are.
         _fx_refresh_if_due()
+
+        _display_panel()
 
         st.markdown("---")
         st.markdown('<div class="muted">Private use. Verify all data.<br>Notárska úschova always.</div>', unsafe_allow_html=True)

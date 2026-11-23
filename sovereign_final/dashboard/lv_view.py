@@ -63,7 +63,8 @@ def part_c_html(text: str, cz: bool = False) -> str:
 def render_part_c(l, lv_docs=None) -> None:
     """The toggle on a card, and under it part C of the deed on file. Built
     only while the toggle is on: it reads the stored deed and screens it."""
-    cz = l.get("_market") == "cz"
+    from dashboard.fmt import czech_words
+    cz = czech_words(l)
     if not st.toggle("📜 Přečíst část C výpisu z LV" if cz else "📜 Read part C of the title deed",
                      key=f"lvc_{l.get('id')}",
                      help="The encumbrance section of the deed the last LV check read, with "

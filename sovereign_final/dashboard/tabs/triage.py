@@ -49,7 +49,8 @@ def render_summary(l, v, ctx: str = "triage") -> None:
     score, grade = compute_deal_score(l)
     surplus = v.surplus(l)
     my = l.get("max_price_yellow")
-    cz = l.get("_market") == "cz"
+    from dashboard.fmt import czech_words
+    cz = czech_words(l)
     struct = "s.r.o." if v.sro(l) else "Personal"
     st.markdown(
         f'<div class="pick-t">{esc((l.get("title") or l.get("district") or "—")[:80])}</div>'

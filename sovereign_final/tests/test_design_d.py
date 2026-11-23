@@ -239,3 +239,34 @@ def test_tabs_and_buttons_use_material_icons_not_emoji(populated_db):
         assert f":material/{g}" in tabs, tabs
     labels = [b.label for b in at.button] + [t.label for t in at.tabs]
     assert not any(ch in l for l in labels for ch in "🔻👤📸🧪🩺▶🔗")
+
+
+# ── D7: the cards' language ─────────────────────────────────────────────────
+def _lang_app():
+    import streamlit as st
+    from dashboard import prefs
+    from dashboard.fmt import _labels, czech_words
+    if st.button("English", key="en"):
+        st.session_state["card_lang"] = "en"
+        prefs.save("card_lang")
+    cz = {"_market": "cz"}
+    st.markdown(f"{czech_words(cz)}|{_labels(cz)('Price')}|{czech_words({'_market': 'sk'})}")
+
+
+def test_czech_cards_speak_czech_until_you_choose_english(populated_db):
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_function(_lang_app).run()
+    assert at.markdown[0].value == "True|Cena|False"
+    at.button(key="en").click().run()
+    assert at.markdown[0].value == "False|Price|False"
+    # Kept in the database: a new session (another device) starts in English.
+    again = AppTest.from_function(_lang_app).run()
+    assert again.markdown[0].value == "False|Price|False"
+
+
+def test_the_language_setting_is_in_the_sidebar(populated_db):
+    at = run_app()
+    assert not at.exception
+    radio = at.sidebar.radio(key="card_lang")
+    assert radio.value == "auto"
+    assert set(radio.options) == {"By the flat's country", "English on every card"}

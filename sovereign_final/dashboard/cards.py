@@ -11,7 +11,7 @@ from database import DEAL_STAGES
 from dashboard.listing_cache import clear_listing_cache
 from modules.redact import redact
 from dashboard.fmt import (
-    _floor_label, _labels, _lv_link, _lv_state_t, _of100, _pct_or_dash,
+    _floor_label, _labels, _lv_link, czech_words, _lv_state_t, _of100, _pct_or_dash,
     _quick_cadastre, _rent_fallback, _risk_label, amt, esc, fp, last_seen_label,
     lv_checked_label, market_badge,
     mkw, safe_href, safe_url, sgn, tier_badge,
@@ -29,10 +29,11 @@ def _load_stage(key, cur, *source):
     _load_box(key, cur, *source)
 
 
-def _lv_photo(lid: str, cz: bool, disabled: bool) -> None:
+def _lv_photo(lid: str, cz_mkt: bool, disabled: bool, words: bool | None = None) -> None:
     """📷 An LV photo or scan, read by Claude: its number and cadastral area
     go into the card's boxes (and, for a Czech flat, its text into the výpis
     box), so RE-VERIFY LV checks them. Shown only with ANTHROPIC_API_KEY."""
+    cz = cz_mkt if words is None else words
     from modules import doc_reader
     if not doc_reader.enabled():
         return
@@ -52,7 +53,7 @@ def _lv_photo(lid: str, cz: bool, disabled: bool) -> None:
                 st.session_state[f"lvno_{lid}"] = got["lv_number"]
             if got["cadastral_area"]:
                 st.session_state[f"lvku_{lid}"] = got["cadastral_area"]
-            if cz:
+            if cz_mkt:
                 st.session_state[f"lvdoc_{lid}"] = got["text"]
             st.session_state[f"lvphtext_{lid}"] = got["text"]
             st.rerun()
@@ -99,7 +100,8 @@ def render_card(l, v):
     show_sro, using_demo = v.sro(l), v.using_demo
     _LV_DOCS, _cf_negative = v.lv_docs, v.cf_negative
     T        = _labels(l)
-    cz       = l.get("_market") == "cz"
+    cz_mkt   = l.get("_market") == "cz"     # a Czech flat: Kč, Czech data and rules
+    cz       = czech_words(l)               # its card in Czech (D7)
     cls      = (l.get("cf_class") or l.get("classification") or "PENDING").upper()
     emoji    = {"GREEN":"🟢","YELLOW":"🟡","WHITE":"⚪"}.get(cls,"")
 
@@ -136,7 +138,7 @@ def render_card(l, v):
     cut = f"   ·   🔻{ph['change_pct']:+.0%}" if ph and (ph.get("change_pct") or 0) < 0 else ""
     stage_tag = f"   ·   [{stage['stage']}]" if stage else ""
     header = (f"{emoji}  {title[:60]}   ·   {amt(l, price)}   ·   {below}   ·   "
-              f"{sgn(l, surplus)}{cut}{stage_tag}" + ("   ·   🇨🇿 CZ" if cz else ""))
+              f"{sgn(l, surplus)}{cut}{stage_tag}" + ("   ·   🇨🇿 CZ" if cz_mkt else ""))
 
     # Only an open card builds its body. Every click reruns the whole script,
     # and a collapsed expander still ran its ~40 widgets, so the page slowed
@@ -175,7 +177,7 @@ def render_card(l, v):
             with k1:
                 st.metric(T("Price"), amt(l, price),
                           help=(f"≈ {markets.format_money(l.get('_price_eur'))} "
-                                f"({markets.fx_note()})" if cz else None))
+                                f"({markets.fx_note()})" if cz_mkt else None))
             with k2:
                 with st.container(key=f"kfneg_{lid}" if (surplus or 0) < 0 else f"kfpos_{lid}"):
                     st.metric(T("Surplus/mo"), sgn(l, surplus))
@@ -187,17 +189,21 @@ def render_card(l, v):
                                 "Highest price at which this is still YELLOW "
                                 "(≥10% below the regional median €/m²)."))
 
-        if cz:
+        if cz_mkt and cz:
             rent_help = (("Živé srovnání z pronájmů" if l.get("rent_source") == "live"
                           else "Výchozí Kč/m² (engine.rent_cz)")
                          + (f" pro '{l['rent_key']}'" if l.get("rent_key") else ""))
+        elif cz_mkt:
+            rent_help = (("Live rental comps" if l.get("rent_source") == "live"
+                          else "Default Kč/m² (engine.rent_cz)")
+                         + (f" for '{l['rent_key']}'" if l.get("rent_key") else ""))
         else:
             rent_help = (("Live prenájom comps" if l.get("rent_source") == "live"
                           else "Published baseline €/m² (config.RENT_PER_M2)")
                          + (f" for '{l['rent_key']}'" if l.get("rent_key") else ""))
         median_m2 = l.get("regional_median_m2")
         from engine.regional_prices import benchmark_note
-        unit = "Kč/m²" if cz else "€/m²"
+        unit = "Kč/m²" if cz_mkt else "€/m²"
         # Every other figure, smaller, in two rows.
         with st.container(key=f"sf_{lid}"):
             r1 = st.columns(6)
@@ -302,7 +308,7 @@ def render_card(l, v):
                 )
         fallback = _rent_fallback(l)
         if fallback:
-            if cz:
+            if cz_mkt:
                 from engine.financial import baseline_rent as _baseline
                 _d = _baseline("default", market="cz")
                 why = (f"the national default {amt(l, _d)}/m² — this town is in no rent table"
@@ -324,7 +330,7 @@ def render_card(l, v):
                         unsafe_allow_html=True)
         # This flat type's own rental comps and how long such ads stay up
         # (engine/rent_comps, M10 of the 12 Nov audit).
-        if not cz and not using_demo:
+        if not cz_mkt and not using_demo:
             from dashboard.listing_cache import rent_types
             from engine.rent_comps import type_note
             _tn = type_note(l.get("district") or "", l.get("rooms"), rent_types())
@@ -410,7 +416,7 @@ def render_card(l, v):
             # Financing stress: +2 pp rate, and the 70% investor LTV cap.
             if price and size and rent:
                 from engine.financial import analyse as _an
-                if cz:
+                if cz_mkt:
                     _prof = markets.get("cz")
                     inv_ltv, base_rate, base_term = (_prof.ltv_ratio_investor,
                                                      _prof.mortgage_rate_pa, _prof.loan_term_years)
@@ -526,7 +532,7 @@ def render_card(l, v):
         # and a stale box would clear the saved number or put back an old one.
         # A photo or scan of the LV (the agent's phone picture): Claude copies
         # it into the boxes below (modules/doc_reader).
-        _lv_photo(lid, cz, using_demo)
+        _lv_photo(lid, cz_mkt, using_demo, words=cz)
         _load_box(f"lvno_{lid}", l.get("lv_number") or "")
         _load_box(f"lvku_{lid}", l.get("cadastral_area") or "")
         v1, v2 = st.columns(2)
@@ -545,21 +551,25 @@ def render_card(l, v):
                 help=("Název nebo kód katastrálního území." if cz else
                       "Name or numeric code of the cadastral unit."))
         lv_doc = None
-        if cz:
+        if cz_mkt:
             # As the LV boxes: a výpis pasted since (in the REJECTED tab, say)
             # reloads the box, so RE-VERIFY LV can't write the old text back.
             _load_box(f"lvdoc_{lid}", _LV_DOCS.get(lid, ""))
             lv_doc = st.text_area(
                 T("LV extract (text)"), key=f"lvdoc_{lid}",
                 height=110, disabled=using_demo,
-                placeholder="Vložte text výpisu z listu vlastnictví…",
-                help="Text výpisu z LV této jednotky (CzechPOINT nebo dálkový přístup "
-                     "ČÚZK). Bezplatné služby katastru obsah LV programu nedávají; "
-                     "OVĚŘIT LV jej projde (části C a D).")
+                placeholder=("Vložte text výpisu z listu vlastnictví…" if cz else
+                             "Paste the text of the title deed (výpis z LV)…"),
+                help=("Text výpisu z LV této jednotky (CzechPOINT nebo dálkový přístup "
+                      "ČÚZK). Bezplatné služby katastru obsah LV programu nedávají; "
+                      "OVĚŘIT LV jej projde (části C a D)." if cz else
+                      "The text of this flat's title deed (from CzechPOINT or the ČÚZK "
+                      "remote access). The cadastre's free services don't give a program "
+                      "the deed's content; RE-VERIFY LV reads it (parts C and D)."))
         if verify:
             try:
                 from modules.debt_bot import reverify
-                if cz and (lv_doc or "").strip() != _LV_DOCS.get(lid, "").strip():
+                if cz_mkt and (lv_doc or "").strip() != _LV_DOCS.get(lid, "").strip():
                     from database import set_lv_document
                     set_lv_document(lid, lv_doc or "")
                     clear_listing_cache()   # even if the check below fails
@@ -589,8 +599,8 @@ def render_card(l, v):
         render_erase(l, disabled=using_demo)
         if not using_demo:
             from dashboard.building_view import render_building, render_short_let
-            render_building(l, cz)
-            render_short_let(l, cz)
+            render_building(l, cz_mkt, words=cz)
+            render_short_let(l, cz_mkt, words=cz)
 
         seen = last_seen_label(l, cz)
         seen = f" · {seen}" if seen else ""
