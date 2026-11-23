@@ -177,7 +177,7 @@ def _fake_call(calls, fill=None):
 
 
 class TestDashboardRun:
-    """The dashboard's ▶ RUN EVERYTHING runs run_pipeline: it already holds
+    """The dashboard's RUN EVERYTHING runs run_pipeline: it already holds
     the pipeline lock, reports progress, and runs the browser-driven steps
     its own way."""
 

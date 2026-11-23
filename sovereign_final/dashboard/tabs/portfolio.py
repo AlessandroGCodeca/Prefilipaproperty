@@ -101,7 +101,7 @@ def render(v) -> None:
         rows = calibration(flats, numbers)
         if rows:
             st.markdown('<div class="muted" style="margin-top:8px">THE MODEL AGAINST YOUR FLATS — '
-                        'where they differ a lot, set your own figures (👤 YOUR SITUATION, .env) '
+                        'where they differ a lot, set your own figures (YOUR SITUATION, .env) '
                         'or treat the scores with care</div>', unsafe_allow_html=True)
             st.dataframe(pd.DataFrame(rows).astype(object).fillna("—"), hide_index=True, width="stretch")
     else:

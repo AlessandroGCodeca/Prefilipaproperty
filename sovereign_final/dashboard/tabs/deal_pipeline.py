@@ -54,7 +54,7 @@ def render(v) -> None:
                     name = esc((t.get("title") or t.get("district") or "—")[:40])
                     st.markdown(
                         f'<div class="sc" style="margin-bottom:6px;padding:8px">'
-                        f'<div class="mono" style="font-size:.7rem;color:#e4eaf5">'
+                        f'<div class="mono" style="font-size:.7rem;color:var(--text)">'
                         f'<a href="{safe_href(t["url"])}" target="_blank">{name}</a></div>'
                         f'<div class="muted">{market_badge(t)} {amt(t, t.get("price_eur") or 0)}{maxy}'
                         f' · {_local_stamp(t.get("updated_at"))[0][:10]}{gone}</div>{note}</div>',

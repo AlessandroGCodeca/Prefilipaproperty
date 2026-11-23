@@ -360,7 +360,7 @@ def test_the_memo_prints_the_nearest_transit_as_given(monkeypatch, metres, want)
 
 
 def test_the_cards_zero_location_score_reads_the_same_in_its_memo(db, monkeypatch):
-    # The card's own row (get_all_active), as the 📄 MEMO button passes it.
+    # The card's own row (get_all_active), as the MEMO button passes it.
     from modules import memo
     add(db, "zeroLoc", district="Žilina", title="Zero location flat")
     score(db, "zeroLoc", 100_000.0, "Žilina")
@@ -420,7 +420,7 @@ def test_the_memo_keeps_a_daytime_date_and_an_unreadable_stamp(monkeypatch):
 
 
 def test_the_memo_from_stored_rows_uses_bratislava_dates(db, monkeypatch):
-    # The rows the 📄 MEMO button passes, written by the real DB writers.
+    # The rows the MEMO button passes, written by the real DB writers.
     from modules import memo
     add(db, "dealT", district="Žilina", title="Deal T")
     db.set_deal_stage("dealT", "OFFER", "offer sent")

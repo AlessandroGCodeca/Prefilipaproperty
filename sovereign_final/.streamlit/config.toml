@@ -3,12 +3,23 @@
 # selectboxes, number inputs, and the red slider thumbs and multiselect tags.
 # Streamlit reads this file from the folder it is started in (sovereign_final/,
 # /app in Docker).
-[theme]
+# Two themes (D14): dark, palette 1, the default look, and light, palette 3
+# ("paper light"), for daylight and a projector. Switch in the ⋮ menu, top
+# right: Settings → Choose app theme (Light, Dark, or your device's setting).
+# The page's own colours follow (dashboard/style.py, html[data-theme]).
+[theme.dark]
 base = "dark"
 primaryColor = "#3ddc97"
 backgroundColor = "#07090e"
 secondaryBackgroundColor = "#0b0d14"
 textColor = "#bcc8e0"
+
+[theme.light]
+base = "light"
+primaryColor = "#0a6b43"
+backgroundColor = "#f4f5f7"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#2a3342"
 
 # "minimal" hides the toolbar's Deploy button (Streamlit Community Cloud,
 # which this private dashboard must never be published to) and the developer
@@ -36,3 +47,7 @@ maxUploadSize = 25
 # Both on by default; set here so they can't be switched off by accident.
 enableXsrfProtection = true
 enableCORS = true
+# D15: serves ./static at app/static/ — only the IBM Plex fonts and their
+# licence (static/fonts). Anything put there is public, without a login, so
+# nothing else goes in that folder.
+enableStaticServing = true

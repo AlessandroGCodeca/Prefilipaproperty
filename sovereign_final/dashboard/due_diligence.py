@@ -19,7 +19,9 @@ def render(listing: dict, disabled: bool = False) -> None:
     lid = listing.get("id")
     if not lid:
         return
-    cz = (listing.get("market") or listing.get("_market") or "sk") == "cz"
+    cz_mkt = (listing.get("market") or listing.get("_market") or "sk") == "cz"
+    from dashboard.fmt import czech_words
+    cz = cz_mkt and czech_words({**listing, "_market": "cz"})
     st.markdown('<hr class="div">', unsafe_allow_html=True)
     have = get_checklist(lid)
     done = sum(1 for k, *_ in CHECKLIST if (have.get(k) or {}).get("done"))
@@ -81,7 +83,7 @@ def render(listing: dict, disabled: bool = False) -> None:
                 delete_deal_file(f["id"])
                 st.rerun()
 
-    _seller_checks(listing, lid, cz, disabled)
+    _seller_checks(listing, lid, cz_mkt, disabled)
     from dashboard.building_view import render_facts_form
     render_facts_form(listing, disabled)
 

@@ -129,7 +129,7 @@ class TestSummarize:
 
 
 class TestSummarizeDashboardRun:
-    """A full run started from the dashboard's ▶ RUN EVERYTHING (trigger
+    """A full run started from the dashboard's RUN EVERYTHING (trigger
     "dashboard"): no scheduler stands behind it, so the text points at the
     button rather than at retries or the scheduler."""
 

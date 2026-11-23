@@ -1,5 +1,5 @@
 """modules/tax_rates and engine/property_tax_sk's stored rates — what one
-click on 🏛️ UPDATE TAX RATES does with what it read.
+click on UPDATE TAX RATES does with what it read.
 
 The rule they keep: a rate read from a town's site replaces the hand-checked
 table only when it comes from a dated ordinance for a later tax year than the

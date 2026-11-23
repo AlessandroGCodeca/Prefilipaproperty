@@ -2,7 +2,7 @@
 
 - The 06:00 job reading the clock a few seconds early (a wall clock stepped
   back after APScheduler's due check) must still run that 06:00's markets.
-- A market that ▶ RUN EVERYTHING ran while the 06:00 job (or a retry) waited
+- A market that RUN EVERYTHING ran while the 06:00 job (or a retry) waited
   for the pipeline lock is not run again.
 - A success stamped in the future (the clock was ahead, then corrected) does
   not make a market's day be skipped.
@@ -116,7 +116,7 @@ def test_a_market_run_while_the_six_oclock_job_waited_is_not_rerun(env, monkeypa
     clock[0] = at(19, 6, 0, 0)         # the 06:00 job, on time
     scheduler.run_daily()
     ticks(clock, at(19, 23, 55))
-    # ▶ RUN EVERYTHING ran both markets while the 06:00 job waited for the
+    # RUN EVERYTHING ran both markets while the 06:00 job waited for the
     # lock: the job runs neither again, so no "FAILED, retrying" is left.
     assert [(r[0], r[1]) for r in runs] == [("sk", "dashboard"), ("cz", "dashboard")]
     st = pipeline_state.read_status("sk")

@@ -113,7 +113,7 @@ def test_empty_database_renders_the_demo_view(db):
 PAGE_TABS = ["TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER", "AUCTIONS",
              "WHAT-IF / TAX", "COMPARE", "RENT COMPS", "TAX RATES", "BACKTEST", "DEAL PIPELINE",
              "LV TO-DO", "REJECTED", "ONE-CLICK CLOSE", "ALERTS", "PORTFOLIO"]
-GROUP_TABS = ["🎯 DEALS", "📊 ANALYSIS", "🗂 WORKFLOW"]
+GROUP_TABS = [":material/home: TODAY", ":material/sell: DEALS", ":material/analytics: ANALYSIS", ":material/checklist: WORKFLOW"]
 
 
 def tab_labels(at):
@@ -131,26 +131,26 @@ def test_the_tabs_are_grouped(populated_db):
     at = run_app()
     labels = tab_labels(at)
     # Each group's own tabs follow it.
-    assert labels == ["🎯 DEALS", "TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER",
-                      "AUCTIONS", "📊 ANALYSIS", "WHAT-IF / TAX", "COMPARE", "RENT COMPS",
-                      "TAX RATES", "BACKTEST", "🗂 WORKFLOW", "DEAL PIPELINE", "LV TO-DO",
+    assert labels == [":material/home: TODAY", ":material/sell: DEALS", "TRIAGE TABLE", "ACTIVE SNAG LIST", "MAP", "SATELLITE VIEWER",
+                      "AUCTIONS", ":material/analytics: ANALYSIS", "WHAT-IF / TAX", "COMPARE", "RENT COMPS",
+                      "TAX RATES", "BACKTEST", ":material/checklist: WORKFLOW", "DEAL PIPELINE", "LV TO-DO",
                       "REJECTED", "ONE-CLICK CLOSE", "ALERTS", "PORTFOLIO"]
 
 
 def test_the_sidebar_buttons_are_grouped_and_named_in_full(populated_db):
     at = run_app()
     groups = {e.label: [b.label for b in e.button] for e in at.sidebar.expander}
-    assert list(groups) == ["📅 DAILY RUN — step by step", "🔧 REPAIR DATA", "🩺 DIAGNOSTICS",
-                            "👤 YOUR SITUATION"]
-    assert groups["👤 YOUR SITUATION"] == ["💾 SAVE AND RE-SCORE"]
-    daily = groups["📅 DAILY RUN — step by step"]
+    assert list(groups) == ["DAILY RUN — step by step", "REPAIR DATA", "DIAGNOSTICS",
+                            "YOUR SITUATION", "DISPLAY"]
+    assert groups["YOUR SITUATION"] == ["SAVE AND RE-SCORE"]
+    daily = groups["DAILY RUN — step by step"]
     assert daily[:3] == ["🇸🇰 Nehnutelnosti.sk", "🇸🇰 Bazos.sk", "🇸🇰 Topreality.sk"]
     assert "🇨🇿 Bazos.cz" in daily and "🇨🇿 Bezrealitky.cz" in daily
-    assert "🔎 FILL MISSING DETAILS" in daily and "💰 CASHFLOW SCORE" in daily
-    assert "♻️ RESCORE ALL" in groups["🔧 REPAIR DATA"]
-    assert "🔗 TEST SITES" in groups["🩺 DIAGNOSTICS"]
-    # ▶ RUN EVERYTHING stays above the groups.
-    assert at.sidebar.button[0].label == "▶ RUN EVERYTHING"
+    assert "FILL MISSING DETAILS" in daily and "CASHFLOW SCORE" in daily
+    assert "RESCORE ALL" in groups["REPAIR DATA"]
+    assert "TEST SITES" in groups["DIAGNOSTICS"]
+    # RUN EVERYTHING stays above the groups.
+    assert at.sidebar.button[0].label == "RUN EVERYTHING"
 
 
 def test_stats_bar_counts_the_listings_on_the_page(populated_db):
@@ -519,7 +519,7 @@ def test_a_closed_price_cut_list_works_out_nothing(db, monkeypatch):
                         lambda *a, **k: calls.append(a) or real(*a, **k))
     at = run_app()
     assert not at.exception, [e.value for e in at.exception]
-    assert any(e.label.startswith("🔻 5 price cut(s)") for e in at.expander)
+    assert any(e.label.startswith("5 price cut(s)") for e in at.expander)
     assert not calls and "open ↗" not in markdown_of(at)
     at.session_state["price_cuts"] = True
     at.run()
@@ -568,7 +568,7 @@ def test_a_steps_result_survives_the_rerun(populated_db, monkeypatch):
     monkeypatch.setattr(populated_db, "deactivate_stale_listings",
                         lambda **k: go.wait(30) and real(**k))
     at = run_app()
-    _button(at, "🧹 CLEAN STALE (21d)").click().run()
+    _button(at, "CLEAN STALE (21d)").click().run()
     go.set()
     _finished(at)
     assert any("Deactivated 1 stale listings" in s.value for s in at.success)
@@ -584,7 +584,7 @@ def test_parse_desc_says_why_nothing_was_parsed(populated_db, monkeypatch):
     import modules.llm_enrichment as llm
     monkeypatch.setattr(llm, "ANTHROPIC_API_KEY", "")
     at = run_app()
-    _button(at, "📝 PARSE DESCRIPTIONS").click().run()
+    _button(at, "PARSE DESCRIPTIONS").click().run()
     _finished(at)
     assert any("set ANTHROPIC_API_KEY" in i.value for i in at.info)
 
@@ -747,7 +747,7 @@ def test_test_sites_fetches_the_scrapers_own_urls(db, monkeypatch):
 
     monkeypatch.setattr(_http, "get", lambda url, **k: fetched.append(url) or _Resp())
     at = run_app()
-    next(b for b in at.button if b.label == "🔗 TEST SITES").click().run()
+    next(b for b in at.button if b.label == "TEST SITES").click().run()
     assert not at.exception, [e.value for e in at.exception]
     assert fetched == [nehnutelnosti.SEARCH_PAGE.format(page=1),
                        bazos.BASE + bazos.CATEGORY,
@@ -879,7 +879,7 @@ def test_a_button_runs_its_step_in_the_background(db, monkeypatch):
         release.wait(30)
         return 3
     monkeypatch.setattr(db, "deactivate_stale_listings", slow_stale)
-    at = _click(run_app(), "🧹 CLEAN STALE (21d)")
+    at = _click(run_app(), "CLEAN STALE (21d)")
     # The click returned at once; the step is still going and the pipeline
     # buttons wait for it.
     assert jobs.running()
@@ -900,7 +900,7 @@ def test_a_button_waits_for_the_scheduler(db):
     from modules import jobs
     from modules.pipeline_state import PipelineLock
     with PipelineLock("scheduler"):
-        at = _click(run_app(), "🧹 CLEAN STALE (21d)")
+        at = _click(run_app(), "CLEAN STALE (21d)")
     assert not jobs.running()
     assert any("scheduler is running" in w.value for w in at.warning)
 
@@ -925,7 +925,7 @@ def test_run_everything_runs_the_scheduler_pipeline_under_its_job_lock(db, monke
                       {"step": "LV Debt Filter", "ok": False}]})
         return True
     monkeypatch.setattr(scheduler, "run_pipeline", fake_run_pipeline)
-    at = _finished(_click(run_app(), "▶ RUN EVERYTHING"))
+    at = _finished(_click(run_app(), "RUN EVERYTHING"))
     assert seen["trigger"] == "dashboard"
     assert seen["holder"] == seen["lock"] == "dashboard: RUN EVERYTHING"
     assert callable(seen["call"])
@@ -943,7 +943,7 @@ def test_a_failed_full_run_says_why(db, monkeypatch):
                                      "error": "all 3 scrapers failed", "steps": []})
         return False
     monkeypatch.setattr(scheduler, "run_pipeline", fake_run_pipeline)
-    at = _finished(_click(run_app(), "▶ RUN EVERYTHING"))
+    at = _finished(_click(run_app(), "RUN EVERYTHING"))
     assert any("Full run failed: all 3 scrapers failed" in e.value for e in at.error)
     assert any("RUN EVERYTHING to try again" in e.value for e in at.error)
 
@@ -980,7 +980,7 @@ def test_run_everything_runs_the_browser_steps_in_a_subprocess(db, monkeypatch):
         return False
     _fake_subprocess_run(monkeypatch, fake_subprocess_run)
     monkeypatch.setattr(scheduler, "run_pipeline", fake_run_pipeline)
-    _finished(_click(run_app(), "▶ RUN EVERYTHING"))
+    _finished(_click(run_app(), "RUN EVERYTHING"))
     assert outcomes[0] == 7
     assert "'enrich_pending'" in cmds[0] and '"limit": 100' in cmds[0]
     assert isinstance(outcomes[1], RuntimeError) and "blocked" in str(outcomes[1])
@@ -998,7 +998,7 @@ def test_fill_missing_details_reports_what_it_found(populated_db, monkeypatch):
             '{"ok": true, "n": {"checked": 3, "price": 1, "size": 2, "district": 0, '
             '"gone": 1}}\n'), "")
     _fake_subprocess_run(monkeypatch, fake)
-    at = _finished(_click(run_app(), "🔎 FILL MISSING DETAILS"))
+    at = _finished(_click(run_app(), "FILL MISSING DETAILS"))
     assert "'enrich_pending'" in cmds[0] and '"limit": 200' in cmds[0]
     assert any("Re-read 3: +price 1, +size 2, +district 0, 1 taken down" in s.value
                for s in at.success)
@@ -1009,7 +1009,7 @@ def test_fill_missing_details_with_nothing_to_fill(db, monkeypatch):
     _fake_subprocess_run(monkeypatch, lambda cmd, **k: subprocess.CompletedProcess(
         cmd, 0, '{"ok": true, "n": {"checked": 0, "price": 0, "size": 0, "district": 0, '
                 '"gone": 0}}\n', ""))
-    at = _finished(_click(run_app(), "🔎 FILL MISSING DETAILS"))
+    at = _finished(_click(run_app(), "FILL MISSING DETAILS"))
     assert any("No nehnutelnosti listing is missing" in i.value for i in at.info)
 
 

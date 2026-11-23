@@ -20,7 +20,7 @@ def render(v) -> None:
     # The warning names the country's own way to a valid contract, so it is
     # written once the listing is chosen.
     close_hdr = st.empty()
-    _sk_close_hdr = '<div class="muted" style="color:#ff8a8a;margin-bottom:16px">⚠️ DRAFT ONLY — no legal validity until executed before a licensed Slovak notár</div>'
+    _sk_close_hdr = '<div class="muted" style="color:var(--bad);margin-bottom:16px">⚠️ DRAFT ONLY — no legal validity until executed before a licensed Slovak notár</div>'
 
     if not data:
         close_hdr.markdown(_sk_close_hdr, unsafe_allow_html=True)
@@ -33,7 +33,7 @@ def render(v) -> None:
         # kupní smlouva for a Czech advokát, amounts in Kč.
         close_cz = markets.of_row(sel3) == "cz"
         close_hdr.markdown(
-            '<div class="muted" style="color:#ff8a8a;margin-bottom:16px">⚠️ DRAFT ONLY — no '
+            '<div class="muted" style="color:var(--bad);margin-bottom:16px">⚠️ DRAFT ONLY — no '
             'legal validity until a Czech advokát or notář completes it; ownership passes on '
             'its entry (vklad) into the katastr nemovitostí</div>' if close_cz else _sk_close_hdr,
             unsafe_allow_html=True)

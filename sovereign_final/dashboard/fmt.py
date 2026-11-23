@@ -283,10 +283,20 @@ CZ_LABELS = {
 }
 
 
+def czech_words(l) -> bool:
+    """Whether the card of `l` speaks Czech: a Czech flat, unless you chose
+    English for every card (D7, dashboard/prefs.py). Amounts stay in the
+    flat's own currency either way."""
+    if l.get("_market") != "cz":
+        return False
+    from dashboard import prefs
+    return prefs.get("card_lang") != "en"
+
+
 def _labels(l):
-    """The card's label function: English for a Slovak card, Czech for a
-    Czech one."""
-    if l.get("_market") == "cz":
+    """The card's label function: Czech on a card that speaks Czech
+    (czech_words), English otherwise."""
+    if czech_words(l):
         return lambda s: CZ_LABELS.get(s, s)
     return lambda s: s
 
@@ -309,7 +319,7 @@ def sgn(l, v, suffix: str = "/mo") -> str:
 def _lv_state_t(l):
     """_lv_state, in Czech on a Czech card."""
     label, css = _lv_state(l)
-    if l.get("_market") != "cz":
+    if not czech_words(l):
         return label, css
     for en, cz in (("LV CLEAN", "LV ČISTÝ"), ("LV REJECTED", "LV ZAMÍTNUT"),
                    ("LV UNVERIFIED", "LV NEOVĚŘEN"), ("LV PENDING", "LV ČEKÁ")):

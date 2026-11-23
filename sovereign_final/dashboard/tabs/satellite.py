@@ -65,7 +65,7 @@ def render(v) -> None:
             if img and img.startswith("http"):
                 st.image(img, width="stretch")
             else:
-                st.markdown('<div style="background:#0b0d14;border:1px solid #1b2132;height:260px;display:flex;align-items:center;justify-content:center;color:#8b97b0;font-family:var(--mono);font-size:0.7rem;letter-spacing:2px">NO IMAGE</div>', unsafe_allow_html=True)
+                st.markdown('<div style="background:var(--panel);border:1px solid var(--line);height:260px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-family:var(--mono);font-size:0.7rem;letter-spacing:2px">NO IMAGE</div>', unsafe_allow_html=True)
 
         with c2:
             st.markdown('<div class="muted">SATELLITE VIEW</div>', unsafe_allow_html=True)

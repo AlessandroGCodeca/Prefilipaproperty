@@ -97,6 +97,7 @@ _USER_TABLES = {
     "deal_files":         "SELECT id, listing_id, kind, name, mime, size, uploaded_at "
                           "FROM deal_files ORDER BY uploaded_at",
     "alert_rules":        "SELECT * FROM alert_rules ORDER BY position",
+    "starred":            "SELECT * FROM starred ORDER BY starred_at",
 }
 
 

@@ -39,13 +39,13 @@ STRUCTURES = {"Recommended": "best", "Personal": "personal", "s.r.o.": "sro"}
 
 
 def _situation_panel(busy: bool) -> bool:
-    """👤 YOUR SITUATION: the model inputs that are yours (modules/settings),
+    """YOUR SITUATION: the model inputs that are yours (modules/settings),
     typed here instead of in .env. True when a change was saved — the stored
     scores are then stale and the page re-scores."""
     from modules import settings
     now = settings.current()
     typed = {}
-    with st.expander("👤 YOUR SITUATION", expanded=False):
+    with st.expander("YOUR SITUATION", icon=":material/person:", expanded=False):
         st.markdown('<div class="muted">Your own figures, used by every score. Saved to '
                     'data/settings.json; they outrank .env.</div>', unsafe_allow_html=True)
         shown_cz = False
@@ -71,7 +71,7 @@ def _situation_panel(busy: bool) -> bool:
                 typed[f.key] = int(st.number_input(
                     f.label, min_value=int(f.low), max_value=int(f.high),
                     value=int(v), step=1, help=f.help))
-        if st.button("💾 SAVE AND RE-SCORE", width="stretch", disabled=busy,
+        if st.button("SAVE AND RE-SCORE", icon=":material/save:", width="stretch", disabled=busy,
                      help="Saves what changed and re-scores every listing with it "
                           "(the same job as ♻️ RESCORE ALL)."):
             changed = {k: v for k, v in typed.items() if abs(float(v) - float(now[k])) > 1e-9}
@@ -82,6 +82,29 @@ def _situation_panel(busy: bool) -> bool:
             st.caption("Saved: " + ", ".join(changed) + ". Re-scoring…")
             return True
     return False
+
+
+LANG_NAMES = {"auto": "By the flat's country", "en": "English on every card"}
+THEME_NAMES = {"dark": "Dark", "light": "Light", "auto": "Like this device"}
+
+
+def _display_panel() -> None:
+    """DISPLAY: the cards' language (D7) and the theme (D14), kept in the
+    database (dashboard/prefs.py)."""
+    from dashboard import prefs
+    with st.expander("DISPLAY", icon=":material/tune:", expanded=False):
+        prefs.get("card_lang")
+        st.radio("Card language", tuple(LANG_NAMES), key="card_lang",
+                 format_func=LANG_NAMES.get, on_change=prefs.save, args=("card_lang",),
+                 help="By the flat's country: a Czech flat's card in Czech, a Slovak one's "
+                      "in English. The listing's own text stays as written, and amounts "
+                      "stay in the flat's currency.")
+        prefs.get("theme")
+        st.radio("Theme", tuple(THEME_NAMES), key="theme", horizontal=True,
+                 format_func=THEME_NAMES.get, on_change=prefs.save, args=("theme",),
+                 help="Light is easier to read in daylight and on a projector. "
+                      "Like this device follows your phone's or computer's setting. "
+                      "The page reloads once to switch.")
 
 
 def render() -> SimpleNamespace:
@@ -150,14 +173,14 @@ def render() -> SimpleNamespace:
             st.caption(f"{_RUN_ICON[_lvl]} {_m.upper()} · {_txt}")
         _job_panel()
         _busy = jobs.running()
-        do_all   = st.button("▶ RUN EVERYTHING", type="primary", width="stretch", disabled=_busy,
+        do_all   = st.button("RUN EVERYTHING", icon=":material/play_arrow:", type="primary", width="stretch", disabled=_busy,
                              help="Every step under DAILY RUN, in order: each market's portals, "
                                   "missing details, rent comps, LV check, scoring, location, "
                                   "risk, portal copies — what the 06:00 scheduler runs. Takes "
                                   "a while (up to an hour); the page stays usable.")
 
         # The steps the daily run makes, one button each, in its order.
-        with st.expander("📅 DAILY RUN — step by step", expanded=False):
+        with st.expander("DAILY RUN — step by step", icon=":material/event:", expanded=False):
             st.markdown('<div class="muted">Portals</div>', unsafe_allow_html=True)
             # One full-width button per portal, named in full with its country:
             # three abbreviations in a row were cut off ("NEH…"), and the Slovak
@@ -176,65 +199,65 @@ def render() -> SimpleNamespace:
                 _cz_clicks.append((st.button(_label, key=f"cz_{_module}", width="stretch",
                                              disabled=_busy), _label, _name, _module))
             st.markdown('<div class="muted">Then</div>', unsafe_allow_html=True)
-            do_fill  = st.button("🔎 FILL MISSING DETAILS", width="stretch", disabled=_busy,
+            do_fill  = st.button("FILL MISSING DETAILS", icon=":material/search:", width="stretch", disabled=_busy,
                                  help="Re-read nehnutelnosti listings saved without a price, "
                                       "size or district (one with no price or size can't be "
                                       "scored), retire the ones taken down, then score what "
                                       "it filled in. Bazos / Topreality listings aren't re-read.")
-            do_rent  = st.button("🏘️ RENT COMPS", width="stretch", disabled=_busy,
+            do_rent  = st.button("RENT COMPS", icon=":material/apartment:", width="stretch", disabled=_busy,
                                  help="Scrape Slovak (prenájom) and Czech (pronájem) rentals, "
                                       "rebuild the live rents per district / town and re-score "
                                       "the listings whose rate moved — and the Czech ones that "
                                       "waited for a rent figure.")
-            do_lv    = st.button("🔒 LV DEBT FILTER", width="stretch", disabled=_busy)
-            do_addr  = st.button("🗺️ NORMALIZE ADDRESSES", width="stretch", disabled=_busy,
+            do_lv    = st.button("LV DEBT FILTER", icon=":material/lock:", width="stretch", disabled=_busy)
+            do_addr  = st.button("NORMALIZE ADDRESSES", icon=":material/map:", width="stretch", disabled=_busy,
                                  help="Run Claude on listings with a blank district to "
                                       "resolve city/district from the raw address, so rent "
                                       "stops defaulting to €6.50/m². Needs ANTHROPIC_API_KEY. "
                                       "Re-score afterwards to apply.")
-            do_desc  = st.button("📝 PARSE DESCRIPTIONS", width="stretch", disabled=_busy,
+            do_desc  = st.button("PARSE DESCRIPTIONS", icon=":material/description:", width="stretch", disabled=_busy,
                                  help="Run Claude on un-parsed listing descriptions to "
                                       "extract parking / furnished / condition. Needs "
                                       "ANTHROPIC_API_KEY. Re-score afterwards to apply the "
                                       "parking & furnished rent premiums.")
-            do_cf    = st.button("💰 CASHFLOW SCORE", width="stretch", disabled=_busy)
-            do_loc   = st.button("📍 LOCATION IQ",    width="stretch", disabled=_busy,
+            do_cf    = st.button("CASHFLOW SCORE", icon=":material/payments:", width="stretch", disabled=_busy)
+            do_loc   = st.button("LOCATION IQ", icon=":material/location_on:",    width="stretch", disabled=_busy,
                                  help="Geocode + transit/amenities + real noise/flood/"
                                       "construction flags. Google when GOOGLE_PLACES_API_KEY "
                                       "is set, OpenStreetMap otherwise.")
-            do_risk  = st.button("🌊 RISK BACKFILL", width="stretch", disabled=_busy,
+            do_risk  = st.button("RISK BACKFILL", icon=":material/flood:", width="stretch", disabled=_busy,
                                  help="Give listings located before the real risk data "
                                       "existed their noise / flood / construction answers.")
-            do_dupes = st.button("📡 MERGE PORTAL COPIES", width="stretch", disabled=_busy,
+            do_dupes = st.button("MERGE PORTAL COPIES", icon=":material/merge:", width="stretch", disabled=_busy,
                                  help="Group the same flat listed on several portals.")
 
         # Redoing work the daily run already did, after a rule or a table changed.
-        with st.expander("🔧 REPAIR DATA", expanded=False):
-            do_rescore = st.button("♻️ RESCORE ALL",  width="stretch", disabled=_busy,
+        with st.expander("REPAIR DATA", icon=":material/build:", expanded=False):
+            do_rescore = st.button("RESCORE ALL", icon=":material/refresh:",  width="stretch", disabled=_busy,
                                    help="Clear all cashflow scores and re-run scoring from "
                                         "scratch. Use after updating rent/tax assumptions.")
-            do_reparse = st.button("📝 RE-PARSE (new fields)", width="stretch", disabled=_busy,
+            do_reparse = st.button("RE-PARSE (new fields)", icon=":material/description:", width="stretch", disabled=_busy,
                                    help="Re-run description parsing on listings parsed before "
                                         "floor / elevator / cellar / terrace were kept. Needs "
                                         "ANTHROPIC_API_KEY.")
-            do_tax   = st.button("🏛️ UPDATE TAX RATES", width="stretch", disabled=_busy,
+            do_tax   = st.button("UPDATE TAX RATES", icon=":material/account_balance:", width="stretch", disabled=_busy,
                                  help="Read each Slovak town's flat property-tax rate (daň z "
                                       "bytov) from its own site, apply the new ones, hold "
                                       "anything doubtful for review in the TAX RATES tab, and "
                                       "re-score the listings whose tax moved. Once a year is "
                                       "enough (most ordinances take effect on 1 January).")
-            do_stale = st.button("🧹 CLEAN STALE (21d)", width="stretch", disabled=_busy,
+            do_stale = st.button("CLEAN STALE (21d)", icon=":material/cleaning_services:", width="stretch", disabled=_busy,
                                  help="Retire listings not seen for 21 days — but not those "
                                       "of a portal that has returned nothing on its last runs.")
 
-        with st.expander("🩺 DIAGNOSTICS", expanded=False):
-            do_test  = st.button("🔗 TEST SITES",      width="stretch",
+        with st.expander("DIAGNOSTICS", icon=":material/monitor_heart:", expanded=False):
+            do_test  = st.button("TEST SITES", icon=":material/link:",      width="stretch",
                                  help="robots.txt and HTTP status of each Slovak portal.")
-            do_test_cz = (st.button("🔗 TEST CZ SITES", width="stretch",
+            do_test_cz = (st.button("TEST CZ SITES", icon=":material/link:", width="stretch",
                                     help="robots.txt and HTTP status of each Czech portal — "
                                          "the ones read and the ones left out.")
                           if _cz_portals or _scheduler.BLOCKED.get("cz") else False)
-            do_test_tg = st.button("📨 TEST TELEGRAM", width="stretch",
+            do_test_tg = st.button("TEST TELEGRAM", icon=":material/send:", width="stretch",
                                    help="Send a test message to your Telegram chat "
                                         "(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env).")
 
@@ -355,6 +378,8 @@ def render() -> SimpleNamespace:
         # fetched from the ČNB when the saved one is over 6 h old, at most hourly.
         # It is shown, and its age warned about, where Czech listings are.
         _fx_refresh_if_due()
+
+        _display_panel()
 
         st.markdown("---")
         st.markdown('<div class="muted">Private use. Verify all data.<br>Notárska úschova always.</div>', unsafe_allow_html=True)

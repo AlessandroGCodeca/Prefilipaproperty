@@ -124,7 +124,7 @@ def test_the_header_notes_are_one_line_with_details(populated_db):
 def test_the_tab_in_the_address_is_opened(populated_db):
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file(smoke.APP, default_timeout=120)
-    at.query_params["group"] = "📊 ANALYSIS"
+    at.query_params["group"] = ":material/analytics: ANALYSIS"
     at.query_params["tab"] = "RENT COMPS"
     at.run()
     assert not at.exception

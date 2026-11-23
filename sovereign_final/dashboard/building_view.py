@@ -39,15 +39,16 @@ def _row(label: str, value: str) -> str:
     return f'<div class="brow"><span class="l">{esc(label)}</span><span class="v">{value}</span></div>'
 
 
-def render_building(l: dict, cz: bool) -> None:
+def render_building(l: dict, cz: bool, words: bool | None = None) -> None:
     """The card's 🏗 toggle: the building's facts and risks, the renovation
     and heating estimates, and the flip scenario."""
     from engine.building import building_risks, flip, heating_monthly, renovation_cost
+    market = "cz" if cz else "sk"
+    cz = cz if words is None else words     # from here on: the card's language (D7)
     lid = l.get("id") or ""
     if not st.toggle("🏗 Dům · rekonstrukce · flip" if cz else "🏗 Building · renovation · flip",
                      key=f"bld_{lid}"):
         return
-    market = "cz" if cz else "sk"
     facts, src = known_facts(l)
     size = l.get("size_m2") or 0
     html = ""
@@ -141,10 +142,11 @@ def render_facts_form(listing: dict, disabled: bool = False) -> None:
             st.success("Saved; the flat was re-scored with them.")
 
 
-def render_short_let(l: dict, cz: bool) -> None:
+def render_short_let(l: dict, cz: bool, words: bool | None = None) -> None:
     """The card's 🛏 toggle, where short lets are a market (engine/short_let)."""
     from engine.short_let import area_for, scenario
     market = "cz" if cz else "sk"
+    cz = cz if words is None else words     # from here on: the card's language (D7)
     lid = l.get("id") or ""
     if not area_for(l.get("district") or "", market):
         return

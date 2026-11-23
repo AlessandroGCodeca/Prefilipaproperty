@@ -13,13 +13,29 @@ import markets
 
 from dashboard.fmt import amt, esc, sgn
 
-CLASS_COLOR = {"GREEN": [0, 230, 118], "YELLOW": [255, 215, 64],
-               "WHITE": [96, 125, 139], "PENDING": [68, 138, 255]}
+# The palette's colours (dashboard/style.py tokens).
+CLASS_COLOR = {"GREEN": [61, 220, 151], "YELLOW": [245, 184, 74],
+               "WHITE": [139, 151, 176], "PENDING": [110, 168, 255]}
 _CLASS_RANK = {"GREEN": 3, "YELLOW": 2, "WHITE": 1, "PENDING": 0}
 # Monthly surplus, in EUR, to a colour: (at least, colour), best first.
-CASHFLOW_COLOR = ((100, [0, 230, 118]), (0, [150, 220, 130]),
-                  (-100, [255, 145, 0]), (-math.inf, [255, 82, 82]))
-NO_SCORE_COLOR = [96, 125, 139]
+CASHFLOW_COLOR = ((100, [61, 220, 151]), (0, [150, 220, 130]),
+                  (-100, [245, 184, 74]), (-math.inf, [255, 138, 138]))
+NO_SCORE_COLOR = [139, 151, 176]
+LEGEND_CLASS = (("GREEN", "Green: ≥20% under market"), ("YELLOW", "Yellow: 10–20% under"),
+                ("WHITE", "White: at market"), ("PENDING", "Not scored"))
+LEGEND_CASH = ((CASHFLOW_COLOR[0][1], "≥ +€100 a month"), (CASHFLOW_COLOR[1][1], "break-even or better"),
+               (CASHFLOW_COLOR[2][1], "down to −€100"), (CASHFLOW_COLOR[3][1], "worse"),
+               (NO_SCORE_COLOR, "not scored"))
+
+
+def legend_html(by_cash: bool) -> str:
+    """The pins' colours, as swatches (D9)."""
+    items = (LEGEND_CASH if by_cash else
+             tuple((CLASS_COLOR[c], label) for c, label in LEGEND_CLASS))
+    return '<div class="lg">' + "".join(
+        f'<span><i style="background:rgb({c[0]},{c[1]},{c[2]})"></i>{esc(label)}</span>'
+        for c, label in items) + '<span><i class="faded"></i>faded: area, not street</span></div>'
+
 # Grouping draws the pins of one grid cell as one circle. The map draws what
 # the page computed — it can't regroup as you zoom — so the cell is sized to
 # the view the map opens on: about a tenth of its width, between ~1 km and
@@ -129,8 +145,8 @@ def render(v) -> None:
         st.info(hidden_note())
         return
     if not mapped:
-        st.info("No coordinates yet — run 📍 LOCATION IQ (works without a Google key: "
-                "it falls back to OpenStreetMap).")
+        st.info("No flat has a place on the map yet. Press LOCATION IQ under DAILY RUN in "
+                "the sidebar; it works without a Google key, using OpenStreetMap.")
         return
 
     c1, c2, c3, c4 = st.columns([2, 2, 4, 2])
@@ -163,9 +179,13 @@ def render(v) -> None:
             st.markdown(credit, unsafe_allow_html=True)
         point, why = _find_point(near, v.market)
         if point is None:
-            st.warning(f"Couldn't place “{near.strip()}” ({why}). Type its coordinates "
-                       f"instead, as 48.1486, 17.1077 — right-click a spot in a map app to "
-                       f"copy them.")
+            if why == "not found":
+                st.warning(f"“{near.strip()}” isn't on the map. Try a street and town "
+                           f"(Hlavná 1, Košice), or paste coordinates such as 48.1486, 17.1077: "
+                           f"right-click a spot in a map app to copy them.")
+            else:
+                st.warning(f"The address search didn't answer ({why}). Check that this "
+                           f"computer is online, or paste coordinates such as 48.1486, 17.1077.")
 
     # Travel time to the point (modules/travel): a straight line misleads
     # across a river or a hill.
@@ -215,7 +235,7 @@ def render(v) -> None:
                + ("<br/><i>approximate (area centroid)</i>" if approx
                   else f"<br/><i>{esc(l.get('geo_precision') or '')}</i>"))
         pts.append({
-            "lat": l["lat"], "lng": l["lng"], "tip": tip,
+            "id": l["id"], "lat": l["lat"], "lng": l["lng"], "tip": tip,
             "color": color + ([110] if approx else [220]),
             "radius": 60 if cls in ("GREEN", "YELLOW") else 35,
             # The pin a group is coloured as: by cash flow or by class.
@@ -228,12 +248,8 @@ def render(v) -> None:
               if mode else f" within {radius_km} km (straight line) of {esc(near.strip())}")
              if point else "")
     st.markdown(f'<div class="muted">{len(pts)} of {len(data)} filtered listings'
-                f'{scope or " have coordinates"}. '
-                + ("Green: at least +€100 a month · light green: break-even or better · "
-                   "orange: down to −€100 · red: worse · grey: not scored. "
-                   if by_cash else "") +
-                'Faded dots are geocoded to an area, not a street.</div>',
-                unsafe_allow_html=True)
+                f'{scope or " have coordinates"}. Click a pin to see the flat below the map.</div>'
+                + legend_html(by_cash), unsafe_allow_html=True)
     if not pts:
         st.info("No listing within that distance — widen it, or move the point.")
         return
@@ -271,7 +287,7 @@ def render(v) -> None:
                 "tip": f"<b>{g['n']} listings here</b><br/>best: {g['best']['tip']}",
             })
         layers.append(pdk.Layer(
-            "ScatterplotLayer", data=shown, get_position="[lng, lat]",
+            "ScatterplotLayer", data=shown, get_position="[lng, lat]", id="pins",
             get_fill_color="color", get_radius="radius",
             radius_min_pixels=5, radius_max_pixels=46, pickable=True))
         layers.append(pdk.Layer(
@@ -280,7 +296,7 @@ def render(v) -> None:
             get_text_anchor="'middle'", get_alignment_baseline="'center'"))
     else:
         layers.append(pdk.Layer(
-            "ScatterplotLayer", data=pts, get_position="[lng, lat]",
+            "ScatterplotLayer", data=pts, get_position="[lng, lat]", id="pins",
             get_fill_color="color", get_radius="radius",
             radius_min_pixels=4, radius_max_pixels=14, pickable=True))
     if point:
@@ -290,7 +306,34 @@ def render(v) -> None:
         import statistics
         centre = (statistics.median(p["lat"] for p in pts), statistics.median(p["lng"] for p in pts))
         zoom = 7 if len(pts) > 1 else 13
-    st.pydeck_chart(pdk.Deck(
+    event = st.pydeck_chart(pdk.Deck(
         initial_view_state=pdk.ViewState(latitude=centre[0], longitude=centre[1], zoom=zoom),
         layers=layers, tooltip={"html": "{tip}"},
-    ))
+    ), on_select="rerun", selection_mode="single-object", key="map_pick")
+    # D9: the list of the flats on the map, and the one picked (a pin or a row).
+    by_id = {l["id"]: l for l in mapped}
+    picked = None
+    objs = ((event or {}).get("selection") or {}).get("objects") or {}
+    for obj in objs.get("pins") or []:
+        picked = by_id.get(obj.get("id"))
+    on_map = sorted((by_id[p["id"]] for p in pts if p.get("id") in by_id),
+                    key=lambda l: -(v.surplus(l) if v.surplus(l) is not None else -1e12))
+    import pandas as pd
+    table = pd.DataFrame([{
+        "Title": (l.get("title") or l.get("district") or "—")[:60],
+        "Price": v.in_view_cur(l, l.get("price_eur") or 0),
+        "Surplus": v.in_view_cur(l, v.surplus(l)),
+        "Class": (l.get("cf_class") or l.get("classification") or "").title(),
+        "_id": l["id"]} for l in on_map[:200]])
+    if not table.empty:
+        sel = st.dataframe(
+            table, hide_index=True, width="stretch", height=min(320, 40 + 35 * len(table)),
+            column_order=["Title", "Price", "Surplus", "Class"],
+            column_config={"Price": v.money_col("Price"), "Surplus": v.money_col("Surplus")},
+            on_select="rerun", selection_mode="single-row", key="map_list")
+        rows = (sel.selection.rows if sel else []) or []
+        if rows and not picked:
+            picked = by_id.get(table.iloc[rows[0]]["_id"])
+    if picked:
+        from dashboard.tabs.triage import render_summary
+        render_summary(picked, v, ctx="map")

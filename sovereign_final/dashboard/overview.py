@@ -80,10 +80,15 @@ def portal_strip(health: dict, view_market, now=None) -> str:
                 tail = (("failed " if last["error"] else "no listings ") + local(last["run_at"])
                         + (f" · last good {local(good)}" if good else " · never returned any"))
                 tip += f". Latest run: {last['error'] or 'ran, but returned no listings'}"
+                from dashboard.messages import next_step
+                step = (next_step(last["error"]) if last["error"] else
+                        "The page may have changed its layout; run TEST SITES under "
+                        "DIAGNOSTICS if it happens again tomorrow.")
+                tip += f". {step}" if step else ""
             else:
                 tail = ("last run " if age_h > PORTAL_STALE_H else "") + local(last["run_at"])
             cls = "bad" if bad else "old" if age_h > PORTAL_STALE_H else "ok"
-            chips.append(f'<span class="phc {cls}" title="{esc(tip[:300])}">{flag} {esc(name)} '
+            chips.append(f'<span class="phc {cls}" title="{esc(tip[:500])}">{flag} {esc(name)} '
                          f'<b>{last["listings"]}</b> <span class="spk">{sparkline(daily)}</span> '
                          f'{esc(tail)}</span>')
     if not any_run:
@@ -161,7 +166,7 @@ def render(v, sb) -> None:
         (st.warning if _r["level"] == "warning" else st.info)(_r["text"])
     if _due:
         from modules.yearly import STEPS
-        with st.expander("📅 What to do for the new tax year"):
+        with st.expander("What to do for the new tax year", icon=":material/event:"):
             st.markdown("\n".join(f"{i}. {esc(step)}" for i, step in enumerate(STEPS, 1)))
     for _m, (_lvl, _txt) in _OTHER_RUNS.items():
         if _lvl == "error" and (view_market in (None, _m)):
@@ -237,8 +242,8 @@ def render(v, sb) -> None:
         st.markdown(tiles, unsafe_allow_html=True)
     if notes:
         warn = any(kind == "warning" for _s, kind, _f in notes)
-        with st.expander(("⚠ " if warn else "ℹ️ ") + " · ".join(short for short, _k, _f in notes)
-                         + " — details"):
+        with st.expander(" · ".join(short for short, _k, _f in notes) + " — details",
+                         icon=":material/warning:" if warn else ":material/info:"):
             for _short, kind, full in notes:
                 if kind == "warning":
                     st.warning(full)
@@ -254,7 +259,7 @@ def render(v, sb) -> None:
         # Built only when opened, like a card: each row works out the class at
         # the new price, a regional-median lookup, and a big scrape can bring
         # hundreds of cuts — it was most of every click's time.
-        box = st.expander(f"🔻 {len(_drops)} price cut(s) in the last 14 days",
+        box = st.expander(f"{len(_drops)} price cut(s) in the last 14 days", icon=":material/trending_down:",
                           key="price_cuts", on_change="rerun")
         if not box.open:
             return

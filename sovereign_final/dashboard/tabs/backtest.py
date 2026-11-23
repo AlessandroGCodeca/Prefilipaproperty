@@ -26,7 +26,7 @@ def render(v) -> None:
                                               "time to go.")
     rows, exact = backtest.run(max(frm), min(frm), market=market)
     if rows:
-        st.dataframe(pd.DataFrame(rows).astype(object).fillna("—"), hide_index=True, width="stretch")
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         st.caption(("Classes as they were on those days (daily snapshots)." if exact else
                     "Approximate: snapshots don't reach back that far yet, so the cohort is the "
                     "flats first seen in the window with the class they have now.")
@@ -41,7 +41,7 @@ def render(v) -> None:
                 'median</div>', unsafe_allow_html=True)
     gap = backtest.asking_vs(market)
     if gap:
-        st.dataframe(pd.DataFrame(gap).astype(object).fillna("—"), hide_index=True, width="stretch")
+        st.dataframe(pd.DataFrame(gap), hide_index=True, width="stretch")
     with st.form("bt_sold", border=False):
         s1, s2, s3, s4 = st.columns(4)
         district = s1.text_input("District", key="bt_d", placeholder="e.g. Petržalka")
