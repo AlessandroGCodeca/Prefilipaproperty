@@ -14,4 +14,4 @@ pytz==2026.6
 anthropic==2.11.0       # ≥2.0: API version 2026-10-21 (no temperature/top_p/top_k), key sent as Authorization: Bearer; output_config effort/format, beta fallbacks
 fpdf2==2.9.0
 pypdf==7.1.1           # reads the towns' tax ordinances (scraper/property_tax_rates)
-playwright==1.65.2     # Chromium 156 (build 1248); each pin needs its own `playwright install chromium`; 1.56.1 is a Node-only release
+playwright==1.65.2     # each release needs its own Chromium build: run `python -m playwright install chromium` after upgrading (CI and the Dockerfile do); 1.56.1 is a Node-only release
