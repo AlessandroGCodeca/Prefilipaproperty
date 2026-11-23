@@ -145,8 +145,8 @@ def render(v) -> None:
         st.info(hidden_note())
         return
     if not mapped:
-        st.info("No coordinates yet — run 📍 LOCATION IQ (works without a Google key: "
-                "it falls back to OpenStreetMap).")
+        st.info("No flat has a place on the map yet. Press LOCATION IQ under DAILY RUN in "
+                "the sidebar; it works without a Google key, using OpenStreetMap.")
         return
 
     c1, c2, c3, c4 = st.columns([2, 2, 4, 2])
@@ -179,9 +179,13 @@ def render(v) -> None:
             st.markdown(credit, unsafe_allow_html=True)
         point, why = _find_point(near, v.market)
         if point is None:
-            st.warning(f"Couldn't place “{near.strip()}” ({why}). Type its coordinates "
-                       f"instead, as 48.1486, 17.1077 — right-click a spot in a map app to "
-                       f"copy them.")
+            if why == "not found":
+                st.warning(f"“{near.strip()}” isn't on the map. Try a street and town "
+                           f"(Hlavná 1, Košice), or paste coordinates such as 48.1486, 17.1077: "
+                           f"right-click a spot in a map app to copy them.")
+            else:
+                st.warning(f"The address search didn't answer ({why}). Check that this "
+                           f"computer is online, or paste coordinates such as 48.1486, 17.1077.")
 
     # Travel time to the point (modules/travel): a straight line misleads
     # across a river or a hill.

@@ -80,10 +80,15 @@ def portal_strip(health: dict, view_market, now=None) -> str:
                 tail = (("failed " if last["error"] else "no listings ") + local(last["run_at"])
                         + (f" · last good {local(good)}" if good else " · never returned any"))
                 tip += f". Latest run: {last['error'] or 'ran, but returned no listings'}"
+                from dashboard.messages import next_step
+                step = (next_step(last["error"]) if last["error"] else
+                        "The page may have changed its layout; run TEST SITES under "
+                        "DIAGNOSTICS if it happens again tomorrow.")
+                tip += f". {step}" if step else ""
             else:
                 tail = ("last run " if age_h > PORTAL_STALE_H else "") + local(last["run_at"])
             cls = "bad" if bad else "old" if age_h > PORTAL_STALE_H else "ok"
-            chips.append(f'<span class="phc {cls}" title="{esc(tip[:300])}">{flag} {esc(name)} '
+            chips.append(f'<span class="phc {cls}" title="{esc(tip[:500])}">{flag} {esc(name)} '
                          f'<b>{last["listings"]}</b> <span class="spk">{sparkline(daily)}</span> '
                          f'{esc(tail)}</span>')
     if not any_run:

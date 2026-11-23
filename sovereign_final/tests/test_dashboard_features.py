@@ -292,7 +292,7 @@ def test_an_address_that_cant_be_placed_says_so(db, monkeypatch):
     _add(db, "g1", lat=49.2231, lng=18.7394)
     at = _ok(run_app())
     at.text_input(key="map_near").set_value("Nowhere 5").run()
-    assert any("Couldn't place" in w.value for w in _ok(at).warning)
+    assert any("“Nowhere 5” isn't on the map" in w.value for w in _ok(at).warning)
     assert "1 of 1 filtered listings have coordinates" in markdown_of(at)   # not filtered
     at.run()
     assert looked_up == ["Nowhere 5"]                    # looked up once, not per rerun

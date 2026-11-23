@@ -95,9 +95,8 @@ def render(v) -> None:
         elif n_hidden:
             st.info(hidden_note("scored listings"))
         else:
-            st.info("No scored listings yet — click ▶ RUN EVERYTHING in the sidebar "
-                    "(or a portal under 📅 DAILY RUN, then 💰 CASHFLOW SCORE) to populate "
-                    "this view.")
+            st.info("No flats scored yet. Press RUN EVERYTHING at the top of the sidebar: it "
+                    "fetches the portals and scores what it finds, in a few minutes.")
     else:
         from engine.financial import compute_deal_score
         emoji_map = {"GREEN": "🟢", "YELLOW": "🟡", "WHITE": "⚪", "PENDING": "⏳"}

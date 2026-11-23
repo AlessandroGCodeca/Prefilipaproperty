@@ -19,6 +19,7 @@ def render(sb) -> None:
         st.info(f"Proxy mode: {'✅ ScraperAPI' if _proxy_mode else '⚠️ Direct (no SCRAPER_API_KEY set)'}")
         # The scrapers' own URLs, so this tests what a scrape would actually fetch.
         from scraper import nehnutelnosti as _neh, bazos as _baz, topreality as _top
+        from dashboard.messages import next_step
         for label, url in [
             ("nehnutelnosti.sk", _neh.SEARCH_PAGE.format(page=1)),
             ("bazos.sk",          _baz.BASE + _baz.CATEGORY),
@@ -28,9 +29,10 @@ def render(sb) -> None:
                 _r = _http_get(url, timeout=12)
                 snippet = _r.text[:80].strip().replace("\n", " ")
                 icon = "✅" if _r.status_code == 200 else "❌"
-                st.info(f"{icon} **{label}** → HTTP {_r.status_code} | `{snippet}`")
+                st.info(f"{icon} **{label}** → HTTP {_r.status_code} | `{snippet}`"
+                        + ("" if _r.status_code == 200 else f"\n\n{next_step(_r.status_code)}"))
             except Exception as _e:
-                st.error(f"❌ **{label}** → {_e}")
+                st.error(f"❌ **{label}** → {_e}\n\n{next_step(_e)}")
 
     if do_test_cz:
         # Each Czech portal's robots.txt first (a disallowed one isn't fetched),

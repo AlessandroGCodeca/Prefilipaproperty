@@ -270,3 +270,40 @@ def test_the_language_setting_is_in_the_sidebar(populated_db):
     radio = at.sidebar.radio(key="card_lang")
     assert radio.value == "auto"
     assert set(radio.options) == {"By the flat's country", "English on every card"}
+
+
+# ── D12: what a failure means, and what to do ───────────────────────────────
+def test_usual_failures_get_a_next_step():
+    from dashboard.messages import next_step
+    assert "turned the scraper away" in next_step("HTTP 403")
+    assert "fewer visits" in next_step(429)
+    assert "site was down" in next_step("503 Service Unavailable")
+    assert "online" in next_step(TimeoutError("read timed out"))
+    assert ".env" in next_step("REQUEST_DENIED: The provided API key is invalid")
+    assert next_step(None) == "" and next_step("something odd") == ""
+
+
+def test_a_failed_portal_chip_says_what_to_do():
+    from dashboard.overview import portal_strip
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    health = {("sk", "nehnutelnosti"): {"daily": [3, 4], "last_good_at": now,
+                                         "last": {"run_at": now, "listings": 0,
+                                                  "error": "HTTP 403"}}}
+    html = portal_strip(health, None)
+    assert "HTTP 403" in html and "turned the scraper away" in html
+
+
+def test_the_backtest_table_takes_missing_numbers(populated_db, monkeypatch):
+    """A district with no flats that left had "—" among the numbers: Arrow
+    refused the column (ArrowInvalid, in the log) and Streamlit showed it as
+    text, sorting 900 after 2100. Now the cell is empty and the column numeric."""
+    from engine import backtest
+    col = "Last asking of flats that left €/m²"
+    monkeypatch.setattr(backtest, "asking_vs", lambda market: [
+        {"District key": "a", "Listed": 3, col: None},
+        {"District key": "b", "Listed": 5, col: 2100}])
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    shown = next(df.value for df in at.dataframe if col in df.value.columns)
+    assert shown[col].dtype.kind == "f"
