@@ -314,7 +314,8 @@ def test_both_themes_are_configured_and_light_tokens_exist():
     import tomllib
     with open(os.path.join(os.path.dirname(__file__), "..", ".streamlit", "config.toml"), "rb") as f:
         cfg = tomllib.load(f)
-    assert cfg["theme"]["dark"]["base"] == "dark" and cfg["theme"]["light"]["base"] == "light"
+    assert cfg["theme"]["dark"]["backgroundColor"] == "#07090e"
+    assert cfg["theme"]["light"]["backgroundColor"] == "#f4f5f7"
     from dashboard.style import CSS
     light = CSS[CSS.index('html[data-theme="light"]'):]
     for token in ("--bg", "--text", "--good", "--bad", "--caution", "--info"):
@@ -403,3 +404,23 @@ def test_today_says_when_the_last_visit_was(populated_db):
     md = " ".join(m.value for m in at.markdown)
     when = re.search(r'Since your last visit</div><div class="muted"[^>]*>([^<]+)<', md)
     assert when and re.fullmatch(r"\d{1,2} [A-Z][a-z]{2}, \d{2}:\d{2}", when.group(1)), when
+
+
+def test_every_option_in_config_toml_is_one_streamlit_knows():
+    """An option Streamlit doesn't know is ignored with only a warning in the
+    terminal (it happened with "base" in [theme.dark]); here it fails."""
+    import tomllib
+    from streamlit import config as st_config
+    with open(os.path.join(os.path.dirname(__file__), "..", ".streamlit", "config.toml"), "rb") as f:
+        cfg = tomllib.load(f)
+
+    def keys(d, prefix=""):
+        for k, v in d.items():
+            if isinstance(v, dict):
+                yield from keys(v, f"{prefix}{k}.")
+            else:
+                yield f"{prefix}{k}"
+
+    known = set(st_config._config_options_template)
+    unknown = [k for k in keys(cfg) if k not in known]
+    assert not unknown, unknown
