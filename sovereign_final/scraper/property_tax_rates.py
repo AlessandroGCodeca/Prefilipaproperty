@@ -918,7 +918,7 @@ def municipalities(session=None) -> list[Municipality]:
     try:
         r = s.get(WIKIDATA, params={"query": _MUNICIPALITIES_QUERY},
                   headers={"Accept": "text/csv",
-                           "User-Agent": "SovereignPropertyTax/1.0 (municipal tax rates)"},
+                           "User-Agent": "MFCProperty/1.0 (municipal tax rates)"},
                   timeout=180)
     finally:
         if session is None:

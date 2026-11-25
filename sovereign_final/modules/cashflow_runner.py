@@ -1,5 +1,5 @@
 """
-modules/cashflow_runner.py — Sovereign Investor Dashboard
+modules/cashflow_runner.py — MFC PROPERTY
 Runs the financial engine on all unscored PASS listings — each in its own
 market (listings.market): a Czech listing is scored in CZK under the Czech
 rules, a Slovak one exactly as before.

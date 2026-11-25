@@ -1,5 +1,5 @@
 """
-database — Sovereign Investor Dashboard
+database — MFC PROPERTY
 SQLite storage (data/sovereign.db), locally and in Docker alike.
 
 One module per topic; this package re-exports every name, so callers keep

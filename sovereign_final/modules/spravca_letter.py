@@ -74,7 +74,7 @@ Súhlas vlastníka bytu (predávajúceho) s poskytnutím údajov:
 {FILL}, vlastník bytu č. {FILL}
 
 ---
-NÁVRH vytvorený dashboardom Sovereign — doplňte údaje v {FILL} a pred
+NÁVRH vytvorený dashboardom MFC PROPERTY — doplňte údaje v {FILL} a pred
 odoslaním ho skontrolujte. Nejde o právnu radu.
 """
 
@@ -123,6 +123,6 @@ Souhlas vlastníka jednotky (prodávajícího) s poskytnutím údajů:
 {FILL}, vlastník jednotky č. {FILL}
 
 ---
-NÁVRH vytvořený dashboardem Sovereign — doplňte údaje v {FILL} a před
+NÁVRH vytvořený dashboardem MFC PROPERTY — doplňte údaje v {FILL} a před
 odesláním jej zkontrolujte. Nejde o právní radu.
 """

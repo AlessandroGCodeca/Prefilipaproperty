@@ -421,7 +421,7 @@ def test_backups_are_private(full_db, tmp_path, monkeypatch):
 
 
 def test_the_start_file_locks_down_env_and_data():
-    text = open(os.path.join(ROOT, "Start Sovereign.command"), encoding="utf-8").read()
+    text = open(os.path.join(ROOT, "Start MFC PROPERTY.command"), encoding="utf-8").read()
     assert "chmod 600 .env" in text and "chmod 700 data backups logs" in text
 
 

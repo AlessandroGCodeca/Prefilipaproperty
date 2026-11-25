@@ -117,7 +117,7 @@ def _fetch_ecb(timeout: float = 15) -> str:
     with requests.Session() as s:
         r = s.get(ECB_URL, timeout=timeout,
                   headers={"Accept": "text/csv",
-                           "User-Agent": "SovereignDashboard/1.0 (exchange rate)"})
+                           "User-Agent": "MFCProperty/1.0 (exchange rate)"})
         r.raise_for_status()
         return r.text
 
@@ -126,7 +126,7 @@ def _fetch(timeout: float = 15) -> str:
     import requests
     with requests.Session() as s:
         r = s.get(CNB_URL, timeout=timeout,
-                  headers={"User-Agent": "SovereignDashboard/1.0 (exchange rate)"})
+                  headers={"User-Agent": "MFCProperty/1.0 (exchange rate)"})
         r.raise_for_status()
         r.encoding = r.encoding or "utf-8"
         return r.text

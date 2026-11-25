@@ -1,5 +1,5 @@
 """
-modules/debt_bot.py — Sovereign Investor Dashboard
+modules/debt_bot.py — MFC PROPERTY
 Module D: LV (List Vlastníctva) Debt-Bot
 
 Hard stop: any non-bank lien, execution, or lawsuit = instant REJECTED; so

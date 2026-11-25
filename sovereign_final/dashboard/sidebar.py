@@ -159,7 +159,7 @@ def render() -> SimpleNamespace:
 
     # ── Sidebar ───────────────────────────────────────────────────────────────────
     with st.sidebar:
-        st.markdown('<div class="wordmark">SOVEREIGN</div>', unsafe_allow_html=True)
+        st.markdown('<div class="wordmark">MFC PROPERTY</div>', unsafe_allow_html=True)
         st.markdown('<div class="sub">Investor Dashboard · Slovakia · Czechia 2026</div>',
                     unsafe_allow_html=True)
         st.markdown("---")

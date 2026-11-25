@@ -324,7 +324,7 @@ def _kv(seen, label):
     """The value printed next to a label in a memo's label/value table (a
     page break between the two prints the page footer in between)."""
     after = seen[seen.index(label) + 1:]
-    return next(s for s in after if not s.startswith("Sovereign RE · investment memo"))
+    return next(s for s in after if not s.startswith("MFC PROPERTY · investment memo"))
 
 
 def _memo_row(**over):

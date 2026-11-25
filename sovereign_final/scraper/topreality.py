@@ -1,5 +1,5 @@
 """
-scraper/topreality.py — Sovereign Investor Dashboard
+scraper/topreality.py — MFC PROPERTY
 Scrapes for-sale apartment listings from topreality.sk.
 
 topreality.sk is a traditional server-rendered Slovak real-estate site.
