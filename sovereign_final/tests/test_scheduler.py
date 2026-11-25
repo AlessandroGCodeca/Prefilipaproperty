@@ -312,12 +312,13 @@ class TestPortalsSideBySide:
     def test_the_portals_overlap_and_the_steps_keep_their_order(self, run_file, full_db,
                                                                 steps_fail):
         seen = []
-        began = time.monotonic()
         scheduler.run_pipeline(call=self._slow_call(seen))
         starts = [t for kind, _, t in seen if kind == "start"]
         ends = [t for kind, _, t in seen if kind == "end"]
         assert len(starts) == 3 and max(starts) < min(ends)     # all three at once
-        assert time.monotonic() - began < 3 * 0.4                # not one after another
+        # The portals' own span, from the first start to the last end: the
+        # rest of the run (backup, imports) takes what the machine takes.
+        assert max(ends) - min(starts) < 3 * 0.4                 # not one after another
         names = [s["step"] for s in _status()["steps"]]
         assert names[1:4] == ["Nehnutelnosti.sk", "Bazos.sk", "Topreality.sk"]
 
