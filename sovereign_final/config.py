@@ -398,6 +398,8 @@ GOOGLE_API_KEY    = os.getenv("GOOGLE_PLACES_API_KEY", "")
 # ScraperAPI key — bypasses IP blocks on nehnutelnosti/bazos when running
 # from a server/cloud environment. Free tier: https://www.scraperapi.com
 SCRAPER_API_KEY   = os.getenv("SCRAPER_API_KEY", "")
+# fallback (direct first, ScraperAPI for a site that refuses it), always, off.
+SCRAPER_API_MODE  = os.getenv("SCRAPER_API_MODE", "fallback")
 
 # Anthropic Claude — optional cloud LLM for listing enrichment (parsing Slovak
 # free-text descriptions, normalising blank districts, structured LV analysis).
