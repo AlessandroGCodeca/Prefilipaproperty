@@ -465,3 +465,53 @@ def test_another_portals_link_is_not_fetched(populated_db, monkeypatch):
     at.text_input(key="find_q").input("https://reality.bazos.sk/inzerat/77/").run()
     assert not at.exception, [e.value for e in at.exception]
     assert any("read every morning" in i.value for i in at.info)
+
+
+# ── D19: the map by district ─────────────────────────────────────────────────
+def test_spellings_of_one_district_fall_together_and_the_cheapest_is_lightest():
+    from dashboard.tabs.map_view import PRICE_STEPS, YIELD_STEPS, district_areas
+    rows = [
+        {"_market": "sk", "district": "Bratislava - Ružinov", "_price_eur": 220_000,
+         "size_m2": 55, "gross_yield": 0.045, "lat": 48.15, "lng": 17.15},
+        {"_market": "sk", "district": "Ružinov, Bratislava", "_price_eur": 230_000,
+         "size_m2": 55, "gross_yield": 0.044, "lat": 48.16, "lng": 17.16},
+        {"_market": "sk", "district": "Žilina", "_price_eur": 110_000, "size_m2": 55,
+         "gross_yield": 0.062, "lat": 49.22, "lng": 18.74},
+        {"_market": "sk", "district": "Žilina", "_price_eur": 120_000, "size_m2": 55,
+         "gross_yield": 0.060, "lat": 49.23, "lng": 18.75},
+        {"_market": "sk", "district": "Nitra", "_price_eur": 90_000, "size_m2": 55,
+         "gross_yield": 0.07, "lat": 48.31, "lng": 18.09},                  # one flat: none
+    ]
+    by_price = {a["area"]: a for a in district_areas(rows)}
+    assert len(by_price) == 2 and all(a["n"] == 2 for a in by_price.values())
+    ba = next(a for k, a in by_price.items() if "Ružinov" in k)
+    za = next(a for k, a in by_price.items() if "Žilina" in k)
+    assert za["color"][:3] == PRICE_STEPS[0] and ba["color"][:3] == PRICE_STEPS[-1]
+    assert round(ba["per_m2"]) == 4091 and "<b>" in ba["tip"]
+    by_yield = {a["area"]: a for a in district_areas(rows, by_yield=True)}
+    zy = next(a for k, a in by_yield.items() if "Žilina" in k)
+    assert zy["color"][:3] == YIELD_STEPS[-1]                     # the higher yield, darkest
+
+
+def test_the_district_name_is_escaped_in_its_tooltip():
+    from dashboard.tabs.map_view import district_areas
+    rows = [{"_market": "sk", "district": "<img src=x onerror=alert(1)>", "_price_eur": 1e5,
+             "size_m2": 50, "lat": 48.1, "lng": 17.1}] * 2
+    tips = [a["tip"] for a in district_areas(rows)]
+    assert tips and "<img" not in tips[0] and "&lt;img" in tips[0]
+
+
+def test_the_map_draws_the_districts_under_the_pins(db):
+    from modules.cashflow_runner import run_scoring
+    from tests.conftest import make_listing
+    for i, (lat, lng) in enumerate(((49.2231, 18.7394), (49.2240, 18.7400), (49.2250, 18.7420))):
+        db.upsert_listing(make_listing(f"z{i}", district="Žilina", price_eur=100_000.0 + i,
+                                       size_m2=55.0, lat=lat, lng=lng))
+    run_scoring()
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    at.toggle(key="map_districts").set_value(True).run()
+    assert not at.exception, [e.value for e in at.exception]
+    spec = next(iter(at.get("deck_gl_json_chart"))).proto.json
+    assert '"districts"' in spec and spec.index('"districts"') < spec.index('"pins"')
+    assert any("Districts, €" in m.value for m in at.markdown)        # the legend
