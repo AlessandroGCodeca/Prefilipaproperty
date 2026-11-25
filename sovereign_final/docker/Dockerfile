@@ -6,10 +6,12 @@ WORKDIR /app
 # unprivileged user below could not run it.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# curl: the HEALTHCHECK. No compiler: every pinned package ships a wheel for
-# Python 3.12 on x86_64 and arm64.
+# curl: the HEALTHCHECK. libatomic1: Playwright's own Node.js (bundled from
+# 1.65) won't start without it, and the slim image lacks it ("error while
+# loading shared libraries: libatomic.so.1"). No compiler: every pinned
+# package ships a wheel for Python 3.12 on x86_64 and arm64.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl fonts-dejavu-core \
+    curl fonts-dejavu-core libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
