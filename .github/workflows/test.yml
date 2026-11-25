@@ -61,9 +61,11 @@ jobs:
         run: ruff check . --output-format=github
 
       - name: Run tests
-        # On every core the runner has (pytest-xdist): the Windows job spent
-        # nearly 13 of its 14 minutes running the tests one at a time.
-        run: pytest tests/ -n auto -v --tb=short
+        # On every core the runner has (pytest-xdist): the Linux jobs went
+        # from about 3 minutes to 1.5-2.5. Windows gained nothing (about 14
+        # minutes either way): there the time goes on file handling, not the
+        # processor. The 20 slowest tests are listed at the end of the log.
+        run: pytest tests/ -n auto -v --tb=short --durations=20
 
   browser:
     # The job above leaves Playwright out, so on its own a Playwright or
