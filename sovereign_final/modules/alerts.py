@@ -544,8 +544,13 @@ def build_digest(now: datetime, f: dict) -> str:
     if f["best"]:
         parts.append("<b>Best new deals this week</b>")
         parts += [_deal_line(l) for l in f["best"]]
-    text = "\n".join(parts)
-    return text[:MESSAGE_MAX]
+    out, size = [], 0
+    for part in parts:              # whole lines only: a cut tag would be refused
+        if size + len(part) + 1 > MESSAGE_MAX:
+            break
+        out.append(part)
+        size += len(part) + 1
+    return "\n".join(out)
 
 
 def send_digest_if_due(now: datetime | None = None) -> bool:

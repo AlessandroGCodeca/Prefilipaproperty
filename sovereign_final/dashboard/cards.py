@@ -250,8 +250,8 @@ def render_card(l, v):
                 from engine.financial import match_rent_key
                 _mk = "cz" if cz_mkt else "sk"
                 _dk = days_on_market(_mk).get(match_rent_key(l.get("district") or "", market=_mk)) or {}
-                _dom_note = (f" In {_dk['District key'].title()}, the {_dk['Left']} flats that left "
-                             f"the portals in the last 6 months had been up a median "
+                _dom_note = (f" In {_dk['District key'].title()}, the {_dk['Left']} flats retired "
+                             f"as gone in the last 6 months had been up a median "
                              f"{_dk['Median days to go']:.0f} days."
                              if _dk.get("Left", 0) >= 3 else "")
                 st.metric(T("Days tracked"), "—" if l.get("_dom") is None else f"{l['_dom']}",

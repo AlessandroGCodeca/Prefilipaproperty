@@ -37,15 +37,15 @@ def render(v) -> None:
 
     # S18: how long flats stay on the market, per district.
     st.markdown('<hr class="div">', unsafe_allow_html=True)
-    st.markdown('<div class="muted">DAYS ON THE MARKET — per district: how long the flats that '
-                'left the portals in the last 6 months had been up, and how long the ones still '
-                'listed have been so far. Counted from this dashboard\'s first sighting</div>',
+    st.markdown('<div class="muted">DAYS ON THE MARKET — per district: how long the flats the '
+                'dashboard retired as gone in the last 6 months had been up, and how long the ones '
+                'still listed have been so far. Counted from this dashboard\'s first sighting</div>',
                 unsafe_allow_html=True)
     dom = backtest.days_on_market(market)
     if dom:
         st.dataframe(pd.DataFrame(dom), hide_index=True, width="stretch")
     else:
-        st.info("No flats have left the portals yet; this fills in as the daily runs go on.")
+        st.info("No flat has been retired as gone yet; this fills in as the daily runs go on.")
 
     st.markdown('<hr class="div">', unsafe_allow_html=True)
     st.markdown('<div class="muted">SOLD PRICES — no free register publishes them. The last asking '

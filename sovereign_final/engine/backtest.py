@@ -250,10 +250,12 @@ def asking_vs(market: str = "sk", days: int = 90) -> list[dict]:
 
 # ── Days on the market (S18) ──────────────────────────────────────────────────
 def days_on_market(market: str = "sk", days: int = 180) -> list[dict]:
-    """Per district key, most data first: how long the flats that left the
-    portals in the last `days` had been listed (gone: inactive, or unseen for
-    GONE_AFTER_DAYS before the newest sighting), and how long the ones still
-    listed have been up so far. Days count from this dashboard's first
+    """Per district key, most data first: how long the flats the dashboard
+    retired in the last `days` had been listed (is_active 0: their page said
+    they were gone, or 21 days unseen), and how long the ones still being
+    seen have been up so far. A flat merely unseen for a few days is in
+    neither: the scrapers read a set number of result pages, so it may still
+    be for sale (finding 56). Days count from this dashboard's first
     sighting, not the portal's posting date."""
     from engine.financial import match_rent_key
     conn = _db.get_conn()
@@ -274,10 +276,10 @@ def days_on_market(market: str = "sk", days: int = 180) -> list[dict]:
         if not first or not last:
             continue
         key = match_rent_key(r[0] or "", market=market)
-        gone = is_gone(r[3], last, newest)
-        if gone and last >= cutoff:
-            groups.setdefault(key, {}).setdefault("left", []).append(max((last - first).days, 0))
-        elif not gone:
+        if not r[3]:                                   # retired
+            if last >= cutoff:
+                groups.setdefault(key, {}).setdefault("left", []).append(max((last - first).days, 0))
+        elif not is_gone(r[3], last, newest):          # seen on the latest runs
             groups.setdefault(key, {}).setdefault("listed", []).append(max((newest - first).days, 0))
     out = []
     for key, g in groups.items():

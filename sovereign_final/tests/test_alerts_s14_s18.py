@@ -109,6 +109,10 @@ def test_days_on_market_per_district(db):
     for i, (seen, first) in enumerate(((10, 40), (8, 20), (5, 35))):
         db.upsert_listing(make_listing(f"g{i}", price_eur=100_000.0, scraped_at=_now(first),
                                        last_seen_at=_now(seen)))
+        _retire(db, f"g{i}")
+    # Only unseen for 6 days, not retired: in neither column.
+    db.upsert_listing(make_listing("u1", price_eur=100_000.0, scraped_at=_now(50),
+                                   last_seen_at=_now(6)))
     rows = backtest.days_on_market("sk")
     row = rows[0]
     assert row["Left"] == 3 and row["Median days to go"] == 30
@@ -173,3 +177,16 @@ def test_followed_flats_on_a_database_from_before_markets(monkeypatch, tmp_path)
     database.set_starred("o1", True)
     rows = database.get_followed()
     assert rows[0]["id"] == "o1" and rows[0]["market"] == "sk" and rows[0]["starred"] == 1
+
+
+def test_a_long_digest_is_cut_between_lines_not_inside_a_tag(db, monkeypatch):
+    from modules import alerts
+    monkeypatch.setattr(alerts, "MESSAGE_MAX", 300)
+    long_deal = {"_class": "GREEN", "title": "x" * 80, "url": "https://example.sk/" + "y" * 120,
+                 "district": "Žilina", "price_eur": 90000.0, "_best": 50.0, "market_discount": 0.3,
+                 "lv_status": "PASS"}
+    f = {"by_class": {}, "new_by_class": {}, "by_market": {}, "cuts": 0, "starred": 0,
+         "staged": 0, "gone": [], "failed": [], "best": [long_deal] * 3}
+    text = alerts.build_digest(datetime.now(timezone.utc), f)
+    assert len(text) <= 300
+    assert text.count("<a ") == text.count("</a>") and text.count("<b>") == text.count("</b>")
