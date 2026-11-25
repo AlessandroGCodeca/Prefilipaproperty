@@ -56,6 +56,7 @@ def _no_live_fx_rate(monkeypatch, tmp_path):
     def _offline(timeout=15):
         raise fx_rate.FxError("no network in tests")
     monkeypatch.setattr(fx_rate, "_fetch", _offline)
+    monkeypatch.setattr(fx_rate, "_fetch_ecb", _offline)
     monkeypatch.setattr(fx_rate, "CACHE_PATH", str(tmp_path / "fx_rate.json"))
 
 

@@ -157,7 +157,8 @@ before; Czechia is added next to it.
   convert CZK at one rate: the Czech National Bank's daily fixing, fetched
   before each scheduled run and at most hourly by the dashboard
   (`modules/fx_rate.py`, saved to `data/fx_rate.json`) and shown with its date
-  in the sidebar. The sidebar warns when the rate is more than a week old.
+  in the sidebar; when the ČNB can't be read, the ECB's reference rate stands
+  in. The sidebar warns when the rate is more than a week old.
   `CZK_PER_EUR` / `FX_RATE_DATE` in `config.py` are the fallback until the
   first fetch; setting `CZK_PER_EUR` in `.env` pins the rate by hand. Czech
   cards use Czech labels and Czech number formatting (`4 500 000 Kč`).
@@ -888,7 +889,15 @@ send one Telegram message with what is new:
 - **price cuts on the deals you track** in DEAL PIPELINE (not CLOSED or
   PASSED), and whether the new price is inside max 🟡;
 - **problems** — a run that failed with no retry left, a portal gone quiet
-  (`ALERT_FAILURES=0` turns these off).
+  (`ALERT_FAILURES=0` turns these off);
+- **a flat you follow that left the portals** — starred, or in a deal stage
+  that isn't CLOSED or PASSED: sold or withdrawn? Once each (TODAY lists the
+  last 30 days' too).
+
+Once a week, with the first run on or after Monday (`ALERT_DIGEST_DAY`, 0 =
+Monday … 6 = Sunday), a **weekly digest**: what is on the dashboard by class,
+what is new, the week's price cuts, what you follow and what of it went, the
+portals, and the week's three best new deals. `ALERT_DIGEST=0` turns it off.
 
 Nothing new, no message. The first run with alerts on doesn't list the deals
 already on the dashboard; it says how many there are and alerts on new ones

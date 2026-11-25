@@ -82,3 +82,10 @@ def test_no_ticket_without_a_login(db, monkeypatch):
     at.run()
     assert _ticket_in_page(at) == ""
     assert not at.tabs
+
+
+def test_the_privacy_notice_names_the_resume_cookie_and_the_theme_storage():
+    from dashboard import legal
+    text = legal.privacy_md()
+    assert "sv_resume" in text and "_streamlit_xsrf" in text and "local storage" in text
+    assert "contact" in legal.imprint_html() and "Digital Services Act" in legal.imprint_html()

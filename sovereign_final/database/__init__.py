@@ -106,9 +106,10 @@ from database.portal_runs import (
 )
 
 from database.alert_rules import get_alert_rules, save_alert_rules
-from database.starred import get_starred, set_starred
+from database.starred import get_followed, get_starred, set_starred
 
 __all__ = [
+    "get_followed",
     "get_starred",
     "set_starred",
     "get_alert_rules",

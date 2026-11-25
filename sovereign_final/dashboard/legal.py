@@ -75,7 +75,9 @@ def imprint_html() -> str:
     rows = "".join(
         f'<div class="brow"><span class="l">{label}</span><span class="v">{_v(k)}</span></div>'
         for k, label in FIELDS if operator()[k] or k not in OPTIONAL)
-    return rows + ('<div class="muted" style="margin-top:6px">Supervisory authority for '
+    return rows + ('<div class="muted" style="margin-top:6px">The e-mail above is the single '
+                   'point of contact for authorities and users, including reports of illegal '
+                   'content (Digital Services Act, Art. 11, 12 and 16). Supervisory authority for '
                    'consumer protection: Slovak Trade Inspection (SOI), soi.sk. For personal '
                    'data: Úrad na ochranu osobných údajov SR, dataprotection.gov.sk.</div>')
 
@@ -119,8 +121,11 @@ Czechia — its terms require the logo): they see your IP address, as with any w
 (180 by default) and is not a deal you track. Daily backups: the newest BACKUP_KEEP (14).
 Logs: rotated, at most about 30 MB. Listings stay while they are useful for price history.
 
-**Cookies.** One strictly necessary cookie (`_streamlit_xsrf`, protection against forged
-requests). No consent is needed for it, and no other cookie is set.
+**Cookies and browser storage.** `_streamlit_xsrf`, protection against forged requests; and,
+for 60 seconds after you switch the colour theme, `sv_resume`, which keeps you logged in across
+the page reload the switch needs (good once, then deleted). The theme you chose is also kept in
+your browser's local storage. All of it is strictly necessary for what you asked for: no consent
+is needed, and nothing tracks you.
 
 **Your rights.** Access, rectification, erasure, restriction, objection and portability (Art. 15–21):
 write to {mail}; we answer within one month. You can complain to the

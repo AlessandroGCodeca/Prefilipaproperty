@@ -52,6 +52,8 @@ def tg(monkeypatch):
     monkeypatch.setattr(config, "ALERT_GRADES", [])
     monkeypatch.setattr(config, "ALERT_MIN_SURPLUS", None)
     monkeypatch.setattr(config, "ALERT_FAILURES", True)
+    # The weekly digest has tests of its own (test_alerts_s14_s18.py).
+    monkeypatch.setattr(config, "ALERT_DIGEST", False)
     return Fake
 
 

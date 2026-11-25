@@ -15,7 +15,13 @@ chat with what is new since the last one:
   - price cuts on the deals you track in DEAL PIPELINE (not CLOSED or
     PASSED), each cut once;
   - with config.ALERT_FAILURES: a market whose run failed with no retry left,
-    and a portal gone quiet (database.quiet_portals), each once.
+    and a portal gone quiet (database.quiet_portals), each once;
+  - a flat you follow (starred, or in a deal stage that isn't CLOSED or
+    PASSED) that has gone from the portals — sold or withdrawn — once (S18).
+
+Once a week, with the first run on or after ALERT_DIGEST_DAY (Monday by
+default), a digest of its own: what is on the dashboard, what came and went
+that week, the portals (S14). ALERT_DIGEST=0 turns it off.
 
 Nothing new, no message. What was sent is kept in the sent_alerts table, and
 recorded only once Telegram took the message: an alert lost to a network
@@ -341,6 +347,15 @@ def _cut_line(t: dict) -> str:
             f"    now {_money(t, t['price_eur'])} ({t['_cut']:+.1%}){inside}")
 
 
+def _gone_line(g: dict) -> str:
+    title = html.escape((g.get("title") or g.get("district") or "—")[:60])
+    tag = html.escape(g["stage"]) if g.get("stage") else "★"
+    days = f" · up {g['_days_listed']} days" if g.get("_days_listed") is not None else ""
+    return (f"📭 <a href=\"{html.escape(g.get('url') or '', quote=True)}\">{title}</a> [{tag}]\n"
+            f"    last asked {_money(g, g.get('price_eur'))}{days} · "
+            f"last seen {g['_last_seen']:%d.%m.}")
+
+
 def _section(parts: list, title: str, lines: list, shown: int) -> None:
     if not lines:
         return
@@ -351,7 +366,7 @@ def _section(parts: list, title: str, lines: list, shown: int) -> None:
 
 
 def build_message(deals, cuts, issues, now: datetime | None = None,
-                  now_green=(), recut=()) -> str:
+                  now_green=(), recut=(), gone=()) -> str:
     """The message: new deals, deals that turned GREEN, deals cut again,
     price cuts on tracked deals, problems — each section capped, and the
     whole cut at MESSAGE_MAX (Telegram's limit is 4,096 characters)."""
@@ -363,6 +378,8 @@ def build_message(deals, cuts, issues, now: datetime | None = None,
     _section(parts, "Now GREEN", [_deal_line(l) for l in now_green], DEALS_SHOWN)
     _section(parts, "Cut since you were told", [_deal_line(l) for l in recut], DEALS_SHOWN)
     _section(parts, "Price cuts on deals you track", [_cut_line(t) for t in cuts], CUTS_SHOWN)
+    _section(parts, "Gone from the portals: sold or withdrawn?", [_gone_line(g) for g in gone],
+             CUTS_SHOWN)
     _section(parts, "Needs a look", [line for _key, line in issues], ISSUES_SHOWN)
     out, size = [], 0
     for part in parts:              # whole lines only: a cut tag would be refused
@@ -375,11 +392,30 @@ def build_message(deals, cuts, issues, now: datetime | None = None,
 
 
 # ── The pipeline's step ───────────────────────────────────────────────────────
+def gone_news() -> list[dict]:
+    """Followed flats gone from the portals that weren't announced yet. The
+    first time, the ones already gone are noted, not messaged."""
+    from engine.backtest import gone_followed
+    gone, told = gone_followed(), _sent("gone")
+    if not told:
+        _mark_sent([("gone", "__baseline__")] + [("gone", g["id"]) for g in gone])
+        return []
+    return [g for g in gone if g["id"] not in told]
+
+
 def run() -> str:
-    """Send what is new since the last message. Returns a summary for the log;
-    raises TelegramError when Telegram refused or couldn't be reached."""
+    """Send what is new since the last message, and the weekly digest when it
+    is due. Returns a summary for the log; raises TelegramError when Telegram
+    refused or couldn't be reached."""
     if not enabled():
         return "off (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set)"
+    summary = _run_news()
+    if send_digest_if_due():
+        summary += "; weekly digest sent"
+    return summary
+
+
+def _run_news() -> str:
     deals = qualifying_deals()
     sent_deals = _sent("deal")
     if not sent_deals:
@@ -402,16 +438,122 @@ def run() -> str:
               if k not in done]
     # The yearly tax-table reminder (modules/yearly), once each.
     issues += [(r["key"], r["text"]) for r in _reminders() if r["key"] not in done]
-    if not (new or now_green or recut or cuts or issues):
+    gone = gone_news()
+    if not (new or now_green or recut or cuts or issues or gone):
         return "nothing new"
-    send(build_message(new, cuts, issues, now_green=now_green, recut=recut))
+    send(build_message(new, cuts, issues, now_green=now_green, recut=recut, gone=gone))
     _mark_sent([("deal", _deal_key(l)) for l in new]
                + [("deal-green", _deal_key(l)) for l in new + now_green if l["_class"] == "GREEN"]
                + [("deal-cut", l["_key"]) for l in recut]
                + [("cut", t["_key"]) for t in cuts]
-               + [("issue", k) for k, _line in issues])
+               + [("issue", k) for k, _line in issues]
+               + [("gone", g["id"]) for g in gone])
     return (f"sent: {len(new)} deal(s), {len(now_green)} now GREEN, {len(recut)} cut again, "
-            f"{len(cuts)} tracked cut(s), {len(issues)} issue(s)")
+            f"{len(gone)} gone, {len(cuts)} tracked cut(s), {len(issues)} issue(s)")
+
+
+# ── The weekly digest (S14) ───────────────────────────────────────────────────
+def _local(now: datetime) -> datetime:
+    from modules.pipeline_state import LOCAL_TZ
+    return now.astimezone(LOCAL_TZ)
+
+
+def digest_key(now: datetime) -> str | None:
+    """This week's digest key when one is due now, else None: on or after
+    ALERT_DIGEST_DAY in the local week, not sent yet."""
+    if not config.ALERT_DIGEST:
+        return None
+    local = _local(now)
+    if local.weekday() < config.ALERT_DIGEST_DAY:
+        return None
+    year, week, _ = local.isocalendar()
+    key = f"{year}-W{week:02d}"
+    return None if key in _sent("digest") else key
+
+
+def digest_figures(now: datetime) -> dict:
+    """The digest's numbers: active scored flats by market and class, the
+    ones first seen in the last 7 days, price cuts in those days, what you
+    follow and what of it went, and the portals whose latest run failed."""
+    from engine.backtest import gone_followed
+    week_ago = (now - timedelta(days=7)).isoformat()
+    by_class: dict[str, int] = {}
+    new_by_class: dict[str, int] = {}
+    by_market: dict[str, int] = {}
+    conn = _db.get_conn()
+    try:
+        if _db._has_table(conn, "cashflow_scores"):
+            for market, cls, n, new in conn.execute("""
+                    SELECT COALESCE(l.market, 'sk'), c.classification, COUNT(*),
+                           SUM(CASE WHEN l.scraped_at >= ? THEN 1 ELSE 0 END)
+                    FROM listings l JOIN cashflow_scores c ON c.listing_id = l.id
+                    WHERE l.is_active = 1 GROUP BY 1, 2""", (week_ago,)):
+                cls = (cls or "PENDING").upper()
+                by_class[cls] = by_class.get(cls, 0) + n
+                new_by_class[cls] = new_by_class.get(cls, 0) + (new or 0)
+                by_market[market] = by_market.get(market, 0) + n
+    finally:
+        conn.close()
+    followed = _db.get_followed()
+    gone = [g for g in gone_followed() if g["_last_seen"].isoformat() >= week_ago]
+    failed = _failed_portals()
+    best = sorted((l for l in qualifying_deals() if (l.get("scraped_at") or "") >= week_ago),
+                  key=lambda l: -(l["_best"] if l.get("_best") is not None else -1e12))[:3]
+    return {"by_class": by_class, "new_by_class": new_by_class, "by_market": by_market,
+            "cuts": len(_db.get_price_drops(days=7)),
+            "starred": sum(1 for f in followed if f.get("starred")),
+            "staged": sum(1 for f in followed if f.get("stage")),
+            "gone": gone, "failed": failed, "best": best}
+
+
+def _failed_portals() -> list[str]:
+    """Portals whose latest run (in the last two days) failed or found nothing."""
+    import scheduler
+    names = {(m, scheduler.source_of(mod)): n
+             for m, pairs in scheduler.SCRAPERS.items() for n, mod in pairs}
+    out = []
+    for key, h in _db.portal_health(days=2).items():
+        last = (h or {}).get("last")
+        if last and (last.get("error") or not last.get("listings")):
+            out.append(names.get(key, key[1]))
+    return sorted(out)
+
+
+def build_digest(now: datetime, f: dict) -> str:
+    local = _local(now)
+    start = local - timedelta(days=7)
+    dots = (("GREEN", "🟢"), ("YELLOW", "🟡"), ("WHITE", "⚪"))
+
+    def classes(counts: dict) -> str:
+        return " · ".join(f"{dot} {counts.get(c, 0)}" for c, dot in dots)
+
+    markets_line = " · ".join(f"{m.upper()} {n}" for m, n in sorted(f["by_market"].items()))
+    parts = [f"🏛 <b>Sovereign · your week</b> ({start:%d.%m.}–{local:%d.%m.})",
+             f"On the dashboard: {classes(f['by_class'])}"
+             + (f" ({markets_line})" if markets_line else ""),
+             f"New this week: {classes(f['new_by_class'])}",
+             f"Price cuts this week: {f['cuts']}",
+             f"You follow: ★ {f['starred']} starred · {f['staged']} in a deal stage"
+             + (f" · 📭 {len(f['gone'])} gone from the portals this week" if f["gone"] else ""),
+             ("Portals: all ran" if not f["failed"] else
+              "Portals: ⚠ " + html.escape(", ".join(f["failed"])) + " failed or found nothing")]
+    if f["best"]:
+        parts.append("<b>Best new deals this week</b>")
+        parts += [_deal_line(l) for l in f["best"]]
+    text = "\n".join(parts)
+    return text[:MESSAGE_MAX]
+
+
+def send_digest_if_due(now: datetime | None = None) -> bool:
+    """Send this week's digest if it is due; True when it went out. Recorded
+    only once Telegram took it."""
+    now = now or datetime.now(timezone.utc)
+    key = digest_key(now)
+    if not key:
+        return False
+    send(build_digest(now, digest_figures(now)))
+    _mark_sent([("digest", key)])
+    return True
 
 
 def run_quietly() -> None:

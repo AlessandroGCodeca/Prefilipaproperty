@@ -65,6 +65,21 @@ def _parse(iso: str | None) -> datetime | None:
     return d.replace(tzinfo=d.tzinfo or timezone.utc) if d else None
 
 
+def _newest_by_market(conn) -> dict[str, datetime]:
+    """Each market's newest sighting. A flat is "gone" against its own
+    market's: when one market's runs fail for days, its flats must not all
+    look sold just because the other market's run went on."""
+    return {(m or "sk"): d for m, t in conn.execute(
+        "SELECT COALESCE(market, 'sk'), MAX(last_seen_at) FROM listings GROUP BY 1")
+        for d in [_parse(t)] if d}
+
+
+def is_gone(is_active, last_seen: datetime | None, newest: datetime | None) -> bool:
+    """Inactive, or unseen for GONE_AFTER_DAYS before its market's newest
+    sighting."""
+    return (not is_active) or bool(last_seen and newest and (newest - last_seen).days >= GONE_AFTER_DAYS)
+
+
 def cohort(start: date, end: date, market: str | None = None) -> tuple[dict[str, str], bool]:
     """({listing id: class on its first snapshot in [start, end]}, exact).
     Without snapshots in the window: listings first seen in it, with their
@@ -102,12 +117,13 @@ def outcomes(ids, today: datetime | None = None) -> dict[str, dict]:
         return {}
     conn = _db.get_conn()
     try:
-        newest = _parse(conn.execute("SELECT MAX(last_seen_at) FROM listings").fetchone()[0])
+        newest_by = _newest_by_market(conn)
         rows, hist = [], {}
         for i in range(0, len(ids), 500):
             chunk = ids[i:i + 500]
             q = ",".join("?" * len(chunk))
-            rows += conn.execute(f"SELECT id, scraped_at, last_seen_at, is_active FROM listings "
+            rows += conn.execute(f"SELECT id, scraped_at, last_seen_at, is_active, "
+                                 f"COALESCE(market, 'sk') FROM listings "
                                  f"WHERE id IN ({q})", chunk).fetchall()
             if _db._has_table(conn, "price_history"):
                 for r in conn.execute(f"SELECT listing_id, price_eur FROM price_history WHERE "
@@ -115,13 +131,13 @@ def outcomes(ids, today: datetime | None = None) -> dict[str, dict]:
                     hist.setdefault(r[0], []).append(r[1])
     finally:
         conn.close()
-    newest = newest or today or datetime.now(timezone.utc)
+    fallback = today or datetime.now(timezone.utc)
     out = {}
     for r in rows:
         first, last = _parse(r[1]), _parse(r[2])
         if not first or not last:
             continue
-        gone = not r[3] or (newest - last).days >= GONE_AFTER_DAYS
+        gone = is_gone(r[3], last, newest_by.get(r[4]) or fallback)
         prices = hist.get(r[0], [])
         cuts = sum(1 for a, b in zip(prices, prices[1:]) if b < a)
         out[r[0]] = {"gone": gone, "days_listed": max((last - first).days, 0), "cuts": cuts,
@@ -194,7 +210,7 @@ def asking_vs(market: str = "sk", days: int = 90) -> list[dict]:
     conn = _db.get_conn()
     try:
         _ensure(conn)
-        newest = _parse(conn.execute("SELECT MAX(last_seen_at) FROM listings").fetchone()[0])
+        newest = _newest_by_market(conn).get(market)
         rows = conn.execute("SELECT district, price_eur, size_m2, last_seen_at, is_active, market "
                             "FROM listings WHERE price_eur > 0 AND size_m2 > 0").fetchall()
         sold = conn.execute("SELECT district, price, size_m2, market FROM sold_prices").fetchall()
@@ -209,7 +225,7 @@ def asking_vs(market: str = "sk", days: int = 90) -> list[dict]:
             continue
         key = match_rent_key(r[0] or "", market=market)
         last = _parse(r[3])
-        gone = not r[4] or (last and (newest - last).days >= GONE_AFTER_DAYS)
+        gone = is_gone(r[4], last, newest)
         bucket = "left" if gone and last and last >= cutoff else "listed" if not gone else None
         if bucket:
             groups.setdefault(key, {}).setdefault(bucket, []).append(r[1] / r[2])
@@ -230,3 +246,70 @@ def asking_vs(market: str = "sk", days: int = 90) -> list[dict]:
             row[f"{label} vs asking %"] = round((med / listed - 1) * 100, 1) if med and listed else None
         out.append(row)
     return out
+
+
+# ── Days on the market (S18) ──────────────────────────────────────────────────
+def days_on_market(market: str = "sk", days: int = 180) -> list[dict]:
+    """Per district key, most data first: how long the flats that left the
+    portals in the last `days` had been listed (gone: inactive, or unseen for
+    GONE_AFTER_DAYS before the newest sighting), and how long the ones still
+    listed have been up so far. Days count from this dashboard's first
+    sighting, not the portal's posting date."""
+    from engine.financial import match_rent_key
+    conn = _db.get_conn()
+    try:
+        newest = _newest_by_market(conn).get(market)
+        rows = conn.execute("SELECT district, scraped_at, last_seen_at, is_active, market "
+                            "FROM listings").fetchall()
+    finally:
+        conn.close()
+    if not newest:
+        return []
+    cutoff = newest - timedelta(days=days)
+    groups: dict[str, dict[str, list[int]]] = {}
+    for r in rows:
+        if (r[4] or "sk") != market:
+            continue
+        first, last = _parse(r[1]), _parse(r[2])
+        if not first or not last:
+            continue
+        key = match_rent_key(r[0] or "", market=market)
+        gone = is_gone(r[3], last, newest)
+        if gone and last >= cutoff:
+            groups.setdefault(key, {}).setdefault("left", []).append(max((last - first).days, 0))
+        elif not gone:
+            groups.setdefault(key, {}).setdefault("listed", []).append(max((newest - first).days, 0))
+    out = []
+    for key, g in groups.items():
+        left, listed = g.get("left", []), g.get("listed", [])
+        out.append({"District key": key, "Left": len(left),
+                    "Median days to go": statistics.median(left) if left else None,
+                    "Still listed": len(listed),
+                    "Median days listed so far": statistics.median(listed) if listed else None})
+    return sorted(out, key=lambda r: (-r["Left"], -r["Still listed"], r["District key"]))
+
+
+def gone_followed(within_days: int | None = None) -> list[dict]:
+    """The flats you follow (starred, or in an open deal stage) that have
+    left the portals (is_gone), newest departure first, each with
+    "_days_listed" and "_last_seen" (a datetime). within_days: only the ones
+    last seen that recently."""
+    rows = _db.get_followed()
+    if not rows:
+        return []
+    conn = _db.get_conn()
+    try:
+        newest_by = _newest_by_market(conn)
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        first, last = _parse(r.get("scraped_at")), _parse(r.get("last_seen_at"))
+        newest = newest_by.get(r.get("market") or "sk")
+        if not last or not is_gone(r.get("is_active"), last, newest):
+            continue
+        if within_days is not None and newest and (newest - last).days > within_days:
+            continue
+        out.append({**r, "_last_seen": last,
+                    "_days_listed": max((last - first).days, 0) if first else None})
+    return sorted(out, key=lambda r: r["_last_seen"], reverse=True)
