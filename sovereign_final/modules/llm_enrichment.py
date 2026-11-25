@@ -43,7 +43,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
     ANTHROPIC_API_KEY, ANTHROPIC_BATCH, ANTHROPIC_BATCH_MIN, ANTHROPIC_BATCH_WAIT_MIN,
-    ANTHROPIC_MODEL_BULK, ANTHROPIC_MODEL_LV, LV_SOFT_FLAGS_REJECT,
+    ANTHROPIC_MODEL_ASK, ANTHROPIC_MODEL_BULK, ANTHROPIC_MODEL_LV, LV_SOFT_FLAGS_REJECT,
 )
 
 log = logging.getLogger(__name__)
@@ -455,6 +455,47 @@ def analyze_lv(lv_text: str, market: str = "sk") -> dict | None:
     """
     request = lv_request(lv_text, market)
     return _ask_json(**request) if request else None
+
+
+# ── 4. A question about one flat (UX7) ───────────────────────────────────────
+_ASK_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "answer": {"type": "string"},
+        "figures_used": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False,
+            "properties": {"name": {"type": "string"}, "value": {"type": "string"}},
+            "required": ["name", "value"]}},
+        "answerable": {"type": "boolean"},
+    },
+    "required": ["answer", "figures_used", "answerable"],
+}
+
+_ASK_SYSTEM = (
+    "You answer a property investor's question about one flat for sale, using only the "
+    "figures and the ad text in the JSON you are given: the dashboard's own model of the flat "
+    "(money is in the 'currency' given, monthly unless a name says otherwise). Work out what "
+    "the figures allow, show the arithmetic in a sentence, and say plainly when they don't "
+    "answer the question (answerable false) instead of guessing. Three to six sentences, in "
+    "the language of the question. List every figure you used, by its name in the JSON and "
+    "its value. You are not giving financial, tax or legal advice: where the question needs "
+    "an adviser, say which one."
+)
+
+
+def ask_about_flat(question: str, facts: dict) -> dict | None:
+    """Claude's answer to `question` from one flat's `facts` (the card's own
+    figures): {answer, figures_used: [{name, value}], answerable}, or None
+    when disabled, refused or failed."""
+    question = (question or "").strip()[:500]
+    if not question:
+        return None
+    return _ask_json(_ASK_SYSTEM,
+                     "FLAT:\n" + json.dumps(facts, ensure_ascii=False, default=str)
+                     + "\n\nQUESTION:\n" + question,
+                     _ASK_SCHEMA, model=ANTHROPIC_MODEL_ASK, effort="medium",
+                     max_tokens=8000, fallbacks=True)
 
 
 if __name__ == "__main__":

@@ -108,7 +108,8 @@ def privacy_md() -> str:
 - *Technical data*: the login, error logs on the server. No analytics and no advertising.
 
 **Who else receives data (processors).**
-- Anthropic (USA): an ad's text, an uploaded scan or deed, an auction announcement — to read them.
+- Anthropic (USA): an ad's text, an uploaded scan or deed, an auction announcement — to read them;
+  and a question you ask about a flat, with that flat's figures and ad text — to answer it.
   Under Anthropic's data processing addendum with the EU Standard Contractual Clauses; not used to
   train models.
 - Mapy.com, Seznam.cz, a.s. (Czechia): the address of a listing, to find its coordinates.
@@ -119,9 +120,11 @@ def privacy_md() -> str:
 - Healthchecks.io: only whether the daily run happened, no personal data.
 - Apple iCloud (if backups are copied there): encrypted at rest by Apple.
 
-**What your browser loads from others.** Map tiles (CARTO), listing photos from the portals'
-servers and, when a Mapy.com key is set, the Mapy.com logo from Mapy.com's server (Seznam.cz,
-Czechia — its terms require the logo): they see your IP address, as with any website you open.
+**What your browser loads from others.** Map tiles (CARTO) and, when a Mapy.com key is set,
+the Mapy.com logo from Mapy.com's server (Seznam.cz, Czechia — its terms require the logo):
+they see your IP address, as with any website you open. Listing photos are fetched by the
+dashboard's server from the portals and shown as its own copy, so the portals see the
+server's address, not yours.
 
 **How long.** Deed texts: until the flat has been off the market for LV_TEXT_RETENTION_DAYS
 (180 by default) and is not a deal you track. Backups: {_backup_reach()}.

@@ -97,6 +97,9 @@ diagnostics.render(sb)
 # ── This run's listings, filtered and sorted ──────────────────────────────────
 v = view.build(sb, view_market)
 overview.render(v, sb)
+# UX2: find a flat by its link, id or words of its title or street.
+from dashboard import find  # noqa: E402
+find.render(v)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TABS

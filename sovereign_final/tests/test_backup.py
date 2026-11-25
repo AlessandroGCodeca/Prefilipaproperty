@@ -276,3 +276,26 @@ def test_an_upkeep_failure_never_fails_the_backup(db, dirs, monkeypatch):
     monkeypatch.setattr(backup, "upkeep", broken)
     summary = backup.run_backup(date(2026, 10, 8))
     assert "written and checked" in summary and "upkeep skipped" in summary
+
+
+
+def test_the_export_holds_rules_searches_your_flats_and_viewings(db, dirs):
+    """A table without a listing_id (alert rules, saved searches, your own
+    flats) made the export raise KeyError, which also stopped the backup
+    step before pruning, upkeep and the off-site copy."""
+    from database.viewing import set_viewing
+    db.save_alert_rules([{"name": "Cheap Žilina", "classes": "GREEN"}])
+    conn = db.get_conn()
+    conn.execute("CREATE TABLE IF NOT EXISTS saved_searches (name TEXT PRIMARY KEY, "
+                 "filters TEXT NOT NULL, saved_at TEXT NOT NULL)")
+    conn.execute("INSERT INTO saved_searches VALUES ('Žilina big', '{}', '2026-11-25')")
+    conn.commit()
+    conn.close()
+    set_viewing("a1", "original", {"damp": "bathroom"})
+    path = backup.export_user_data(date(2026, 10, 8))
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["alert_rules"][0]["name"] == "Cheap Žilina"
+    assert data["saved_searches"][0]["name"] == "Žilina big"
+    assert data["viewing"][0]["condition"] == "original"
+    assert "written and checked" in backup.run_backup(date(2026, 10, 9))

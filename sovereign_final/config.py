@@ -418,6 +418,8 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 # longer read: copied from .env.example it pinned every task to one model.)
 ANTHROPIC_MODEL_BULK = os.getenv("ANTHROPIC_MODEL_BULK") or "claude-haiku-5-5"
 ANTHROPIC_MODEL_LV   = os.getenv("ANTHROPIC_MODEL_LV") or "claude-opus-5-5"
+# UX7: a question you ask about one flat on its card, answered from its figures.
+ANTHROPIC_MODEL_ASK  = os.getenv("ANTHROPIC_MODEL_ASK") or "claude-opus-5-5"
 # EF3: the daily run sends its Claude reads (ads, addresses, title deeds) as one
 # Message Batch per step, at half the price, and waits at most this many
 # minutes for it; what it hasn't answered by then is asked one by one. The

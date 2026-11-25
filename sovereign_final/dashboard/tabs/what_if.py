@@ -281,8 +281,11 @@ def render(v) -> None:
         st.markdown(f'<div class="muted">EQUITY CASH FLOWS ({best_tag})</div>',
                     unsafe_allow_html=True)
         flows = (irr_s if best_sro else irr_p).cash_flows
-        st.bar_chart(pd.DataFrame({"Year": list(range(len(flows))),
-                                   sym: flows}).set_index("Year"), height=180)
+        from dashboard.charts import draw, flows_spec
+        from dashboard.prefs import theme_now
+        spec = flows_spec(flows, sym, theme_now())
+        if spec:
+            draw(spec)
 
     render_offers(v, dict(price=wi_price, size=wi_size, district=wi_district, sym=sym, cur=cur,
                           sk=sk, mk=mk, structure="SRO" if best_sro else "PERSONAL",

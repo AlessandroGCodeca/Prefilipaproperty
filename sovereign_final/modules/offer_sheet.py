@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import statistics
 
-from modules.memo import _Memo
+from modules.memo import MUTED, _Memo
 
 COMPARABLES_SHOWN = 8
 SIZE_BAND = 0.25          # a comparable's floor area is within ±25 %
@@ -27,7 +27,7 @@ class _Sheet(_Memo):
     def footer(self):
         self.set_y(-12)
         self.set_font(self.memo_font, "", 7)
-        self.set_text_color(130)
+        self.set_text_color(*MUTED)
         self.cell(0, 5, self.txt("MFC PROPERTY · offer sheet · asking prices, not sales — a "
                                  "negotiation aid, not a valuation"), align="C")
 
@@ -87,7 +87,7 @@ def build_offer_sheet(l: dict, comps: list[dict], *, price_history: dict | None 
     pdf.para(f"{l.get('address_raw') or l.get('district') or ''} · {size:.0f} m²"
              + (f" · {l['rooms']} rooms" if l.get("rooms") else "")
              + f"\n{(l.get('source') or '').upper()} · {l.get('url') or ''}"
-             f"\nPrepared {doc_stamp(generated_at)}", size=8, color=110)
+             f"\nPrepared {doc_stamp(generated_at)}", size=8, color=MUTED)
 
     pdf.h2("Your ceiling")
     my, mg = l.get("max_price_yellow"), l.get("max_price_green")

@@ -266,76 +266,91 @@ def render() -> SimpleNamespace:
 
         st.markdown("---")
         st.markdown("#### FILTERS")
-        max_price  = st.slider("Max Price €",  10_000, 600_000, 300_000, 5_000)
-        min_size   = st.slider("Min Size m²",  20, 150, 25, 5)
-        classes    = st.multiselect(
-            "Classification",
-            ["GREEN", "YELLOW", "WHITE", "PENDING", "REJECTED"],
-            default=["GREEN", "YELLOW", "WHITE", "PENDING"],
-        )
         # The portals, plus any other source in the database — 'sample' for the
         # rows seed_market_data.py writes. A fixed list hid those rows behind a
         # filter that had no option to show them.
         from database import get_active_sources
+        from dashboard import filters as _fl
         _portals = (["nehnutelnosti", "bazos", "topreality"]
                     + [mod.split(".", 1)[1] for _, mod in _cz_portals])
         _source_opts = _portals + [s for s in get_active_sources() if s not in _portals]
-        sources    = st.multiselect(
-            "Source",
-            _source_opts,
-            default=_source_opts,
-        )
+        # UX1: the filters as you left them (kept in the database), and saved searches.
+        _fl.init(_source_opts, list(STRUCTURES))
+        _remember = dict(on_change=_fl.save_last)
+        with st.expander("Saved searches", icon=":material/bookmark:"):
+            _names = _fl.saved_names()
+            if st.session_state.get("fl_saved_pick") not in _names:
+                st.session_state["fl_saved_pick"] = None
+            st.selectbox("Saved search", _names, key="fl_saved_pick", index=None,
+                         placeholder="None saved yet" if not _names else "Pick one",
+                         label_visibility="collapsed")
+            _none = not st.session_state.get("fl_saved_pick")
+            _a, _b, _c = st.columns(3)
+            _a.button("Apply", key="fl_apply", on_click=_fl.apply_saved,
+                      args=(_source_opts, list(STRUCTURES)), disabled=_none, width="stretch")
+            _b.button("Alert rule", key="fl_rule", on_click=_fl.alert_rule_from_saved,
+                      disabled=_none, width="stretch",
+                      help="Adds a rule to WORKFLOW → ALERTS from this search: its classes "
+                           "(GREEN, YELLOW), district, size, price and cash-flow filter.")
+            _c.button("Delete", key="fl_delete", on_click=_fl.delete_saved,
+                      disabled=_none, width="stretch")
+            st.text_input("Save these filters as", key="fl_save_name", max_chars=60,
+                          placeholder="e.g. Bratislava 2-room ≤ €200k")
+            st.button("Save", key="fl_save", on_click=_fl.save_as, width="stretch")
+        max_price  = st.slider("Max Price €", *_fl.PRICE_RANGE, step=_fl.PRICE_STEP,
+                               key="fl_max_price", **_remember)
+        min_size   = st.slider("Min Size m²", *_fl.SIZE_RANGE, step=_fl.SIZE_STEP,
+                               key="fl_min_size", **_remember)
+        classes    = st.multiselect("Classification", _fl.CLASSES, key="fl_classes", **_remember)
+        sources    = st.multiselect("Source", _source_opts, key="fl_sources", **_remember)
         district_q = st.text_input(
-            "District contains",
+            "District contains", key="fl_district", **_remember,
             placeholder="e.g. Bratislava, Petržalka, Košice",
             help="Case-insensitive substring match. Leave blank to show all.",
         )
         cond_filter = st.multiselect(
-            "Condition",
-            ["new", "renovated", "good", "original", "poor"],
-            default=[],
+            "Condition", _fl.CONDITIONS, key="fl_cond", **_remember,
             help="Renovation state parsed from the description. "
                  "Empty = show all (including unparsed/unknown).",
         )
         req_parking = st.toggle(
-            "🅿️ Parking only", value=False,
+            "🅿️ Parking only", key="fl_parking", **_remember,
             help="Show only listings with a garage or parking spot "
                  "(parsed from the description).",
         )
         req_furnished = st.toggle(
-            "🛋️ Furnished only", value=False,
+            "🛋️ Furnished only", key="fl_furnished", **_remember,
             help="Show only fully or semi-furnished listings.",
         )
         req_elevator = st.toggle(
-            "🛗 Elevator only", value=False,
+            "🛗 Elevator only", key="fl_elevator", **_remember,
             help="Show only listings whose description mentions an elevator.",
         )
         drops_only = st.toggle(
-            "🔻 Price cuts only", value=False,
+            "🔻 Price cuts only", key="fl_drops", **_remember,
             help="Show only listings whose asking price has been cut.",
         )
         cf_positive_only = st.toggle(
-            "💶 Cash-flow positive only", value=False,
+            "💶 Cash-flow positive only", key="fl_cf", **_remember,
             help="Show only scored listings whose monthly surplus (after the mortgage "
                  "and tax, for the structure shown) clears CASHFLOW_MIN_SURPLUS. "
                  "GREEN and YELLOW are price vs the market, not income: most "
                  "of them cost money every month.",
         )
         hide_dev   = st.toggle(
-            "Hide dev projects",
-            value=True,
+            "Hide dev projects", key="fl_hide_dev", **_remember,
             help='Dev-project listings (novostavba/developersky-projekt/etc.) quote "od €X" '
                  'starting prices for the cheapest unit and distort cashflow scoring.',
         )
         hide_dups  = st.toggle(
-            "Hide portal copies", value=True,
+            "Hide portal copies", key="fl_hide_dups", **_remember,
             help="Show the same flat once even when it is listed on several portals "
                  "(the copy with a verified LV is kept, else the cheapest; the others "
                  "are linked from its card). It picks among the copies the other "
                  "filters let through, so a flat stays while any copy matches them.",
         )
         structure  = STRUCTURES[st.radio(
-            "Figures shown", list(STRUCTURES), horizontal=True, key="structure",
+            "Figures shown", list(STRUCTURES), horizontal=True, key="structure", **_remember,
             help="Which ownership structure's surplus, costs, IRR and stress test the "
                  "page shows. Recommended: for each flat, the structure the engine "
                  "recommends for it (personal for most). The cash-flow flag, the "

@@ -2,6 +2,12 @@
 dashboard/tabs/triage.py — TRIAGE TABLE: every scored listing in one flat,
 sortable table, to spot the best surplus or yield in one scan instead of
 opening each card.
+
+UX5: tick one row and its summary shows under the table (D3); tick several
+and STAR, COMPARE or PASS acts on all of them at once.
+D22: on a phone (600 px and narrower) the wide table gives way to a list,
+two lines a flat, 25 to a page; the page carries both and the stylesheet
+shows the one that fits (dashboard/style.py, .st-key-triage_wide/_narrow).
 """
 
 from datetime import datetime
@@ -68,6 +74,119 @@ def render_summary(l, v, ctx: str = "triage") -> None:
         st.button("Open its full card", key=f"open_{ctx}", on_click=open_card, args=(l["id"],))
     else:
         st.caption("A WHITE flat has no card: ANALYSIS → WHAT-IF / TAX gives its full breakdown.")
+
+
+# ── UX5: acting on several flats at once ─────────────────────────────────────
+def _new_selection() -> None:
+    """Start the table's selection afresh (its key carries a counter)."""
+    st.session_state["triage_gen"] = st.session_state.get("triage_gen", 0) + 1
+
+
+def star_all(ids) -> None:
+    from database import set_starred
+    for lid in ids:
+        set_starred(lid, True)
+    _new_selection()
+    st.toast(f"★ {len(ids)} starred — TODAY lists them first.")
+
+
+def pass_all(ids) -> None:
+    """Move the flats to PASSED, all but one already CLOSED."""
+    from dashboard.listing_cache import clear_listing_cache
+    from database import get_deal_stages, set_deal_stage
+    stages = get_deal_stages()
+    moved = 0
+    for lid in ids:
+        if (stages.get(lid) or {}).get("stage") != "CLOSED":
+            set_deal_stage(lid, "PASSED", "passed from TRIAGE TABLE")
+            moved += 1
+    clear_listing_cache()
+    _new_selection()
+    st.toast(f"{moved} moved to PASSED in DEAL PIPELINE.")
+
+
+def compare(labels) -> None:
+    """Put the flats in COMPARE and go there."""
+    st.session_state["cmp_pick"] = list(labels)[:4]
+    st.query_params["group"] = "analysis"
+    st.query_params["tab"] = "COMPARE"
+    st.session_state["_tabgen"] = st.session_state.get("_tabgen", 0) + 1
+    _new_selection()
+
+
+def render_bulk(chosen, v) -> None:
+    """What can be done with the ticked flats."""
+    from dashboard.tabs.compare import MAX_COMPARED, _label
+    ids = [l["id"] for l in chosen]
+    st.markdown(f'<div class="muted">{len(chosen)} FLATS TICKED</div>', unsafe_allow_html=True)
+    demo = v.using_demo
+    b1, b2, b3 = st.columns(3)
+    with b1:
+        st.button(f"★ Star all {len(ids)}", key="bulk_star", on_click=star_all, args=(ids,),
+                  disabled=demo, width="stretch",
+                  help="Demo flats aren't in the database." if demo else
+                       "Starred flats are listed first in TODAY.")
+    with b2:
+        fits = len(ids) <= MAX_COMPARED
+        st.button("Compare them", key="bulk_cmp", on_click=compare,
+                  args=([_label(l) for l in chosen],), disabled=not fits, width="stretch",
+                  help=("Opens ANALYSIS → COMPARE with these flats side by side." if fits else
+                        f"COMPARE takes 2 to {MAX_COMPARED} flats."))
+    with b3:
+        sure = st.checkbox(f"Pass all {len(ids)}", key="bulk_pass_ok", disabled=demo,
+                           help="Moves them to PASSED in DEAL PIPELINE (a CLOSED deal stays).")
+        st.button("Pass them", key="bulk_pass", on_click=pass_all, args=(ids,),
+                  disabled=demo or not sure, width="stretch", type="primary")
+
+
+# ── D22: the table as a list on a phone ──────────────────────────────────────
+PHONE_PAGE = 25
+
+
+def _phone_pick(lid) -> None:
+    st.session_state["triage_phone_pick"] = (
+        None if st.session_state.get("triage_phone_pick") == lid else lid)
+
+
+def _phone_page(step: int) -> None:
+    st.session_state["triage_phone_page"] = max(0, st.session_state.get("triage_phone_page", 0)
+                                                + step)
+
+
+def render_phone_list(df, by_id, v) -> None:
+    """Each flat in two lines (class, grade, price and surplus; then its
+    title), 25 to a page; Open shows its summary under it."""
+    from dashboard.fmt import amt, sgn
+    pages = max(1, -(-len(df) // PHONE_PAGE))
+    page = min(st.session_state.get("triage_phone_page", 0), pages - 1)
+    st.session_state["triage_phone_page"] = page
+    pick = st.session_state.get("triage_phone_pick")
+    for _, row in df.iloc[page * PHONE_PAGE:(page + 1) * PHONE_PAGE].iterrows():
+        l = by_id.get(row["_id"])
+        if not l:
+            continue
+        surplus = v.surplus(l)
+        tone = "" if surplus is None else ("bad" if v.cf_negative(l) else "good")
+        with st.container(horizontal=True, vertical_alignment="center",
+                          key=f"trim_{row['_id']}"):
+            st.markdown(
+                f'<div class="td-row"><div class="td-m">{esc(row[""])} '
+                f'<b>{esc(row["Grade"])}</b> · {esc(amt(l, l.get("price_eur") or 0))} · '
+                f'<span class="td-{tone}">{esc(sgn(l, surplus))}</span></div>'
+                f'<div class="td-t">{esc(row["Title"])}</div></div>',
+                unsafe_allow_html=True, width="stretch")
+            st.button("Close" if pick == l["id"] else "Open", key=f"trio_{l['id']}",
+                      on_click=_phone_pick, args=(l["id"],))
+        if pick == l["id"]:
+            render_summary(l, v, ctx="triage_phone")
+    if pages > 1:
+        with st.container(horizontal=True, vertical_alignment="center", key="trim_pages"):
+            st.button("◀", key="trip_prev", on_click=_phone_page, args=(-1,),
+                      disabled=page == 0)
+            st.markdown(f'<div class="muted">page {page + 1} of {pages}</div>',
+                        unsafe_allow_html=True, width="content")
+            st.button("▶", key="trip_next", on_click=_phone_page, args=(1,),
+                      disabled=page >= pages - 1)
 
 
 def render(v) -> None:
@@ -177,7 +296,12 @@ def render(v) -> None:
         optional = [c for c in df.columns if c not in PINNED]
         st.session_state["triage_hide"] = [c for c in st.session_state.get("triage_hide", [])
                                            if c in optional]
-        c_cols, c_csv = st.columns([5, 1])
+        by_id = {l.get("id"): l for l in view.data}    # `v` is the money helper by now
+        # D22: a phone gets the list; the stylesheet hides the one that doesn't fit.
+        with st.container(key="triage_narrow"):
+            render_phone_list(df, by_id, view)
+        wide = st.container(key="triage_wide")
+        c_cols, c_csv = wide.columns([5, 1])
         with c_cols:
             hidden = st.multiselect(
                 "Hide columns", optional, key="triage_hide", label_visibility="collapsed",
@@ -189,7 +313,7 @@ def render(v) -> None:
                 file_name=f"sovereign_triage_{datetime.now():%Y-%m-%d}.csv", key="triage_csv",
                 help=f"Every row and column of this table as filtered — for your bank, "
                      f"adviser or partner. Money in {v_cur}; opens in Excel.")
-        picked = st.dataframe(
+        picked = wide.dataframe(
             df,
             width="stretch",
             hide_index=True,
@@ -226,12 +350,15 @@ def render(v) -> None:
                 "Vibe":    st.column_config.NumberColumn(format="%d/10"),
                 "URL":     st.column_config.LinkColumn(display_text="open ↗"),
             },
-            # D3: a click on a row shows that flat's summary under the table.
-            on_select="rerun", selection_mode="single-row", key="triage_pick",
+            # D3: a ticked row shows that flat's summary under the table;
+            # UX5: several ticked can be starred, compared or passed at once.
+            on_select="rerun", selection_mode="multi-row",
+            key=f"triage_pick{st.session_state.get('triage_gen', 0)}",
         )
         rows = (picked.selection.rows if picked else []) or []
-        if rows:
-            lid = df.iloc[rows[0]]["_id"]
-            chosen = next((l for l in v.data if l.get("id") == lid), None)
-            if chosen:
-                render_summary(chosen, v)
+        chosen = [by_id[df.iloc[r]["_id"]] for r in rows if df.iloc[r]["_id"] in by_id]
+        with wide:
+            if len(chosen) == 1:
+                render_summary(chosen[0], view)
+            elif chosen:
+                render_bulk(chosen, view)

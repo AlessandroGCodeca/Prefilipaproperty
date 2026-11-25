@@ -161,14 +161,34 @@ def render_card(l, v):
                 set_starred(lid, not starred)
                 st.rerun()
 
+        # UX4: at a viewing, one screen with what matters there, instead of the card.
+        if st.toggle("Režim prohlídky" if cz else "Viewing mode", key=f"viewmode_{lid}",
+                     help=("Na prohlídku: čísla k vyjednávání, co zkontrolovat, fotky."
+                           if cz else "For a viewing: the figures to negotiate with, what "
+                           "to look at, photos and notes.")):
+            from dashboard import viewing
+            viewing.render(l, using_demo, cz)
+            return
+
         # The verdict first: what the flat is, in a sentence (dashboard/verdict.py).
         from dashboard.verdict import days_between, verdict_html
         cut_days = (days_between(ph["history"][0][0], ph["history"][-1][0])
                     if ph and ph.get("history") else None)
-        st.markdown(verdict_html(deal_grade, deal_score, disc, surplus, struct,
-                                 lambda v: amt(l, v), cz,
-                                 cut_pct=ph.get("change_pct") if ph else None,
-                                 cut_days=cut_days), unsafe_allow_html=True)
+        verdict = verdict_html(deal_grade, deal_score, disc, surplus, struct,
+                               lambda v: amt(l, v), cz,
+                               cut_pct=ph.get("change_pct") if ph else None,
+                               cut_days=cut_days)
+        # D17: the flat's photo beside it, fetched by the server (dashboard/photos.py).
+        from dashboard.photos import listing_photo, photo_url
+        photo = listing_photo(photo_url(l))
+        if photo:
+            ph_col, v_col = st.columns([1, 2.2], vertical_alignment="center")
+            with ph_col:
+                st.image(photo, width="stretch")
+            with v_col:
+                st.markdown(verdict, unsafe_allow_html=True)
+        else:
+            st.markdown(verdict, unsafe_allow_html=True)
 
         # Key figures: price, surplus and the highest offer, big.
         my, mg = l.get("max_price_yellow"), l.get("max_price_green")
@@ -188,6 +208,19 @@ def render_card(l, v):
                                 "regionálním mediánem Kč/m²)." if cz else
                                 "Highest price at which this is still YELLOW "
                                 "(≥10% below the regional median €/m²)."))
+
+        # D18: where the price per m² sits among the flats like it listed now.
+        if not using_demo and price and size:
+            from dashboard.listing_cache import load_active
+            from dashboard.verdict import price_band_html
+            from engine.regional_prices import median_source
+            from modules.offer_sheet import _per_m2, comparables
+            band = price_band_html(price / size,
+                                   [_per_m2(c) for c in comparables(l, load_active())],
+                                   lambda v: amt(l, v, "/m²"),
+                                   median_source(district or "", **mkw(l))[1], cz)
+            if band:
+                st.markdown(band, unsafe_allow_html=True)
 
         if cz_mkt and cz:
             rent_help = (("Živé srovnání z pronájmů" if l.get("rent_source") == "live"
@@ -348,7 +381,7 @@ def render_card(l, v):
                 st.markdown(f'<div class="muted" style="margin-top:6px">🏘 {esc(_tn)}</div>',
                             unsafe_allow_html=True)
         # D8: the month's cash flow and the price over time, drawn.
-        from dashboard.charts import cost_rows, price_spec, waterfall_spec
+        from dashboard.charts import cost_rows, draw, price_spec, waterfall_spec
         unit = "Kč" if (l.get("_cur") or "EUR") == "CZK" else "€"
         from dashboard.prefs import theme_now
         wf = waterfall_spec(rent, cost_rows(l, show_sro, T), surplus, unit, theme_now())
@@ -360,12 +393,12 @@ def render_card(l, v):
                     title = "MĚSÍČNÍ CASH FLOW" if cz else "CASH FLOW, A MONTH"
                     st.markdown(f'<div class="muted">{title} — {esc(struct)}</div>',
                                 unsafe_allow_html=True)
-                    st.vega_lite_chart(wf, width="stretch")
+                    draw(wf)
             if pr:
                 with (g2 or g1):
                     st.markdown(f'<div class="muted">{"CENA V ČASE" if cz else "ASKING PRICE"} · '
                                 f'{ph["change_pct"]:+.1%}</div>', unsafe_allow_html=True)
-                    st.vega_lite_chart(pr, width="stretch")
+                    draw(pr)
         if ph:
             steps = " → ".join(f"{amt(l, p)} ({str(w)[:10]})" for w, p in ph["history"])
             st.markdown(f'<div class="muted" style="margin-top:6px">📉 Price: {steps} '
@@ -604,6 +637,10 @@ def render_card(l, v):
                     st.warning(f"Re-verify: {r.get('detail', r['status'])}")
             except Exception as e:
                 st.warning(f"Re-verify: {redact(e)}")
+
+        # UX7: a question about this flat, answered by Claude from its figures.
+        from dashboard import ask
+        ask.render(l, using_demo, cz, deal_score, deal_grade)
 
         from dashboard.lv_view import render_erase, render_part_c
         render_part_c(l, _LV_DOCS)

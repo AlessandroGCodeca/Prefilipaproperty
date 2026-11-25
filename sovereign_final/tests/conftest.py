@@ -48,6 +48,21 @@ def _no_real_database(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_photos(monkeypatch, request):
+    """No test downloads a listing's photo (dashboard/photos.py); one about
+    the photos replaces _download itself, or (marked real_photos) keeps it
+    and stubs requests.get."""
+    from dashboard import photos
+    monkeypatch.setattr(photos, "_failed", {})
+    if request.node.get_closest_marker("real_photos"):
+        return
+
+    def _offline(url):
+        raise photos.NoPhoto("no network in tests")
+    monkeypatch.setattr(photos, "_download", _offline)
+
+
+@pytest.fixture(autouse=True)
 def _no_live_fx_rate(monkeypatch, tmp_path):
     """No test fetches the ČNB rate or reads or writes the real
     data/fx_rate.json; one about modules/fx_rate stubs _fetch itself."""
@@ -150,6 +165,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "keeps_listing_cache: the dashboard's listing cache is not "
                    "cleared before each AppTest run")
+    config.addinivalue_line(
+        "markers", "real_photos: dashboard/photos.py keeps its real _download "
+                   "(the test stubs requests.get itself)")
 
 
 @pytest.fixture(autouse=True)

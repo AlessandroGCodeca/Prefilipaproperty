@@ -2,6 +2,13 @@
 dashboard/tabs/map_view.py — MAP: the listings with a pin, coloured by class
 or by monthly cash flow; nearby pins can be grouped, and the map narrowed to
 the listings within a distance of a point (work, a university, a station).
+
+D19: "Districts" lays a circle under the pins for each area with two or more
+flats on the map — the benchmark area of each flat, so spellings of one
+district fall together — sized by its count and coloured by its median price
+per m² (in €, so Slovak and Czech areas share one scale) or its median gross
+yield, in five steps from the lowest to the highest area. Circles, not the
+districts' outlines: those would need boundary files the app doesn't carry.
 """
 
 import math
@@ -26,6 +33,68 @@ LEGEND_CLASS = (("GREEN", "Green: ≥20% under market"), ("YELLOW", "Yellow: 10�
 LEGEND_CASH = ((CASHFLOW_COLOR[0][1], "≥ +€100 a month"), (CASHFLOW_COLOR[1][1], "break-even or better"),
                (CASHFLOW_COLOR[2][1], "down to −€100"), (CASHFLOW_COLOR[3][1], "worse"),
                (NO_SCORE_COLOR, "not scored"))
+
+
+# D19: five steps, lightest for the lowest area value.
+PRICE_STEPS = ([214, 232, 255], [160, 200, 255], [110, 168, 255], [70, 124, 226], [40, 84, 178])
+YIELD_STEPS = ([214, 245, 230], [160, 232, 198], [100, 218, 160], [61, 186, 128], [28, 138, 90])
+DISTRICT_MIN_FLATS = 2
+
+
+def _median(xs):
+    import statistics
+    return statistics.median(xs) if xs else None
+
+
+def district_areas(rows: list[dict], by_yield: bool = False) -> list[dict]:
+    """One circle a benchmark area with DISTRICT_MIN_FLATS or more of `rows`:
+    its median pin, count, median €/m² and gross yield, and a colour step."""
+    from engine.regional_prices import median_source
+    groups: dict[tuple, list[dict]] = {}
+    for l in rows:
+        mkt = l.get("_market") or "sk"
+        area = (median_source(l.get("district") or "", **({} if mkt == "sk" else {"market": mkt}))[1]
+                or (l.get("district") or "").strip())
+        if area:
+            groups.setdefault((mkt, area), []).append(l)
+    areas = []
+    for (_mkt, area), ls in groups.items():
+        if len(ls) < DISTRICT_MIN_FLATS:
+            continue
+        per_m2 = _median([l["_price_eur"] / l["size_m2"] for l in ls
+                          if l.get("_price_eur") and l.get("size_m2")])
+        gross = _median([l["gross_yield"] * 100 for l in ls if l.get("gross_yield")])
+        value = gross if by_yield else per_m2
+        if value is None:
+            continue
+        areas.append({"area": area, "n": len(ls), "value": value, "per_m2": per_m2,
+                      "gross": gross, "lat": _median([l["lat"] for l in ls]),
+                      "lng": _median([l["lng"] for l in ls])})
+    ranked = sorted(a["value"] for a in areas)
+    steps = YIELD_STEPS if by_yield else PRICE_STEPS
+    for a in areas:
+        step = (min(int(ranked.index(a["value"]) / max(len(ranked) - 1, 1) * 5), 4)
+                if len(ranked) > 1 else 2)
+        a["color"] = steps[step] + [95]
+        a["line"] = steps[step] + [200]
+        a["radius"] = 1500 * math.sqrt(a["n"])
+        a["tip"] = (f"<b>{esc(a['area'])}</b><br/>{a['n']} flats on the map"
+                    + (f"<br/>median €{a['per_m2']:,.0f}/m²" if a["per_m2"] else "")
+                    + (f"<br/>median gross yield {a['gross']:.1f}%" if a["gross"] else ""))
+    return areas
+
+
+def district_legend_html(areas: list[dict], by_yield: bool) -> str:
+    """The district circles' scale, lowest to highest."""
+    if not areas:
+        return ""
+    lo, hi = min(a["value"] for a in areas), max(a["value"] for a in areas)
+    steps = YIELD_STEPS if by_yield else PRICE_STEPS
+    what = (f"gross yield {lo:.1f}% → {hi:.1f}%" if by_yield
+            else f"€{lo:,.0f}/m² → €{hi:,.0f}/m² (median, in €)")
+    return ('<div class="lg"><span>Districts, ' + esc(what) + ":</span>"
+            + "".join(f'<span><i style="background:rgb({c[0]},{c[1]},{c[2]})"></i></span>'
+                      for c in steps) + "</div>")
 
 
 def legend_html(by_cash: bool) -> str:
@@ -170,6 +239,17 @@ def render(v) -> None:
                               label_visibility="collapsed", disabled=not near.strip(),
                               format="within %d km")
 
+    d1, d2 = st.columns([2, 4])
+    with d1:
+        show_districts = st.toggle("Districts", key="map_districts",
+                                   help="A circle for each area with two or more flats on the "
+                                        "map, sized by how many and coloured by their median "
+                                        "price per m² or gross yield.")
+    with d2:
+        by_yield = st.radio("District colour", ["€/m²", "Gross yield"], horizontal=True,
+                            key="map_dmetric", disabled=not show_districts,
+                            label_visibility="collapsed") == "Gross yield"
+
     point = None
     if near.strip():
         # Mapy.com's credit, beside the results of its address search.
@@ -247,15 +327,24 @@ def render(v) -> None:
     scope = ((f" within {max_min} min ({esc(travel.MODES[mode].lower())}) of {esc(near.strip())}"
               if mode else f" within {radius_km} km (straight line) of {esc(near.strip())}")
              if point else "")
+    areas = (district_areas([l for l in mapped if l["id"] in {p["id"] for p in pts}], by_yield)
+             if show_districts else [])
     st.markdown(f'<div class="muted">{len(pts)} of {len(data)} filtered listings'
                 f'{scope or " have coordinates"}. Click a pin to see the flat below the map.</div>'
-                + legend_html(by_cash), unsafe_allow_html=True)
+                + legend_html(by_cash) + district_legend_html(areas, by_yield),
+                unsafe_allow_html=True)
     if not pts:
         st.info("No listing within that distance — widen it, or move the point.")
         return
 
     import pydeck as pdk
     layers = []
+    if areas:            # D19: under everything else
+        layers.append(pdk.Layer(
+            "ScatterplotLayer", data=areas, get_position="[lng, lat]", id="districts",
+            get_fill_color="color", get_line_color="line", get_radius="radius",
+            stroked=True, filled=True, line_width_min_pixels=1, radius_min_pixels=12,
+            radius_max_pixels=90, pickable=True))
     if point:
         ring = [{"lat": point[0], "lng": point[1],
                  "tip": f"<b>{esc(near.strip())}</b><br/>{radius_km} km around it"}]

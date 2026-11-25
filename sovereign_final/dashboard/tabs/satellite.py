@@ -104,8 +104,10 @@ def render(v) -> None:
 
         with c1:
             st.markdown('<div class="muted">LISTING PHOTO</div>', unsafe_allow_html=True)
-            img = sel.get("primary_image_url","")
-            if img and img.startswith("http"):
+            # Fetched by the server (D17), not by your browser from the portal.
+            from dashboard.photos import listing_photo, photo_url
+            img = listing_photo(photo_url(sel))
+            if img:
                 st.image(img, width="stretch")
             else:
                 st.markdown('<div style="background:var(--panel);border:1px solid var(--line);height:260px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-family:var(--mono);font-size:0.7rem;letter-spacing:2px">NO IMAGE</div>', unsafe_allow_html=True)

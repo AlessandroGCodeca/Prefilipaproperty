@@ -202,6 +202,8 @@ _USER_TABLES = {
                           "FROM deal_files ORDER BY uploaded_at",
     "alert_rules":        "SELECT * FROM alert_rules ORDER BY position",
     "starred":            "SELECT * FROM starred ORDER BY starred_at",
+    "viewing":            "SELECT * FROM viewing ORDER BY listing_id",          # UX4
+    "saved_searches":     "SELECT * FROM saved_searches ORDER BY name",         # UX1
 }
 
 
@@ -264,7 +266,9 @@ def export_user_data(day: date | None = None) -> str:
                          if database._has_table(conn, name) else [])
         # Enough of each listing those rows refer to (and of every flat whose
         # own LV you entered) to find it again without the database.
-        ids = {r["listing_id"] for name in _USER_TABLES for r in out[name]}
+        # Not every table is about one listing (alert rules, saved searches,
+        # your own flats): a row without a listing_id names none.
+        ids = {r.get("listing_id") for name in _USER_TABLES for r in out[name]} - {None}
         rows = conn.execute(
             "SELECT id, url, title, district, price_eur, size_m2, lv_number, "
             "cadastral_area, lv_status, is_active FROM listings "
