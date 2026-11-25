@@ -26,7 +26,13 @@ from datetime import datetime
 
 from fpdf import FPDF
 
+# D21: the IBM Plex Sans the app ships (modules/fonts) first, so a printout
+# looks like the dashboard on any computer; the system's own fonts only if
+# those files are missing.
+_FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
 _FONT_CANDIDATES = [
+    (os.path.join(_FONTS_DIR, "IBMPlexSans-Regular.woff"),
+     os.path.join(_FONTS_DIR, "IBMPlexSans-Bold.woff")),
     ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
      "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
     ("/usr/share/fonts/dejavu/DejaVuSans.ttf",
@@ -40,6 +46,12 @@ _FONT_CANDIDATES = [
 _ASCII = str.maketrans({"€": "EUR", "—": "-", "−": "-", "–": "-", "·": "|", "≥": ">=",
                         "≤": "<=", "²": "2", "→": "->", "×": "x", "“": '"',
                         "”": '"', "„": '"', "’": "'"})
+
+
+# The light palette (dashboard/style.py tokens): paper is light.
+TEXT, BODY, MUTED = (0x14, 0x1A, 0x26), (0x2A, 0x33, 0x42), (0x56, 0x60, 0x75)
+LINE, SHADE = (0xD5, 0xDA, 0xE3), (0xEE, 0xF0, 0xF4)
+GOOD, CAUTION, BAD = (0x0A, 0x6B, 0x43), (0x7A, 0x4A, 0x00), (0xB3, 0x26, 0x1E)
 
 
 class _Memo(FPDF):
@@ -66,28 +78,41 @@ class _Memo(FPDF):
     def footer(self):
         self.set_y(-12)
         self.set_font(self.memo_font, "", 7)
-        self.set_text_color(130)
+        self.set_text_color(*MUTED)
         self.cell(0, 5, self.txt(f"MFC PROPERTY · investment memo · page {self.page_no()} · "
                                  "data scoring only, not investment advice"), align="C")
 
+    def fit(self, text, width: float, size: float, style: str = "") -> str:
+        """`text` set in the largest size from `size` down to 6.5 pt that fits
+        `width`; still too long at 6.5 pt, it is cut with "…". Sets the font."""
+        text = self.txt(text)
+        while True:
+            self.set_font(self.memo_font, style, size)
+            if self.get_string_width(text) <= width or size <= 6.5:
+                break
+            size -= 0.5
+        while text and self.get_string_width(text) > width:
+            text = text[:-2] + ("…" if self.memo_unicode else ".")
+        return text
+
     def h1(self, text):
         self.set_font(self.memo_font, "B", 15)
-        self.set_text_color(20)
+        self.set_text_color(*TEXT)
         self.multi_cell(0, 7, self.txt(text), new_x="LMARGIN", new_y="NEXT")
         self.ln(1)
 
     def h2(self, text):
         self.ln(3)
         self.set_font(self.memo_font, "B", 10.5)
-        self.set_text_color(20)
+        self.set_text_color(*TEXT)
         self.cell(0, 6, self.txt(text.upper()), new_x="LMARGIN", new_y="NEXT")
-        self.set_draw_color(200)
+        self.set_draw_color(*LINE)
         self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
         self.ln(1.5)
 
-    def para(self, text, size=8.5, color=60):
+    def para(self, text, size=8.5, color=BODY):
         self.set_font(self.memo_font, "", size)
-        self.set_text_color(color)
+        self.set_text_color(*(color if isinstance(color, tuple) else (color,) * 3))
         self.multi_cell(0, 4.4, self.txt(text), new_x="LMARGIN", new_y="NEXT")
 
     def kv(self, rows, cols=2):
@@ -95,18 +120,17 @@ class _Memo(FPDF):
         width = (self.w - self.l_margin - self.r_margin) / cols
         for i in range(0, len(rows), cols):
             for label, value in rows[i:i + cols]:
-                self.set_font(self.memo_font, "", 8)
-                self.set_text_color(110)
-                self.cell(width * 0.48, 5, self.txt(label))
+                self.set_text_color(*MUTED)
+                self.cell(width * 0.48, 5, self.fit(label, width * 0.48 - 1.5, 8))
                 self.set_font(self.memo_font, "B", 8.5)
-                self.set_text_color(20)
+                self.set_text_color(*TEXT)
                 self.cell(width * 0.52, 5, self.txt(value))
             self.ln(5)
 
     def table(self, header, rows, widths):
         self.set_font(self.memo_font, "B", 7.5)
-        self.set_fill_color(235)
-        self.set_text_color(40)
+        self.set_fill_color(*SHADE)
+        self.set_text_color(*BODY)
         for h, w in zip(header, widths):
             self.cell(w, 5, self.txt(h), border=0, fill=True, align="R" if h != header[0] else "L")
         self.ln(5)
@@ -182,13 +206,13 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
     pdf.h1(l.get("title") or l.get("district") or "Listing")
     pdf.para(f"{l.get('address_raw') or l.get('district') or ''}\n"
              f"{(l.get('source') or '').upper()} · {l.get('url') or ''}\n"
-             f"Memo generated {doc_stamp(generated_at)}", size=8, color=110)
+             f"Memo generated {doc_stamp(generated_at)}", size=8, color=MUTED)
 
     pdf.h2("Verdict")
     verdict = (f"{cls} · deal grade {grade} ({score}/100) · best structure "
                f"{'s.r.o.' if l.get('optimal_structure') == 'SRO' else 'personal'}")
     pdf.set_font(pdf.memo_font, "B", 11)
-    pdf.set_text_color(20)
+    pdf.set_text_color(*TEXT)
     pdf.multi_cell(0, 6, pdf.txt(verdict), new_x="LMARGIN", new_y="NEXT")
     surpluses = [v for v in (l.get("surplus_personal"), l.get("surplus_sro")) if v is not None]
     if surpluses and is_cashflow_negative(max(surpluses), **mk):
@@ -222,7 +246,7 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
     if median_m2:
         pdf.para("Benchmark: " + benchmark_note(l.get("district") or "", l.get("rooms"), **mk)
                  + ". Days tracked count from this dashboard's first sight of the flat, "
-                   "not the portal's posting date.", size=7.5, color=110)
+                   "not the portal's posting date.", size=7.5, color=MUTED)
     ph = (price_history or {}).get(l.get("id"))
     if ph:
         steps = " → ".join(f"{money(p)} ({str(w)[:10]})" for w, p in ph["history"])
@@ -416,12 +440,12 @@ def build_memo_pdf(l: dict, *, price_history: dict | None = None,
                  "flat rate, s.r.o. 21 % corporate tax and 15 % on dividends, a personal "
                  "sale exempt after 10 years — to be confirmed with a daňový poradce. "
                  "The title deed is verified only from the flat's own výpis z LV. Keep the "
-                 "price in úschova until the vklad.", size=7.5, color=110)
+                 "price in úschova until the vklad.", size=7.5, color=MUTED)
         return bytes(pdf.output())
     pdf.para("Rent, market value and risk flags are estimates from public data; the "
              "regional median is for older 3-room flats, adjusted by room count. "
              f"Taxes use the {l.get('tax_year') or 'current'} tax table. Tax treatment (§6(3) personal "
              "rental, s.r.o. corporate + dividend tax, 5-year exemption on a personal "
              "sale) must be confirmed with an účtovník. Use notárska úschova for funds.",
-             size=7.5, color=110)
+             size=7.5, color=MUTED)
     return bytes(pdf.output())
