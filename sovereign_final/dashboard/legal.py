@@ -108,7 +108,8 @@ def privacy_md() -> str:
 - *Technical data*: the login, error logs on the server. No analytics and no advertising.
 
 **Who else receives data (processors).**
-- Anthropic (USA): an ad's text, an uploaded scan or deed, an auction announcement — to read them.
+- Anthropic (USA): an ad's text, an uploaded scan or deed, an auction announcement — to read them;
+  and a question you ask about a flat, with that flat's figures and ad text — to answer it.
   Under Anthropic's data processing addendum with the EU Standard Contractual Clauses; not used to
   train models.
 - Mapy.com, Seznam.cz, a.s. (Czechia): the address of a listing, to find its coordinates.

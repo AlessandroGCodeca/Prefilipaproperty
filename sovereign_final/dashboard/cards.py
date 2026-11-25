@@ -167,7 +167,7 @@ def render_card(l, v):
                            if cz else "For a viewing: the figures to negotiate with, what "
                            "to look at, photos and notes.")):
             from dashboard import viewing
-            viewing.render(l, v, cz)
+            viewing.render(l, using_demo, cz)
             return
 
         # The verdict first: what the flat is, in a sentence (dashboard/verdict.py).
@@ -637,6 +637,10 @@ def render_card(l, v):
                     st.warning(f"Re-verify: {r.get('detail', r['status'])}")
             except Exception as e:
                 st.warning(f"Re-verify: {redact(e)}")
+
+        # UX7: a question about this flat, answered by Claude from its figures.
+        from dashboard import ask
+        ask.render(l, using_demo, cz, deal_score, deal_grade)
 
         from dashboard.lv_view import render_erase, render_part_c
         render_part_c(l, _LV_DOCS)

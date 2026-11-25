@@ -36,14 +36,14 @@ CONDITION_WORDS = {"new": ("new", "nový"), "renovated": ("renovated", "po rekon
                    "poor": ("poor", "špatný")}
 
 
-def render(l: dict, v, cz: bool) -> None:
-    """The viewing screen for listing `l` (inside its open card)."""
+def render(l: dict, demo: bool, cz: bool) -> None:
+    """The viewing screen for listing `l` (inside its open card); `demo`: the
+    page shows the demo data, which isn't in the database."""
     from database import add_annotation
     from database.deal_docs import add_deal_file, list_deal_files
     from database.viewing import CONDITIONS, get_viewing, set_viewing
     from engine.building import renovation_cost
     lid = l["id"]
-    demo = v.using_demo
     size = l.get("size_m2") or 0
     price = l.get("price_eur") or 0
     market = l.get("_market") or "sk"

@@ -1,5 +1,6 @@
 """Design D17–D22 and ease of use UX1, UX2, UX4, UX5, UX7 (audit PDF, section 15)."""
 
+import json
 import pathlib
 
 import pytest
@@ -556,3 +557,69 @@ def test_the_condition_you_saw_drives_the_cards_renovation_estimate(populated_db
     at.toggle(key="bld_g1").set_value(True).run()
     assert not at.exception, [e.value for e in at.exception]
     assert any("Condition (you saw)" in m.value and "poor" in m.value for m in at.markdown)
+
+
+# ── UX7: ask Claude about this flat ──────────────────────────────────────────
+def test_the_figures_sent_are_the_cards_and_never_the_deed(populated_db):
+    from dashboard.ask import card_facts
+    conn = populated_db.get_conn()
+    conn.execute("UPDATE listings SET description='Byt s balkónom, 3. poschodie.' WHERE id='g1'")
+    conn.commit()
+    conn.close()
+    l = next(r for r in populated_db.get_all_active() if r["id"] == "g1")
+    l = {**l, "_cur": "EUR", "_dom": 9, "lv_raw": "Vlastník: Ján Novák, nar. 1960"}
+    facts = card_facts(l, 79, "B")
+    assert facts["currency"] == "EUR" and facts["deal_grade"] == "B" and facts["days_tracked"] == 9
+    assert facts["price_per_m2"] and "balkónom" in facts["ad_text"]
+    sent = json.dumps(facts, ensure_ascii=False)
+    assert "Ján Novák" not in sent and "lv_raw" not in sent
+
+
+def test_the_question_goes_to_the_ask_model_with_its_fallback(monkeypatch):
+    from modules import llm_enrichment as llm
+    seen = {}
+
+    def fake(system, user, schema, **kw):
+        seen.update(system=system, user=user, schema=schema, **kw)
+        return {"answer": "x", "figures_used": [], "answerable": True}
+    monkeypatch.setattr(llm, "_ask_json", fake)
+    llm.ask_about_flat("What if I let it furnished?", {"price_eur": 120000, "currency": "EUR"})
+    assert seen["model"] == llm.ANTHROPIC_MODEL_ASK and seen["fallbacks"] is True
+    assert '"price_eur": 120000' in seen["user"] and "What if I let it furnished?" in seen["user"]
+    assert set(seen["schema"]["required"]) == {"answer", "figures_used", "answerable"}
+    assert llm.ask_about_flat("   ", {}) is None
+
+
+def test_the_card_answers_shows_the_figures_used_and_asks_once(populated_db, monkeypatch):
+    from modules import llm_enrichment as llm
+    asked = []
+
+    def fake(question, facts):
+        asked.append(question)
+        return {"answer": "Furnished, the rent would be about €610 <b>a month</b>.",
+                "figures_used": [{"name": "estimated_rent_eur", "value": "550"}],
+                "answerable": True}
+    monkeypatch.setattr(llm, "is_enabled", lambda: True)
+    monkeypatch.setattr(llm, "ask_about_flat", fake)
+    at = run_app(open_cards=("g1",))
+    at.toggle(key="ask_t_g1").set_value(True).run()
+    at.text_input(key="ask_q_g1").input("What if I let it furnished?").run()
+    at.button(key="ask_b_g1").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    md = " ".join(m.value for m in at.markdown)
+    assert "€610 &lt;b&gt;a month&lt;/b&gt;" in md and "estimated_rent_eur = 550" in md
+    at.button(key="ask_b_g1").click().run()
+    assert asked == ["What if I let it furnished?"]                  # from memory, once
+
+
+def test_without_a_key_the_box_says_so(populated_db, monkeypatch):
+    from modules import llm_enrichment as llm
+    monkeypatch.setattr(llm, "is_enabled", lambda: False)
+    at = run_app(open_cards=("g1",))
+    at.toggle(key="ask_t_g1").set_value(True).run()
+    assert any("ANTHROPIC_API_KEY" in i.value for i in at.info)
+
+
+def test_the_privacy_notice_names_the_questions():
+    from dashboard import legal
+    assert "a question you ask about a flat" in " ".join(legal.privacy_md().split())
