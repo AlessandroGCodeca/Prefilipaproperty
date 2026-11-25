@@ -141,8 +141,9 @@ def test_the_sidebar_buttons_are_grouped_and_named_in_full(populated_db):
     at = run_app()
     groups = {e.label: [b.label for b in e.button] for e in at.sidebar.expander}
     assert list(groups) == ["DAILY RUN — step by step", "REPAIR DATA", "DIAGNOSTICS",
-                            "YOUR SITUATION", "DISPLAY"]
+                            "YOUR SITUATION", "Saved searches", "DISPLAY"]
     assert groups["YOUR SITUATION"] == ["SAVE AND RE-SCORE"]
+    assert groups["Saved searches"] == ["Apply", "Alert rule", "Delete", "Save"]   # UX1
     daily = groups["DAILY RUN — step by step"]
     assert daily[:3] == ["🇸🇰 Nehnutelnosti.sk", "🇸🇰 Bazos.sk", "🇸🇰 Topreality.sk"]
     assert "🇨🇿 Bazos.cz" in daily and "🇨🇿 Bezrealitky.cz" in daily

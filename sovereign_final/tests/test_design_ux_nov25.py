@@ -342,3 +342,61 @@ def test_the_stylesheet_shows_one_of_the_two():
     css = style.CSS if hasattr(style, "CSS") else open(style.__file__, encoding="utf-8").read()
     assert "@media (min-width: 601px) { .st-key-triage_narrow { display: none !important; } }" in css
     assert "@media (max-width: 600px) { .st-key-triage_wide { display: none !important; } }" in css
+
+
+# ── UX1: the filters remembered, and saved searches ──────────────────────────
+def test_a_changed_filter_is_still_set_in_a_new_session(populated_db):
+    at = run_app()
+    at.sidebar.slider(key="fl_max_price").set_value(150_000).run()
+    at.sidebar.toggle(key="fl_cf").set_value(True).run()
+    again = run_app()                                    # a reload, or the phone
+    assert not again.exception, [e.value for e in again.exception]
+    assert again.sidebar.slider(key="fl_max_price").value == 150_000
+    assert again.sidebar.toggle(key="fl_cf").value is True
+
+
+def test_a_stale_or_broken_stored_value_falls_back_to_its_default():
+    from dashboard import filters
+    opts, structs = ["bazos", "topreality"], ["Recommended", "Personal"]
+    assert filters._valid("fl_sources", ["bazos", "gone_portal"], opts, structs) == ["bazos"]
+    assert filters._valid("fl_sources", "not a list", opts, structs) == opts
+    assert filters._valid("fl_max_price", 9_999_999, opts, structs) == 300_000
+    assert filters._valid("fl_max_price", 152_400, opts, structs) == 150_000   # on the step
+    assert filters._valid("fl_parking", "yes", opts, structs) is False
+    assert filters._valid("structure", "Gone", opts, structs) == "Recommended"
+    assert filters._valid("fl_classes", ["GREEN", "<script>"], opts, structs) == ["GREEN"]
+
+
+def test_a_saved_search_comes_back_and_can_be_deleted(populated_db):
+    at = run_app()
+    at.sidebar.slider(key="fl_min_size").set_value(60).run()
+    at.sidebar.text_input(key="fl_district").input("Žilina").run()
+    at.sidebar.text_input(key="fl_save_name").input("Žilina big").run()
+    at.sidebar.button(key="fl_save").click().run()
+    at.sidebar.slider(key="fl_min_size").set_value(25).run()
+    at.sidebar.text_input(key="fl_district").input("").run()
+    at.sidebar.selectbox(key="fl_saved_pick").select("Žilina big").run()
+    at.sidebar.button(key="fl_apply").click().run()
+    assert at.sidebar.slider(key="fl_min_size").value == 60
+    assert at.sidebar.text_input(key="fl_district").value == "Žilina"
+    at.sidebar.button(key="fl_delete").click().run()
+    from dashboard import filters
+    assert filters.saved_names() == []
+
+
+def test_a_saved_search_becomes_an_alert_rule(populated_db):
+    from dashboard import filters
+    rule = filters.rule_from({"fl_classes": ["GREEN", "WHITE"], "fl_district": "Žilina",
+                              "fl_min_size": 50, "fl_max_price": 150_000, "fl_cf": True},
+                             "Žilina big")
+    assert rule["classes"] == "GREEN" and rule["district"] == "Žilina"
+    assert (rule["min_size"], rule["max_price_eur"], rule["min_surplus"]) == (50, 150_000, 0)
+    at = run_app()
+    at.sidebar.text_input(key="fl_save_name").input("Cheap Žilina").run()
+    at.sidebar.button(key="fl_save").click().run()
+    at.sidebar.selectbox(key="fl_saved_pick").select("Cheap Žilina").run()
+    at.sidebar.button(key="fl_rule").click().run()
+    rules = populated_db.get_alert_rules()
+    assert [r["name"] for r in rules] == ["Cheap Žilina"]
+    at.sidebar.button(key="fl_rule").click().run()               # not twice
+    assert len(populated_db.get_alert_rules()) == 1
