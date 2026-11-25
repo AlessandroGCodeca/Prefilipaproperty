@@ -400,6 +400,9 @@ GOOGLE_API_KEY    = os.getenv("GOOGLE_PLACES_API_KEY", "")
 SCRAPER_API_KEY   = os.getenv("SCRAPER_API_KEY", "")
 # fallback (direct first, ScraperAPI for a site that refuses it), always, off.
 SCRAPER_API_MODE  = os.getenv("SCRAPER_API_MODE", "fallback")
+# EF2: a market's portals are read at the same time (each keeps its own
+# pauses); 0 reads them one after another.
+PORTALS_SIDE_BY_SIDE = os.getenv("PORTALS_SIDE_BY_SIDE", "1").strip() != "0"
 
 # Anthropic Claude — optional cloud LLM for listing enrichment (parsing Slovak
 # free-text descriptions, normalising blank districts, structured LV analysis).

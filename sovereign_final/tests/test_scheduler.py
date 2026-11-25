@@ -7,6 +7,8 @@ counts only when a portal was read; a failed one is retried hourly, and
 every attempt is written to the status file the dashboard shows."""
 
 import os
+import threading
+import time
 from datetime import datetime
 
 import pytest
@@ -197,12 +199,14 @@ class TestDashboardRun:
                                                             steps_fail):
         calls = []
         assert scheduler.run_pipeline(call=_fake_call(calls)) is True
-        assert calls == [
-            ("scraper.nehnutelnosti", "run", {"max_pages": 10}),
+        # The portals are read side by side (EF2): in any order, all before
+        # the missing details.
+        assert sorted(calls[:3]) == [
             ("scraper.bazos", "run", {"max_pages": 10}),
+            ("scraper.nehnutelnosti", "run", {"max_pages": 10}),
             ("scraper.topreality", "run", {"max_pages": 10}),
-            ("enrich_pending", "run", {"limit": scheduler.FILL_DETAILS_LIMIT}),
         ]
+        assert calls[3:] == [("enrich_pending", "run", {"limit": scheduler.FILL_DETAILS_LIMIT})]
         fill = next(s for s in _status()["steps"] if s["step"] == "Fill missing details")
         assert fill["ok"] and "4 re-read" in fill["detail"] and "+size 2" in fill["detail"]
 
@@ -285,3 +289,52 @@ def test_paths_do_not_depend_on_the_working_directory():
                  config.BACKUP_DIR):
         assert os.path.isabs(path)
         assert os.path.commonpath([path, here]) == here
+
+
+# ── EF2: the portals side by side ────────────────────────────────────────────
+class TestPortalsSideBySide:
+    def _slow_call(self, seen, fail=()):
+        lock = threading.Lock()
+
+        def call(module, func, **kwargs):
+            if module == "enrich_pending":
+                return {"checked": 0, "price": 0, "size": 0, "district": 0, "gone": 0}
+            with lock:
+                seen.append(("start", module, time.monotonic()))
+            time.sleep(0.4)
+            with lock:
+                seen.append(("end", module, time.monotonic()))
+            if module in fail:
+                raise RuntimeError(f"{module} was turned away")
+            return 5
+        return call
+
+    def test_the_portals_overlap_and_the_steps_keep_their_order(self, run_file, full_db,
+                                                                steps_fail):
+        seen = []
+        began = time.monotonic()
+        scheduler.run_pipeline(call=self._slow_call(seen))
+        starts = [t for kind, _, t in seen if kind == "start"]
+        ends = [t for kind, _, t in seen if kind == "end"]
+        assert len(starts) == 3 and max(starts) < min(ends)     # all three at once
+        assert time.monotonic() - began < 3 * 0.4                # not one after another
+        names = [s["step"] for s in _status()["steps"]]
+        assert names[1:4] == ["Nehnutelnosti.sk", "Bazos.sk", "Topreality.sk"]
+
+    def test_one_portal_failing_leaves_the_others(self, run_file, full_db, steps_fail):
+        scheduler.run_pipeline(call=self._slow_call([], fail={"scraper.bazos"}))
+        steps = {s["step"]: s for s in _status()["steps"]}
+        assert not steps["Bazos.sk"]["ok"] and "turned away" in steps["Bazos.sk"]["detail"]
+        assert steps["Nehnutelnosti.sk"]["ok"] and steps["Topreality.sk"]["ok"]
+        # Nehnutelnosti was read, so its missing details are filled.
+        assert steps["Fill missing details"]["ok"]
+
+    def test_switched_off_they_run_one_after_another(self, run_file, full_db, steps_fail,
+                                                     monkeypatch):
+        monkeypatch.setattr(scheduler, "PORTALS_SIDE_BY_SIDE", False)
+        seen = []
+        scheduler.run_pipeline(call=self._slow_call(seen))
+        kinds = [(kind, module) for kind, module, _ in seen]
+        assert kinds == [("start", "scraper.nehnutelnosti"), ("end", "scraper.nehnutelnosti"),
+                         ("start", "scraper.bazos"), ("end", "scraper.bazos"),
+                         ("start", "scraper.topreality"), ("end", "scraper.topreality")]

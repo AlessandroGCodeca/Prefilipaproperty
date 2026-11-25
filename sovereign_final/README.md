@@ -385,7 +385,11 @@ three groups under it, each folded until you open it:
   🇸🇰 Topreality.sk, 🇨🇿 Bezrealitky.cz, 🇨🇿 Reality.iDNES.cz, 🇨🇿 Bazos.cz),
   then 🔎 FILL MISSING DETAILS, 🏘️ RENT COMPS, 🔒 LV DEBT FILTER, 🗺️ NORMALIZE
   ADDRESSES, 📝 PARSE DESCRIPTIONS, 💰 CASHFLOW SCORE, 📍 LOCATION IQ,
-  🌊 RISK BACKFILL, 📡 MERGE PORTAL COPIES
+  🌊 RISK BACKFILL, 📡 MERGE PORTAL COPIES. In the daily run and ▶ RUN
+  EVERYTHING, a market's portals are read side by side: each keeps its own
+  pauses between pages, and the reads take as long as the slowest portal
+  rather than all of them added up (`PORTALS_SIDE_BY_SIDE=0` in `.env` reads
+  them one after another)
 - **🔧 REPAIR DATA**: ♻️ RESCORE ALL, 📝 RE-PARSE (new fields), 🏛️ UPDATE TAX
   RATES, 🧹 CLEAN STALE (21d)
 - **🩺 DIAGNOSTICS**: 🔗 TEST SITES, 🔗 TEST CZ SITES

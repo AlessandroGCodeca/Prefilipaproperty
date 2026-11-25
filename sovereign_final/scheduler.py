@@ -28,6 +28,8 @@ import contextlib
 import importlib
 import logging, sys, os
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
@@ -37,7 +39,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 import pytz
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import DATA_DIR, LOGS_DIR
+from config import DATA_DIR, LOGS_DIR, PORTALS_SIDE_BY_SIDE
 
 log = logging.getLogger("sovereign")
 TZ  = pytz.timezone("Europe/Bratislava")
@@ -247,6 +249,59 @@ def _scrape(module: str, call=call_here, market: str = "sk"):
     return run
 
 
+def _attempt(fn) -> tuple[bool, object, str]:
+    """fn() as (ok, result, message), its error's text as the message."""
+    try:
+        result, message = fn()
+    except Exception as e:
+        return False, None, str(e)
+    return True, result, message
+
+
+def _scrape_portals(steps: list, market: str, call, progress, first: int,
+                    total: int) -> set:
+    """Read the market's portals, each as its own step from step `first` on.
+    Returns the modules that brought listings.
+
+    Side by side (EF2, PORTALS_SIDE_BY_SIDE): each portal is a different site
+    with its own pauses between pages, so reading them at the same time keeps
+    each site's pace, and the reads take as long as the slowest portal
+    rather than all of them added up. Their database writes still go one at
+    a time (SQLite's lock, waited for up to 30 s). Each step is announced as
+    its read starts and recorded, in the portals' order, once all are done."""
+    portals = SCRAPERS[market]
+    scraped = set()
+    if not PORTALS_SIDE_BY_SIDE or len(portals) < 2:
+        for i, (name, module) in enumerate(portals, start=first):
+            if progress:
+                progress(i, total, name)
+            if _step(steps, i, name, _scrape(module, call, market), total) is not None:
+                scraped.add(module)
+        return scraped
+    began = time.monotonic()
+    with ThreadPoolExecutor(max_workers=len(portals), thread_name_prefix="portal") as pool:
+        running = []
+        for i, (name, module) in enumerate(portals, start=first):
+            if progress:
+                progress(i, total, name)
+            log.info(f"Step {i}/{total} — {name} (side by side)")
+            running.append(pool.submit(_attempt, _scrape(module, call, market)))
+        outcomes = [f.result() for f in running]
+    for (name, module), (ok, result, message) in zip(portals, outcomes):
+        if ok:
+            log.info(f"   ✅ {name}: {message}")
+            steps.append({"step": name, "ok": True, "detail": message})
+            if result is not None:
+                scraped.add(module)
+        else:
+            log.error(f"   ❌ {name}: {message}")
+            steps.append({"step": name, "ok": False, "detail": message[:300]})
+    took = time.monotonic() - began
+    log.info(f"   {len(portals)} portals read side by side in {int(took // 60)} min "
+             f"{int(took % 60)} s")
+    return scraped
+
+
 def _run_steps(steps: list, call=call_here, progress=None,
                market: str = "sk") -> tuple[bool, str]:
     """The pipeline proper. Returns (ok, why not): a run is a success when at
@@ -266,10 +321,7 @@ def _run_steps(steps: list, call=call_here, progress=None,
     from modules.backup import run_backup
     step(1, "Backup", lambda: (None, run_backup()))
 
-    scraped = set()
-    for i, (name, module) in enumerate(SCRAPERS["sk"], start=2):
-        if step(i, name, _scrape(module, call, "sk")) is not None:
-            scraped.add(module)
+    scraped = _scrape_portals(steps, "sk", call, progress, 2, STEP_COUNT)
 
     # Listings the scrapers saved without a price, a size or a district: a
     # listing with no price or size is never scored, and the daily scrape
@@ -397,10 +449,7 @@ def _run_market_steps(steps: list, market: str, call=call_here,
     from modules.backup import run_backup
     step(1, "Backup", lambda: (None, run_backup()))
 
-    scraped = set()
-    for i, (name, module) in enumerate(SCRAPERS[market], start=2):
-        if step(i, name, _scrape(module, call, market)) is not None:
-            scraped.add(module)
+    scraped = _scrape_portals(steps, market, call, progress, 2, total)
     n = 2 + len(SCRAPERS[market])
 
     def rent():
