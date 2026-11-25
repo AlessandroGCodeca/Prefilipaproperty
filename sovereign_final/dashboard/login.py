@@ -32,6 +32,16 @@ _lock = threading.Lock()
 _fails: list[float] = []          # times of the recent wrong passwords
 _locked_until = 0.0
 
+# A theme switch reloads the page (Streamlit reads its theme only when a page
+# loads), and a reload is a new session: without this it asked for the
+# password again. Just before that one reload the page gets a resume ticket:
+# random, good once, for RESUME_TTL_S, in a cookie of its own that the
+# reloaded page sends back. Kept here hashed, in memory only; a restart or
+# a log-out drops them all.
+RESUME_COOKIE = "sv_resume"
+RESUME_TTL_S = 60
+_tickets: dict[str, float] = {}   # sha256 of a ticket → when it expires
+
 
 def _now() -> float:
     return time.time()
@@ -79,10 +89,50 @@ def weak_password(password: str) -> bool:
     return 0 < len(password or "") < MIN_PASSWORD_LEN
 
 
+def _digest(ticket: str) -> str:
+    import hashlib
+    return hashlib.sha256(ticket.encode()).hexdigest()
+
+
+def issue_resume_ticket() -> str:
+    """A ticket that logs the next page load back in, once, within
+    RESUME_TTL_S. Only for a session that is logged in."""
+    import secrets
+    ticket = secrets.token_urlsafe(32)
+    now = _now()
+    with _lock:
+        for k in [k for k, t in _tickets.items() if t <= now]:
+            del _tickets[k]
+        _tickets[_digest(ticket)] = now + RESUME_TTL_S
+    return ticket
+
+
+def redeem_resume_ticket(ticket: str | None) -> bool:
+    """True, once, for a ticket issued here that hasn't expired."""
+    import re
+    # The cookie comes from the browser: only something shaped like a ticket
+    # (token_urlsafe(32): 43 characters of A–Z a–z 0–9 - _) is looked up.
+    if not isinstance(ticket, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", ticket):
+        return False
+    with _lock:
+        expires = _tickets.pop(_digest(ticket), 0.0)
+    return expires > _now()
+
+
+def _resume_cookie() -> str | None:
+    """The resume ticket the page sent with its first request, if any."""
+    try:
+        return st.context.cookies.get(RESUME_COOKIE)
+    except Exception:
+        return None
+
+
 def log_out() -> None:
-    """End this browser session's login."""
+    """End this browser session's login (and any resume ticket not yet used)."""
     for k in ("_authed", "_last_active"):
         st.session_state.pop(k, None)
+    with _lock:
+        _tickets.clear()
 
 
 def logout_button() -> None:
@@ -114,6 +164,11 @@ def require_password() -> None:
                 st.warning(f"DASHBOARD_PASSWORD is shorter than {MIN_PASSWORD_LEN} characters. "
                            "Use a longer one in .env (a few unrelated words), then restart.")
             return
+    # Back from the reload a theme switch makes: logged in still.
+    elif redeem_resume_ticket(_resume_cookie()):
+        st.session_state["_authed"] = True
+        st.session_state["_last_active"] = _now()
+        return
     st.markdown('<div class="wordmark">SOVEREIGN</div>', unsafe_allow_html=True)
     if st.session_state.pop("_timed_out", False):
         st.info("Logged out after a while without activity. Enter the password again.")

@@ -80,3 +80,7 @@ def save(name: str) -> None:
         conn.commit()
     finally:
         conn.close()
+    if name == "theme":
+        # The page reloads to switch (style.THEME_JS): it takes a resume
+        # ticket with it, so the reload keeps the login (dashboard/login.py).
+        st.session_state["_theme_reload"] = True
