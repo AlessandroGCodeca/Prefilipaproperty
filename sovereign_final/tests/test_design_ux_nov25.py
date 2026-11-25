@@ -515,3 +515,44 @@ def test_the_map_draws_the_districts_under_the_pins(db):
     spec = next(iter(at.get("deck_gl_json_chart"))).proto.json
     assert '"districts"' in spec and spec.index('"districts"') < spec.index('"pins"')
     assert any("Districts, €" in m.value for m in at.markdown)        # the legend
+
+
+# ── UX4: the viewing mode ─────────────────────────────────────────────────────
+def test_what_you_saw_is_kept_and_checked(full_db):
+    from database.viewing import get_viewing, set_viewing
+    assert get_viewing("x") == {"condition": None, "problems": {}, "updated_at": None}
+    set_viewing("x", "original", {"damp": "corner of the bedroom " * 30, "noise": ""})
+    got = get_viewing("x")
+    assert got["condition"] == "original" and set(got["problems"]) == {"damp", "noise"}
+    assert len(got["problems"]["damp"]) == 300
+    set_viewing("x", "<b>palace</b>", {})
+    assert get_viewing("x")["condition"] is None
+
+
+def test_viewing_mode_is_one_screen_and_saves_what_you_saw(populated_db):
+    at = run_app(open_cards=("g1",))
+    at.toggle(key="viewmode_g1").set_value(True).run()
+    assert not at.exception, [e.value for e in at.exception]
+    labels = [m.label for m in at.metric]
+    assert "Cap Rate" not in labels                       # the rest of the card waits
+    # A form: its fields are sent with its button, in one run.
+    at.radio(key="vw_cond_g1").set_value("original")
+    at.checkbox(key="vw_damp_g1").check()
+    at.text_input(key="vw_damp_note_g1").input("bathroom ceiling")
+    at.text_area(key="vw_notes_g1").input("Quiet street, bright, needs a new kitchen.")
+    next(b for b in at.button if "SAVE THE VIEWING" in str(b.label)).click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    from database.viewing import get_viewing
+    saw = get_viewing("g1")
+    assert saw["condition"] == "original" and saw["problems"] == {"damp": "bathroom ceiling"}
+    assert any("Quiet street" in a["note"] for a in populated_db.get_annotations("g1"))
+    assert any("original condition as you saw it" in m.value for m in at.markdown)
+
+
+def test_the_condition_you_saw_drives_the_cards_renovation_estimate(populated_db):
+    from database.viewing import set_viewing
+    set_viewing("g1", "poor", {})
+    at = run_app(open_cards=("g1",))
+    at.toggle(key="bld_g1").set_value(True).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("Condition (you saw)" in m.value and "poor" in m.value for m in at.markdown)

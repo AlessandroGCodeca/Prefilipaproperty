@@ -161,6 +161,15 @@ def render_card(l, v):
                 set_starred(lid, not starred)
                 st.rerun()
 
+        # UX4: at a viewing, one screen with what matters there, instead of the card.
+        if st.toggle("Režim prohlídky" if cz else "Viewing mode", key=f"viewmode_{lid}",
+                     help=("Na prohlídku: čísla k vyjednávání, co zkontrolovat, fotky."
+                           if cz else "For a viewing: the figures to negotiate with, what "
+                           "to look at, photos and notes.")):
+            from dashboard import viewing
+            viewing.render(l, v, cz)
+            return
+
         # The verdict first: what the flat is, in a sentence (dashboard/verdict.py).
         from dashboard.verdict import days_between, verdict_html
         cut_days = (days_between(ph["history"][0][0], ph["history"][-1][0])

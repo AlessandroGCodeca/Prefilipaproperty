@@ -68,8 +68,15 @@ def render_building(l: dict, cz: bool, words: bool | None = None) -> None:
         html += _row("Owner's monthly fee", f"{amt(l, l.get('hoa_monthly') or 0)}/mo "
                                             f"<span class='muted'>(estimated by size)</span>")
     cond = (l.get("condition") or "unknown").lower()
+    # UX4: the condition you saw at a viewing outranks the ad's.
+    from database.viewing import get_viewing
+    seen = get_viewing(lid).get("condition") if lid else None
+    if seen:
+        html += _row("Condition (you saw)", esc(seen) + f" <span class='muted'>(ad: {esc(cond)})</span>")
+        cond = seen
+    else:
+        html += _row("Condition (ad)", esc(cond))
     reno = renovation_cost(size, cond, market)
-    html += _row("Condition (ad)", esc(cond))
     html += _row("Renovation estimate", f"{amt(l, reno)}" + (" — none needed" if not reno else ""))
     heat = heating_monthly(size, l.get("energy_class"), market)
     html += _row(f"Heating, class {esc(l.get('energy_class') or '?')}", f"~{amt(l, heat)}/mo "
