@@ -169,7 +169,7 @@ def require_password() -> None:
         st.session_state["_authed"] = True
         st.session_state["_last_active"] = _now()
         return
-    st.markdown('<div class="wordmark">SOVEREIGN</div>', unsafe_allow_html=True)
+    st.markdown('<div class="wordmark">MFC PROPERTY</div>', unsafe_allow_html=True)
     if st.session_state.pop("_timed_out", False):
         st.info("Logged out after a while without activity. Enter the password again.")
     with st.form("login"):

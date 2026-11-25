@@ -50,7 +50,7 @@ from config import (
 
 log = logging.getLogger(__name__)
 
-USER_AGENT = "SovereignRE/1.0 (private Slovak property research tool)"
+USER_AGENT = "MFCProperty/1.0 (private Slovak property research tool)"
 TRANSIT_SEARCH_M = 2000
 
 # Geocode precision. Only "address" / "street" are precise enough to judge

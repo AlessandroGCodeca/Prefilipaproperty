@@ -1,5 +1,5 @@
 # Tool configuration only: the project is not a package (it runs from this
-# directory via START.bat / Start Sovereign.command / Docker).
+# directory via START.bat / Start MFC PROPERTY.command / Docker).
 
 [tool.ruff]
 # The launchers accept Python 3.11–3.14; CI tests 3.11, 3.12 and 3.14.

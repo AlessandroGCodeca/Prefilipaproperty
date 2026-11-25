@@ -1,5 +1,5 @@
 """
-app.py — Sovereign Investor Dashboard
+app.py — MFC PROPERTY
 Slovakia + Czechia 2026 | Private Use Only
 Run: streamlit run app.py
 
@@ -49,7 +49,7 @@ from dashboard.tabs import (  # noqa: E402
 )
 
 st.set_page_config(
-    page_title="Sovereign RE",
+    page_title="MFC PROPERTY",
     page_icon="🏛",
     layout="wide",
     # "auto": open on desktop, collapsed on a phone where it would cover the page.

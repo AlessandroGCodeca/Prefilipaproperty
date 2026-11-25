@@ -66,7 +66,7 @@ def test_mark_duplicates_reads_pins_and_addresses(full_db):
 
 # ── Finding 7: the Mac launcher starts the scheduler ─────────────────────────
 def test_the_mac_launcher_starts_and_stops_the_scheduler():
-    text = open(os.path.join(HERE, "Start Sovereign.command"), encoding="utf-8").read()
+    text = open(os.path.join(HERE, "Start MFC PROPERTY.command"), encoding="utf-8").read()
     assert 'scheduler.py > logs/scheduler.out 2>&1 &' in text
     assert "trap stop_scheduler EXIT INT TERM HUP" in text
     assert "SOVEREIGN_NO_SCHEDULER" in text

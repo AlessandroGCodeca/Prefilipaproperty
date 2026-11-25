@@ -92,6 +92,7 @@ def test_the_satellite_picture_is_fetched_on_the_server(monkeypatch):
 
     class R:
         status_code, headers, content = 200, {"content-type": "image/png"}, b"\x89PNG"
+        text = "<html>an error page</html>"
 
     def get(url, params=None, timeout=None):
         asked.append((url, params))
@@ -102,8 +103,56 @@ def test_the_satellite_picture_is_fetched_on_the_server(monkeypatch):
     assert asked[0][0] == satellite.STATIC_MAP_URL and asked[0][1]["key"] == KEY
     satellite.satellite_image.clear()
     R.headers = {"content-type": "text/html"}                 # an error page
-    assert satellite.satellite_image(48.15, 17.11) is None
+    with pytest.raises(satellite.NoPicture):
+        satellite.satellite_image(48.15, 17.11)
     satellite.satellite_image.clear()
+
+
+def test_a_refusal_says_googles_reason_and_the_fix_and_is_not_kept(monkeypatch):
+    """Google answers a refusal in plain text; the page and the log say it,
+    with the fix, and the next look asks again (a cached refusal used to stay
+    for a week after the key was fixed)."""
+    import requests
+    from dashboard.tabs import satellite
+    monkeypatch.setenv("GOOGLE_PLACES_API_KEY", KEY)
+    satellite.satellite_image.clear()
+    answers = [
+        (403, "text/plain; charset=UTF-8", b"",
+         "The Google Maps Platform server rejected your request. "
+         f"This API project is not authorized to use this API. key={KEY}"),
+        (200, "image/png", b"\x89PNG", ""),
+    ]
+    asked = []
+
+    def get(url, params=None, timeout=None):
+        status, ctype, content, text = answers[len(asked)]
+        asked.append(url)
+        return type("R", (), {"status_code": status, "headers": {"content-type": ctype},
+                              "content": content, "text": text})()
+
+    monkeypatch.setattr(requests, "get", get)
+    with pytest.raises(satellite.NoPicture) as e:
+        satellite.satellite_image(48.15, 17.11)
+    why = str(e.value)
+    assert why.startswith("HTTP 403") and "not authorized to use this API" in why
+    assert "click Enable" in why and KEY not in why
+    assert satellite.satellite_image(48.15, 17.11) == b"\x89PNG"   # asked again
+    assert len(asked) == 2
+    satellite.satellite_image.clear()
+
+
+@pytest.mark.parametrize("said, fix", [
+    ("API keys with referer restrictions cannot be used with this API.", "Application restrictions"),
+    ("This API key is not authorized to use this service or API.", "tick Maps Static API"),
+    ("This API project is not authorized to use this API.", "click Enable"),
+    ("The provided API key is invalid.", "copy it again"),
+    ("You must enable Billing on the Google Cloud Project", "billing account"),
+    ("You have exceeded your daily request quota for this API.", "resets by itself"),
+    ("", "Maps Static API is enabled"),
+])
+def test_each_known_refusal_names_its_fix(said, fix):
+    from dashboard.tabs import satellite
+    assert fix in satellite.why_no_picture(403, said)
 
 
 def _png() -> bytes:
@@ -372,7 +421,7 @@ def test_backups_are_private(full_db, tmp_path, monkeypatch):
 
 
 def test_the_start_file_locks_down_env_and_data():
-    text = open(os.path.join(ROOT, "Start Sovereign.command"), encoding="utf-8").read()
+    text = open(os.path.join(ROOT, "Start MFC PROPERTY.command"), encoding="utf-8").read()
     assert "chmod 600 .env" in text and "chmod 700 data backups logs" in text
 
 

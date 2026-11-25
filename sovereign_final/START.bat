@@ -1,11 +1,11 @@
 @echo off
 REM ══════════════════════════════════════════════════════
-REM  Sovereign RE Dashboard — Windows Auto-Start
+REM  MFC PROPERTY — Windows Auto-Start
 REM  Double-click this file, or add to Windows startup.
 REM  Place this file in your sovereign_final\ folder.
 REM ══════════════════════════════════════════════════════
 
-echo Starting Sovereign Investor Dashboard...
+echo Starting MFC PROPERTY...
 echo.
 
 REM Move to the project folder (edit this path)
@@ -35,7 +35,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo ✅ Sovereign Dashboard starting...
+echo ✅ MFC PROPERTY starting...
 echo    Opening http://localhost:8501 in 15 seconds...
 echo.
 timeout /t 15 /nobreak >nul

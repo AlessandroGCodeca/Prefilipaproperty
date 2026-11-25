@@ -1,4 +1,4 @@
-# Sovereign — Project Review
+# MFC PROPERTY — Project Review
 
 **5 November 2026 · `main` at commit 7ce45e9 · Slovakia and Czechia**
 
@@ -44,7 +44,7 @@ What needs work is mostly **coverage and data** rather than code:
 
 ## 2. What the project does
 
-Sovereign finds flats for sale in Slovakia and Czechia that are priced below
+MFC PROPERTY finds flats for sale in Slovakia and Czechia that are priced below
 the market. It works out their cash flow under Slovak or Czech tax and lending
 rules, screens their title deeds for debts, and tracks the ones worth pursuing
 through to a purchase-contract draft.
@@ -55,7 +55,7 @@ It runs as two processes on one SQLite database (`data/sovereign.db`):
 - **the scheduler** (`scheduler.py`), which runs the whole pipeline every day
   at 06:00 CET.
 
-Docker runs both. On a Mac, `Start Sovereign.command` runs the dashboard
+Docker runs both. On a Mac, `Start MFC PROPERTY.command` runs the dashboard
 without Docker.
 
 ### 2.1 The daily pipeline

@@ -67,7 +67,7 @@ class _Memo(FPDF):
         self.set_y(-12)
         self.set_font(self.memo_font, "", 7)
         self.set_text_color(130)
-        self.cell(0, 5, self.txt(f"Sovereign RE · investment memo · page {self.page_no()} · "
+        self.cell(0, 5, self.txt(f"MFC PROPERTY · investment memo · page {self.page_no()} · "
                                  "data scoring only, not investment advice"), align="C")
 
     def h1(self, text):

@@ -1,5 +1,5 @@
 """
-config.py — Sovereign Investor Dashboard
+config.py — MFC PROPERTY
 All tunable constants. Review every January.
 """
 

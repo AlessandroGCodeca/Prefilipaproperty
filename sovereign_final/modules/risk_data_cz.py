@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 log = logging.getLogger(__name__)
 
-USER_AGENT = "SovereignInvestorDashboard/1.0 (Czech flood and noise check)"
+USER_AGENT = "MFCProperty/1.0 (Czech flood and noise check)"
 NOISE_LIMIT_DB = 65.0
 _layers_checked: dict[str, tuple[bool, str]] = {}
 

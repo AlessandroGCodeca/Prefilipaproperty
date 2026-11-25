@@ -1,4 +1,4 @@
-# 🏛 SOVEREIGN INVESTOR DASHBOARD
+# 🏛 MFC PROPERTY
 **Private Slovak Real Estate Engine — 2026**
 
 ---
@@ -23,7 +23,7 @@ apply it — no rebuild.
    (the "macOS 64-bit universal2 installer" under a 3.13.x release)
 2. Unzip this folder anywhere
 3. Copy .env.example → .env  (optional — API keys)
-4. Double-click "Start Sovereign.command" in sovereign_final/
+4. Double-click "Start MFC PROPERTY.command" in sovereign_final/
 5. Dashboard opens in Chrome at http://localhost:8501
 ```
 
@@ -42,7 +42,7 @@ downloaded file), click **Open Anyway** in System Settings → Privacy &
 Security, or start it once from Terminal in `sovereign_final/`:
 
 ```
-bash "Start Sovereign.command"
+bash "Start MFC PROPERTY.command"
 ```
 
 The start file also starts the **scheduler** beside the dashboard: the daily
@@ -252,7 +252,7 @@ sovereign_final/
 ├── repair_districts.py       ← Fix towns misread as Bratislava, then rescore
 ├── diagnose.py               ← Data-quality report (coverage, classification)
 ├── START.bat                 ← Windows one-click launcher
-├── Start Sovereign.command   ← macOS one-click launcher (no Docker)
+├── Start MFC PROPERTY.command   ← macOS one-click launcher (no Docker)
 ├── restart.sh                ← Restart the dashboard outside Docker
 ├── docker-compose.yml        ← dashboard + scheduler
 ├── docker/Dockerfile         ← App image
@@ -918,7 +918,7 @@ To set it up:
    `docker compose exec dashboard python -m modules.alerts chat-id`), or in a
    browser at `https://api.telegram.org/bot<TOKEN>/getUpdates` ("chat":{"id":…}).
    Put it in `.env` as `TELEGRAM_CHAT_ID=…`.
-4. `docker compose up -d` (or restart `Start Sovereign.command`), then
+4. `docker compose up -d` (or restart `Start MFC PROPERTY.command`), then
    🩺 DIAGNOSTICS → 📨 TEST TELEGRAM.
 
 The token lets anyone post as your bot: keep it in `.env` only. If it leaks,
@@ -929,7 +929,7 @@ send `/revoke` to @BotFather and put the new one in `.env`.
 | Key | Where | Enables |
 |-----|-------|---------|
 | MAPY_API_KEY | developer.mapy.com (free) | Mapy.com geocoder: Czech addresses to the house number (tried first for Czech listings, after Google for Slovak ones); shows a "Search by Mapy.com" credit |
-| GOOGLE_PLACES_API_KEY | console.cloud.google.com | Google geocoding/places + inline satellite view (OpenStreetMap is used without it) |
+| GOOGLE_PLACES_API_KEY | console.cloud.google.com → enable Places API (New), Geocoding API and **Maps Static API** (the satellite picture; HTTP 403 without it) | Google geocoding/places + inline satellite view (OpenStreetMap is used without it) |
 | CZ_CUZK_API_KEY | registrace.cuzk.gov.cz (free) | Czech LV check: the building under a listing's pin, its LV and pending proceedings |
 | TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID | @BotFather in Telegram (free) | Alerts after each run — see "Telegram alerts" |
 | HEALTHCHECK_URL | healthchecks.io (free) | An e-mail when the daily run is late or fails — see "Is the daily run happening?" |

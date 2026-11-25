@@ -1,5 +1,5 @@
 """
-scraper/nehnutelnosti.py — Sovereign Investor Dashboard
+scraper/nehnutelnosti.py — MFC PROPERTY
 Scrapes for-sale listings from nehnutelnosti.sk.
 
 nehnutelnosti.sk uses Imperva WAF + Next.js App Router (RSC streaming).

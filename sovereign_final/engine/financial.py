@@ -1,5 +1,5 @@
 """
-engine/financial.py — Sovereign Investor Dashboard
+engine/financial.py — MFC PROPERTY
 Module B: the financial engine — Slovakia and Czechia
 
 Dual-scenario analysis: Personal (Fyzická osoba) vs s.r.o.

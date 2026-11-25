@@ -1,5 +1,5 @@
 """
-scheduler.py — Sovereign Investor Dashboard
+scheduler.py — MFC PROPERTY
 Runs the full pipeline every day at 06:00 CET.
 On launch it runs only to catch up: when no run has succeeded since the last
 06:00 (first start, the machine was off at 06:00, or the run failed).
@@ -783,7 +783,7 @@ def arm(scheduler) -> None:
 
 if __name__ == "__main__":
     _setup_logging()
-    log.info(f"⏰ Sovereign Scheduler — 06:00 CET daily · markets: "
+    log.info(f"⏰ MFC PROPERTY scheduler — 06:00 CET daily · markets: "
              f"{', '.join(m.upper() for m in active_markets())}")
     now = datetime.now(TZ)
     owed = due_markets(now)

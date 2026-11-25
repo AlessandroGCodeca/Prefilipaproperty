@@ -1,5 +1,5 @@
 """
-scraper/bazos.py — Sovereign Investor Dashboard
+scraper/bazos.py — MFC PROPERTY
 Scrapes private-seller listings from reality.bazos.sk
 """
 

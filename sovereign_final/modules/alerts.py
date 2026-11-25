@@ -373,7 +373,7 @@ def build_message(deals, cuts, issues, now: datetime | None = None,
     whole cut at MESSAGE_MAX (Telegram's limit is 4,096 characters)."""
     now = now or datetime.now(timezone.utc)
     from modules.contract_draft import to_local
-    parts = [f"🏛 <b>Sovereign</b> · {to_local(now.isoformat()):%d.%m. %H:%M}"]
+    parts = [f"🏛 <b>MFC PROPERTY</b> · {to_local(now.isoformat()):%d.%m. %H:%M}"]
     _section(parts, f"{len(deals)} new deal{'s' if len(deals) != 1 else ''}",
              [_deal_line(l) for l in deals], DEALS_SHOWN)
     _section(parts, "Now GREEN", [_deal_line(l) for l in now_green], DEALS_SHOWN)
@@ -424,7 +424,7 @@ def _run_news() -> str:
     if not sent_deals:
         # First run with alerts on: today's deals are already on the
         # dashboard. Say how many, and alert only new ones from now on.
-        send(f"🏛 <b>Sovereign alerts are on.</b>\n{len(deals)} deal(s) matching your "
+        send(f"🏛 <b>MFC PROPERTY alerts are on.</b>\n{len(deals)} deal(s) matching your "
              f"alert rules are already on the dashboard; from now on you'll hear "
              f"about each new one, price cuts on the deals you track"
              + (", and failed runs or quiet portals." if config.ALERT_FAILURES else "."))
@@ -532,7 +532,7 @@ def build_digest(now: datetime, f: dict) -> str:
         return " · ".join(f"{dot} {counts.get(c, 0)}" for c, dot in dots)
 
     markets_line = " · ".join(f"{m.upper()} {n}" for m, n in sorted(f["by_market"].items()))
-    parts = [f"🏛 <b>Sovereign · your week</b> ({start:%d.%m.}–{local:%d.%m.})",
+    parts = [f"🏛 <b>MFC PROPERTY · your week</b> ({start:%d.%m.}–{local:%d.%m.})",
              f"On the dashboard: {classes(f['by_class'])}"
              + (f" ({markets_line})" if markets_line else ""),
              f"New this week: {classes(f['new_by_class'])}",
@@ -574,7 +574,7 @@ def run_quietly() -> None:
 
 
 def send_test() -> None:
-    send("🏛 <b>Sovereign</b> — test message. Alerts reach this chat.")
+    send("🏛 <b>MFC PROPERTY</b> — test message. Alerts reach this chat.")
 
 
 def chat_ids() -> list[tuple[int, str]]:

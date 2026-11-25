@@ -1,5 +1,5 @@
 """
-modules/location_iq.py — Sovereign Investor Dashboard
+modules/location_iq.py — MFC PROPERTY
 Module C: Location IQ — transit, amenities and noise/flood/construction risk.
 
 Transit and amenities come from Google when GOOGLE_PLACES_API_KEY is set,

@@ -28,7 +28,7 @@ class _Sheet(_Memo):
         self.set_y(-12)
         self.set_font(self.memo_font, "", 7)
         self.set_text_color(130)
-        self.cell(0, 5, self.txt("Sovereign RE · offer sheet · asking prices, not sales — a "
+        self.cell(0, 5, self.txt("MFC PROPERTY · offer sheet · asking prices, not sales — a "
                                  "negotiation aid, not a valuation"), align="C")
 
 

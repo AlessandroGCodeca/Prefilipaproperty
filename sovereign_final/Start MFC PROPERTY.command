@@ -1,6 +1,6 @@
 #!/bin/bash
 # ══════════════════════════════════════════════════════
-#  Sovereign RE Dashboard — macOS start, without Docker
+#  MFC PROPERTY — macOS start, without Docker
 #  Double-click this file in Finder. The first start sets everything up
 #  (a few minutes); later starts take seconds. Keep the Terminal window it
 #  opens: closing it (or Ctrl+C in it) stops the dashboard and the daily
