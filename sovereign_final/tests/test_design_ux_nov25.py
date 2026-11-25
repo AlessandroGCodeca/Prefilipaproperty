@@ -225,3 +225,44 @@ def test_the_privacy_notice_says_the_server_fetches_the_photos():
     text = " ".join(legal.privacy_md().split())
     assert "Listing photos are fetched by the dashboard's server" in text
     assert "listing photos from the portals'" not in text
+
+
+# ── D18: where the price sits ────────────────────────────────────────────────
+def _eur_m2(v):
+    return f"€{v:,.0f}/m²"
+
+
+def test_the_band_marks_the_flat_and_the_median_and_says_it_in_words():
+    from dashboard.verdict import price_band_html
+    html = price_band_html(1800, [2000, 2400, 2600, 3000], _eur_m2, "Trnava")
+    assert "cheaper than 4 of 4 similar flats (Trnava)" in html
+    assert "€2,000/m² to €3,000/m²" in html and "median €2,500/m²" in html
+    assert 'class="pband-me good"' in html and 'left:0.0%' in html      # the cheapest
+    dear = price_band_html(3200, [2000, 2400, 2600], _eur_m2)
+    assert 'class="pband-me bad"' in dear and "cheaper than 0 of 3" in dear
+
+
+def test_too_few_flats_like_it_and_no_band():
+    from dashboard.verdict import price_band_html
+    assert price_band_html(1800, [2000, 2400], _eur_m2) == ""
+    assert price_band_html(None, [2000, 2400, 2600], _eur_m2) == ""
+
+
+def test_the_band_escapes_the_area_and_speaks_czech():
+    from dashboard.verdict import price_band_html
+    html = price_band_html(80_000, [90_000, 100_000, 110_000],
+                           lambda v: f"{v:,.0f} Kč/m²".replace(",", " "),
+                           "<b>Praha 2</b>", cz=True)
+    assert "&lt;b&gt;Praha 2" in html and "<b>Praha 2" not in html
+    assert "levnější než 3 z 3 podobných bytů" in html
+
+
+def test_an_open_card_shows_where_its_price_sits(populated_db):
+    from tests.conftest import make_listing
+    for i, price in enumerate((120_000, 130_000, 140_000)):
+        populated_db.upsert_listing(make_listing(f"t{i}", district="Trnava", price_eur=float(price),
+                                                 size_m2=55.0))
+    at = run_app(open_cards=("g1",))
+    assert not at.exception, [e.value for e in at.exception]
+    bands = [m.value for m in at.markdown if 'class="pband"' in m.value]
+    assert bands and "cheaper than 3 of 3 similar flats" in bands[0]

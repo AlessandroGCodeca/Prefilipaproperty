@@ -107,6 +107,18 @@ section[data-testid="stSidebar"] {
     font-size: 1rem; font-weight: 700;
     color: var(--text); letter-spacing: 4px; text-transform: uppercase;
 }
+/* D18: where the price sits among flats like it */
+.pband { margin: 2px 0 10px 0; }
+.pband-track { position: relative; height: 6px; border-radius: 3px; background: var(--line);
+               margin: 10px 6px 6px 6px; }
+.pband-med { position: absolute; top: -4px; width: 2px; height: 14px; margin-left: -1px;
+             background: var(--muted); }
+.pband-me { position: absolute; top: -5px; width: 16px; height: 16px; margin-left: -8px;
+            border-radius: 50%; border: 2px solid var(--bg); }
+.pband-me.good { background: var(--good); }
+.pband-me.caution { background: var(--caution); }
+.pband-me.bad { background: var(--bad); }
+.pband-words { font-size: 0.8rem; color: var(--muted); }
 .sub {
     font-family: var(--mono);
     font-size: 0.55rem; color: var(--muted); letter-spacing: 3px;

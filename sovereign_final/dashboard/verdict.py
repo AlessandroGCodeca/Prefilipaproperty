@@ -141,3 +141,45 @@ def verdict_html(grade: str, score, disc, surplus, struct: str, money, cz: bool 
             f'<div class="vd-text"><div class="vd-head">{esc(headline(disc, surplus, cz))}</div>'
             + (f'<div class="vd-sub">{esc(text)}</div>' if text else "")
             + "</div></div>")
+
+
+# ── D18: where the price sits among flats like it ─────────────────────────────
+# Fewer comparable flats than this and a "cheapest to dearest" bar says little.
+BAND_MIN_COMPS = 3
+
+
+def price_band_html(per_m2: float | None, comps_per_m2, money_m2, area: str = "",
+                    cz: bool = False) -> str:
+    """A thin bar from the cheapest to the dearest price per m² of the flats
+    like this one (offer_sheet.comparables: same market and benchmark area,
+    a similar size), with their median and this flat marked, and the same in
+    words, so the colour is never the only signal. "" with fewer than
+    BAND_MIN_COMPS of them or no price per m². `money_m2(v)` formats a price
+    per m² in the flat's currency."""
+    others = sorted(float(c) for c in (comps_per_m2 or []) if c)
+    if not per_m2 or len(others) < BAND_MIN_COMPS:
+        return ""
+    import statistics
+    med = statistics.median(others)
+    lo, hi = min(others[0], per_m2), max(others[-1], per_m2)
+    span = (hi - lo) or 1.0
+
+    def at(v):
+        return f"{(v - lo) / span * 100:.1f}%"
+    cheaper = sum(1 for o in others if o > per_m2)
+    tone = ("good" if per_m2 <= med * (1 - NEAR_MARKET) else
+            "bad" if per_m2 >= med * (1 + NEAR_MARKET) else "caution")
+    where = f" ({esc(area)})" if area else ""
+    if cz:
+        words = (f"{esc(money_m2(per_m2))} — levnější než {cheaper} z {len(others)} podobných "
+                 f"bytů{where}: {esc(money_m2(others[0]))} až {esc(money_m2(others[-1]))}, "
+                 f"medián {esc(money_m2(med))}.")
+    else:
+        words = (f"{esc(money_m2(per_m2))} — cheaper than {cheaper} of {len(others)} similar "
+                 f"flats{where}: {esc(money_m2(others[0]))} to {esc(money_m2(others[-1]))}, "
+                 f"median {esc(money_m2(med))}.")
+    return (f'<div class="pband" role="img" aria-label="{words}">'
+            f'<div class="pband-track">'
+            f'<span class="pband-med" style="left:{at(med)}"></span>'
+            f'<span class="pband-me {tone}" style="left:{at(per_m2)}"></span></div>'
+            f'<div class="pband-words">{words}</div></div>')

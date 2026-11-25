@@ -200,6 +200,19 @@ def render_card(l, v):
                                 "Highest price at which this is still YELLOW "
                                 "(≥10% below the regional median €/m²)."))
 
+        # D18: where the price per m² sits among the flats like it listed now.
+        if not using_demo and price and size:
+            from dashboard.listing_cache import load_active
+            from dashboard.verdict import price_band_html
+            from engine.regional_prices import median_source
+            from modules.offer_sheet import _per_m2, comparables
+            band = price_band_html(price / size,
+                                   [_per_m2(c) for c in comparables(l, load_active())],
+                                   lambda v: amt(l, v, "/m²"),
+                                   median_source(district or "", **mkw(l))[1], cz)
+            if band:
+                st.markdown(band, unsafe_allow_html=True)
+
         if cz_mkt and cz:
             rent_help = (("Živé srovnání z pronájmů" if l.get("rent_source") == "live"
                           else "Výchozí Kč/m² (engine.rent_cz)")
