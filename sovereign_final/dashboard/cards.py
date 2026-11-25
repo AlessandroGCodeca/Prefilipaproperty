@@ -165,10 +165,21 @@ def render_card(l, v):
         from dashboard.verdict import days_between, verdict_html
         cut_days = (days_between(ph["history"][0][0], ph["history"][-1][0])
                     if ph and ph.get("history") else None)
-        st.markdown(verdict_html(deal_grade, deal_score, disc, surplus, struct,
-                                 lambda v: amt(l, v), cz,
-                                 cut_pct=ph.get("change_pct") if ph else None,
-                                 cut_days=cut_days), unsafe_allow_html=True)
+        verdict = verdict_html(deal_grade, deal_score, disc, surplus, struct,
+                               lambda v: amt(l, v), cz,
+                               cut_pct=ph.get("change_pct") if ph else None,
+                               cut_days=cut_days)
+        # D17: the flat's photo beside it, fetched by the server (dashboard/photos.py).
+        from dashboard.photos import listing_photo, photo_url
+        photo = listing_photo(photo_url(l))
+        if photo:
+            ph_col, v_col = st.columns([1, 2.2], vertical_alignment="center")
+            with ph_col:
+                st.image(photo, width="stretch")
+            with v_col:
+                st.markdown(verdict, unsafe_allow_html=True)
+        else:
+            st.markdown(verdict, unsafe_allow_html=True)
 
         # Key figures: price, surplus and the highest offer, big.
         my, mg = l.get("max_price_yellow"), l.get("max_price_green")

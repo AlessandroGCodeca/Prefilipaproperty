@@ -185,7 +185,11 @@ def test_no_page_element_carries_the_key(populated_db, monkeypatch):
     at = run_app()
     assert not at.exception, [e.value for e in at.exception]
     assert satellite.STATIC_MAP_URL in asked                 # fetched by the server
-    page = " ".join(str(e.proto) for e in at.get("imgs")) + " ".join(
+    # "image" is this Streamlit's element type; "imgs" matched nothing, so the
+    # pictures were never actually checked.
+    images = at.get("image")
+    assert images, "the satellite picture should be on the page"
+    page = " ".join(str(e.proto) for e in images) + " ".join(
         m.value for m in at.markdown)
     assert KEY not in page and "maps.googleapis.com/maps/api/staticmap" not in page
     satellite.satellite_image.clear()

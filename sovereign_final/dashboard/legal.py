@@ -119,9 +119,11 @@ def privacy_md() -> str:
 - Healthchecks.io: only whether the daily run happened, no personal data.
 - Apple iCloud (if backups are copied there): encrypted at rest by Apple.
 
-**What your browser loads from others.** Map tiles (CARTO), listing photos from the portals'
-servers and, when a Mapy.com key is set, the Mapy.com logo from Mapy.com's server (Seznam.cz,
-Czechia — its terms require the logo): they see your IP address, as with any website you open.
+**What your browser loads from others.** Map tiles (CARTO) and, when a Mapy.com key is set,
+the Mapy.com logo from Mapy.com's server (Seznam.cz, Czechia — its terms require the logo):
+they see your IP address, as with any website you open. Listing photos are fetched by the
+dashboard's server from the portals and shown as its own copy, so the portals see the
+server's address, not yours.
 
 **How long.** Deed texts: until the flat has been off the market for LV_TEXT_RETENTION_DAYS
 (180 by default) and is not a deal you track. Backups: {_backup_reach()}.

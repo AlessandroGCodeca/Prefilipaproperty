@@ -2,6 +2,15 @@
 
 import pathlib
 
+import pytest
+
+import tests.test_app_smoke as smoke
+from tests.test_app_smoke import run_app
+
+db = smoke.db
+populated_db = smoke.populated_db
+_isolated_runs = smoke._isolated_runs
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -90,3 +99,129 @@ def test_the_pdf_fonts_are_not_in_the_public_static_folder():
     assert (ROOT / "modules" / "fonts" / "IBMPlexSans-Regular.woff").exists()
     assert (ROOT / "modules" / "fonts" / "OFL-IBM-Plex-Sans.txt").exists()
     assert not list((ROOT / "static").rglob("IBMPlexSans-*.woff"))
+
+
+# ── D17: the flat's photo, fetched by the server ─────────────────────────────
+def _png(w=1200, h=800) -> bytes:
+    import io
+
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h), (120, 140, 160)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+class _Resp:
+    def __init__(self, status=200, body=b"", location=None):
+        self.status_code, self._body = status, body
+        self.headers = {"location": location} if location else {}
+
+    def iter_content(self, n):
+        for i in range(0, len(self._body), n):
+            yield self._body[i:i + n]
+
+    def close(self):
+        pass
+
+
+def _resolve(monkeypatch, table):
+    import socket
+    monkeypatch.setattr(socket, "getaddrinfo",
+                        lambda host, port, *a, **k: [(2, 1, 6, "", (table[host], 0))])
+
+
+def test_the_photo_address_is_the_first_web_address():
+    from dashboard.photos import photo_url
+    assert photo_url({"primary_image_url": "", "image_urls": "x https://img.sk/1.jpg, b"}) \
+        == "https://img.sk/1.jpg"
+    assert photo_url({"primary_image_url": "javascript:alert(1)"}) == ""
+
+
+def test_only_public_web_addresses_are_fetched(monkeypatch):
+    import pytest
+
+    from dashboard import photos
+    _resolve(monkeypatch, {"img.portal.sk": "93.184.216.34", "router": "192.168.1.1",
+                           "me": "127.0.0.1", "meta": "169.254.169.254", "v6": "::1"})
+    assert photos._checked("https://img.portal.sk/a.jpg")
+    for bad in ("http://router/a.jpg", "http://me/a.jpg", "http://meta/latest",
+                "http://v6/a", "ftp://img.portal.sk/a", "https://img.portal.sk:8443/a",
+                "file:///etc/passwd"):
+        with pytest.raises(photos.NoPhoto):
+            photos._checked(bad)
+
+
+@pytest.mark.real_photos
+def test_a_redirect_into_your_network_is_refused_and_the_size_capped(monkeypatch):
+    import pytest
+    import requests
+
+    from dashboard import photos
+    _resolve(monkeypatch, {"img.portal.sk": "93.184.216.34", "me": "127.0.0.1"})
+    answers = {"https://img.portal.sk/a.jpg": _Resp(302, location="http://me/secret"),
+               "https://img.portal.sk/big.jpg": _Resp(200, b"x" * (photos.MAX_BYTES + 10)),
+               "https://img.portal.sk/ok.jpg": _Resp(301, location="/real.jpg"),
+               "https://img.portal.sk/real.jpg": _Resp(200, b"bytes")}
+    monkeypatch.setattr(requests, "get", lambda url, **kw: answers[url])
+    with pytest.raises(photos.NoPhoto, match="not a public address"):
+        photos._download("https://img.portal.sk/a.jpg")
+    with pytest.raises(photos.NoPhoto, match="too large"):
+        photos._download("https://img.portal.sk/big.jpg")
+    assert photos._download("https://img.portal.sk/ok.jpg") == b"bytes"   # a same-site hop
+
+
+def test_a_photo_is_shrunk_and_re_encoded_and_a_non_picture_refused():
+    import io
+
+    import pytest
+    from PIL import Image
+
+    from dashboard import photos
+    out = photos.thumbnail(_png(1600, 900))
+    with Image.open(io.BytesIO(out)) as img:
+        assert img.format == "JPEG" and max(img.size) == photos.THUMB_PX
+    with pytest.raises(photos.NoPhoto):
+        photos.thumbnail(b"<html>not a picture</html>")
+
+
+def test_a_failure_is_not_kept_and_not_retried_on_every_click(monkeypatch):
+    from dashboard import photos
+    calls = []
+
+    def fake(url):
+        calls.append(url)
+        raise photos.NoPhoto("HTTP 403")
+    monkeypatch.setattr(photos, "_download", fake)
+    photos._photo.clear()
+    assert photos.listing_photo("https://img.sk/x.jpg") is None
+    assert photos.listing_photo("https://img.sk/x.jpg") is None
+    assert len(calls) == 1                                # not again for FAIL_TTL_S
+    monkeypatch.setattr(photos, "_download", lambda url: _png())
+    photos._failed.clear()
+    assert photos.listing_photo("https://img.sk/x.jpg")   # now it works, and is kept
+    photos._photo.clear()
+
+
+def test_the_card_shows_the_servers_copy_never_the_portals_address(populated_db, monkeypatch):
+    from dashboard import photos
+    portal = "https://img.portal.sk/byt-g1.jpg"
+    asked = []
+    monkeypatch.setattr(photos, "_download", lambda url: asked.append(url) or _png())
+    photos._photo.clear()
+    conn = populated_db.get_conn()
+    conn.execute("UPDATE listings SET primary_image_url=? WHERE id='g1'", (portal,))
+    conn.commit()
+    conn.close()
+    at = run_app(open_cards=("g1",))
+    assert not at.exception, [e.value for e in at.exception]
+    assert asked == [portal] and at.get("image")
+    page = " ".join(str(e.proto) for e in at.get("image")) + " ".join(m.value for m in at.markdown)
+    assert portal not in page
+    photos._photo.clear()
+
+
+def test_the_privacy_notice_says_the_server_fetches_the_photos():
+    from dashboard import legal
+    text = " ".join(legal.privacy_md().split())
+    assert "Listing photos are fetched by the dashboard's server" in text
+    assert "listing photos from the portals'" not in text
