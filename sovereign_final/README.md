@@ -1007,20 +1007,26 @@ Before each scheduled run, the scheduler writes to `backups/` in this folder
 (on your computer, outside Docker's volume — `docker compose down -v` can't
 delete it):
 
-- `sovereign-YYYY-MM-DD.db` — a full copy of the database, as it was before
-  that day's first run;
+- `sovereign-YYYY-MM-DD.db.gz` — a full copy of the database, as it was before
+  that day's first run, gzip-compressed (a database shrinks several times;
+  older plain `.db` copies are still read and restored);
 - `your-data-YYYY-MM-DD.json` — what you typed: deal stages and their
   history, notes and vibe scores, contract drafts, the flat LV numbers you
   entered, and enough of each listing to find it again. Readable without the
   app.
 
-The newest 14 of each are kept (`BACKUP_KEEP` in `.env`). Back up now, or put
-a copy back:
+Of each kind, the newest 7 days are kept, then the newest copy of each of
+the last 4 weeks and of each of the last 6 months: half a year back
+(`BACKUP_KEEP_DAILY`, `BACKUP_KEEP_WEEKLY`, `BACKUP_KEEP_MONTHLY` in `.env`).
+That is also how long an erased owner's deed text can still sit in a backup;
+the privacy notice says so from these settings. After the copy, the database
+gets its upkeep: fresh query statistics every run, and once a month a VACUUM
+that gives back the room deleted rows left. Back up now, or put a copy back:
 
 ```powershell
 docker compose exec dashboard python -m modules.backup
 docker compose stop scheduler
-docker compose exec dashboard python -m modules.backup restore backups/sovereign-2026-10-08.db
+docker compose exec dashboard python -m modules.backup restore backups/sovereign-2026-10-08.db.gz
 docker compose start scheduler
 ```
 
@@ -1035,7 +1041,7 @@ rules.
 
 The copies are on the same disk as the database. Set `BACKUP_COPY_DIR` in
 `.env` to a cloud-synced folder or a USB disk and each run copies the new
-backups there too (only the newest `BACKUP_KEEP` are kept there). On a Mac,
+backups there too (the same days are kept there). On a Mac,
 iCloud Drive is `~/Library/Mobile Documents/com~apple~CloudDocs/Sovereign-backups`.
 If that folder can't be written (the disk isn't plugged in), the run says so
 and the local backup stands. Keep the folder private: the backups hold

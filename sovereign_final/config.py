@@ -684,4 +684,11 @@ LOGS_DIR       = os.path.join(BASE_DIR, "logs")
 # Daily database copies and data exports (modules/backup). In Docker this is
 # a folder on the host (docker-compose.yml), outside the sovereign_data volume.
 BACKUP_DIR     = os.path.join(BASE_DIR, "backups")
-BACKUP_KEEP    = _env_int("BACKUP_KEEP", 14)   # days of each kept
+# Database copies and data exports kept (modules/backup.keep_days): the newest
+# DAILY days, then the newest of each of the last WEEKLY weeks and MONTHLY
+# months. An older .env's BACKUP_KEEP still sets the daily count; it also caps
+# the copies saved before a restore.
+BACKUP_KEEP         = _env_int("BACKUP_KEEP", 14)
+BACKUP_KEEP_DAILY   = _env_int("BACKUP_KEEP_DAILY", _env_int("BACKUP_KEEP", 7))
+BACKUP_KEEP_WEEKLY  = _env_int("BACKUP_KEEP_WEEKLY", 4)
+BACKUP_KEEP_MONTHLY = _env_int("BACKUP_KEEP_MONTHLY", 6)

@@ -6,23 +6,32 @@ Everything lives in one SQLite file, in Docker on a named volume, so
 `docker compose down -v` (or a broken volume) took the deal pipeline, notes
 and contract drafts with it. Before each scheduled run this writes
 
-  backups/sovereign-YYYY-MM-DD.db     a full, consistent copy (SQLite's online
-                                      backup — safe while the dashboard writes)
+  backups/sovereign-YYYY-MM-DD.db.gz  a full, consistent copy (SQLite's online
+                                      backup — safe while the dashboard writes),
+                                      gzip-compressed: a database file shrinks
+                                      several times
   backups/your-data-YYYY-MM-DD.json   deal stages and their history, notes and
                                       vibe scores, contract drafts, and the flat
                                       LV numbers you entered — readable without
                                       the app
 
-and keeps the newest BACKUP_KEEP of each. In Docker, backups/ is a folder on
-this computer (docker-compose.yml), outside the volume.
+and keeps, of each kind, the newest BACKUP_KEEP_DAILY (7) days, the newest
+copy of each of the last BACKUP_KEEP_WEEKLY (4) weeks and of each of the last
+BACKUP_KEEP_MONTHLY (6) months: half a year back in less room than two weeks
+of plain daily copies took. Older plain .db backups are still read, restored
+and pruned the same way. In Docker, backups/ is a folder on this computer
+(docker-compose.yml), outside the volume.
 
-  python -m modules.backup                       back up now
-  python -m modules.backup restore <file.db>     put a copy back (the live
-                                                 database is saved first as
-                                                 backups/pre-restore-<time>.db)
-  python -m modules.backup check <file.db>       is a copy a sound database?
+  python -m modules.backup                          back up now
+  python -m modules.backup restore <file.db[.gz]>   put a copy back (the live
+                                                    database is saved first as
+                                                    backups/pre-restore-<time>.db)
+  python -m modules.backup check <file.db[.gz]>     is a copy a sound database?
 
 Every new copy is opened and checked (SQLite's quick_check) before it counts.
+After it, the database gets its upkeep (upkeep()): fresh query statistics on
+every run, and once a month a VACUUM, which gives back the room deleted rows
+left (deed texts past LV_TEXT_RETENTION_DAYS, old price history).
 
 Off the disk: set BACKUP_COPY_DIR in .env to a synced folder (on a Mac,
 ~/Library/Mobile Documents/com~apple~CloudDocs/Sovereign-backups is iCloud
@@ -35,9 +44,13 @@ then `docker compose start scheduler`. Restoring goes through SQLite, not a
 file copy, so a write-ahead log left beside the live file can't corrupt it.
 """
 
+import contextlib
 import glob
+import gzip
 import json
+import logging
 import os
+import re
 import shutil
 import sqlite3
 import sys
@@ -45,9 +58,16 @@ from datetime import date, datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import database
-from config import BACKUP_DIR, BACKUP_KEEP, DATA_DIR
+from config import (BACKUP_DIR, BACKUP_KEEP, BACKUP_KEEP_DAILY, BACKUP_KEEP_MONTHLY,
+                    BACKUP_KEEP_WEEKLY, DATA_DIR)
+
+log = logging.getLogger("sovereign")
 
 DB_PREFIX, DATA_PREFIX = "sovereign-", "your-data-"
+DB_SUFFIX = ".db.gz"
+# A dated backup's name: its kind, its day, and what it is (".db" is the
+# plain copy older versions wrote).
+_DATED = re.compile(r"^(sovereign-|your-data-)(\d{4}-\d{2}-\d{2})\.(db\.gz|db|json)$")
 # The live database as it was just before a restore wrote over it.
 PRE_RESTORE_PREFIX = "pre-restore-"
 
@@ -66,19 +86,103 @@ def _private(path: str) -> None:
         pass
 
 
-def integrity_problem(path: str) -> str | None:
-    """None when SQLite reads the file at `path` as a sound database
-    (PRAGMA quick_check); else what is wrong with it."""
+@contextlib.contextmanager
+def _plain(path: str):
+    """The backup at `path` as a plain database file: itself, or, for a .gz,
+    a decompressed copy beside the live database that is deleted afterwards.
+    Raises BackupError when a .gz can't be decompressed."""
+    if not path.endswith(".gz"):
+        yield path
+        return
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = os.path.join(DATA_DIR, f".unpacked-{os.getpid()}-{os.path.basename(path)[:-3]}")
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         try:
-            rows = [r[0] for r in conn.execute("PRAGMA quick_check").fetchall()]
-            conn.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()
-        finally:
-            conn.close()
+            with gzip.open(path, "rb") as src, open(tmp, "wb") as dst:
+                shutil.copyfileobj(src, dst, 1 << 20)
+        except (OSError, EOFError) as e:      # not gzip, or cut short
+            raise BackupError(f"{type(e).__name__}: {e}") from None
+        _private(tmp)
+        yield tmp
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+
+
+def integrity_problem(path: str) -> str | None:
+    """None when SQLite reads the file at `path` (a .db, or a .db.gz) as a
+    sound database (PRAGMA quick_check); else what is wrong with it."""
+    try:
+        with _plain(path) as plain:
+            conn = sqlite3.connect(f"file:{plain}?mode=ro", uri=True)
+            try:
+                rows = [r[0] for r in conn.execute("PRAGMA quick_check").fetchall()]
+                conn.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()
+            finally:
+                conn.close()
+    except BackupError as e:
+        return str(e)
     except sqlite3.DatabaseError as e:
         return f"{type(e).__name__}: {e}"
     return None if rows == ["ok"] else "; ".join(rows[:3])
+
+
+def keep_days(days, daily: int = None, weekly: int = None, monthly: int = None) -> set:
+    """Of the days that have a backup, the ones to keep: the newest `daily`
+    days, and the newest day of each of the newest `weekly` ISO weeks and of
+    each of the newest `monthly` months."""
+    daily = BACKUP_KEEP_DAILY if daily is None else daily
+    weekly = BACKUP_KEEP_WEEKLY if weekly is None else weekly
+    monthly = BACKUP_KEEP_MONTHLY if monthly is None else monthly
+    newest_first = sorted(set(days), reverse=True)
+    keep = set(newest_first[:max(daily, 0)])
+    for count, bucket in ((weekly, lambda d: d.isocalendar()[:2]),
+                          (monthly, lambda d: (d.year, d.month))):
+        seen = set()
+        for d in newest_first:
+            b = bucket(d)
+            if b in seen:
+                continue
+            if len(seen) >= count:
+                break
+            seen.add(b)
+            keep.add(d)
+    return keep
+
+
+def _prune_dated(folder: str) -> int:
+    """Delete the dated backups in `folder` that keep_days() lets go, each kind
+    on its own. Returns how many went."""
+    kinds: dict[str, dict[date, list[str]]] = {}
+    for path in glob.glob(os.path.join(folder, "*")):
+        m = _DATED.match(os.path.basename(path))
+        if m and os.path.isfile(path):
+            day = date.fromisoformat(m.group(2))
+            kinds.setdefault(m.group(1), {}).setdefault(day, []).append(path)
+    gone = 0
+    for by_day in kinds.values():
+        keep = keep_days(by_day)
+        for day, paths in by_day.items():
+            if day not in keep:
+                for path in paths:
+                    os.remove(path)
+                    gone += 1
+    return gone
+
+
+def retention_text() -> str:
+    """How far back the backups reach, for the privacy notice and the erase
+    button: what an erased owner's data may still sit in."""
+    parts = [f"the newest {BACKUP_KEEP_DAILY} days"]
+    if BACKUP_KEEP_WEEKLY > 0:
+        parts.append(f"one a week for {BACKUP_KEEP_WEEKLY} weeks")
+    if BACKUP_KEEP_MONTHLY > 0:
+        parts.append(f"one a month for {BACKUP_KEEP_MONTHLY} months")
+    reach = (f"about {BACKUP_KEEP_MONTHLY} months" if BACKUP_KEEP_MONTHLY > 0 else
+             f"about {BACKUP_KEEP_WEEKLY} weeks" if BACKUP_KEEP_WEEKLY > 0 else
+             f"{BACKUP_KEEP_DAILY} days")
+    return (", ".join(parts[:-1]) + " and " + parts[-1] if len(parts) > 1 else parts[0]) \
+        + f", so the oldest is up to {reach} old"
 
 # What a person typed or decided — the part of the database no scrape can
 # rebuild.
@@ -102,14 +206,16 @@ _USER_TABLES = {
 
 
 def backup_database(day: date | None = None) -> tuple[str, bool]:
-    """Copy the database to backups/sovereign-<day>.db. Returns (path,
+    """Copy the database to backups/sovereign-<day>.db.gz. Returns (path,
     written). A day's first copy is kept: it is the state before that day's
-    first run, and a retry later that day must not overwrite it."""
+    first run, and a retry later that day must not overwrite it (a plain .db
+    of that day, from before the backups were compressed, counts too)."""
     day = day or date.today()
     os.makedirs(BACKUP_DIR, exist_ok=True)
-    target = os.path.join(BACKUP_DIR, f"{DB_PREFIX}{day.isoformat()}.db")
-    if os.path.exists(target):
-        return target, False
+    target = os.path.join(BACKUP_DIR, f"{DB_PREFIX}{day.isoformat()}{DB_SUFFIX}")
+    for existing in (target, target[:-3]):
+        if os.path.exists(existing):
+            return existing, False
     # Build the copy beside the live database, then move the finished file
     # across: a half-written backup never sits in backups/ under its real
     # name, and SQLite only ever writes to the volume it already works on.
@@ -137,7 +243,8 @@ def backup_database(day: date | None = None) -> tuple[str, bool]:
     # only runs init_db() once per process, so bring the schema up to date here.
     database.init_db()
     part = target + ".part"
-    shutil.copyfile(tmp, part)
+    with open(tmp, "rb") as src, gzip.open(part, "wb", compresslevel=6) as dst:
+        shutil.copyfileobj(src, dst, 1 << 20)
     os.replace(part, target)
     _private(target)
     os.remove(tmp)
@@ -175,23 +282,23 @@ def export_user_data(day: date | None = None) -> str:
     return path
 
 
-def prune(keep: int = BACKUP_KEEP) -> int:
-    """Delete all but the newest `keep` backups of each kind. Returns how many
-    went. Names sort by date, so the newest sort last."""
-    gone = 0
-    for pattern in (f"{DB_PREFIX}*.db", f"{DATA_PREFIX}*.json", f"{PRE_RESTORE_PREFIX}*.db"):
-        files = sorted(glob.glob(os.path.join(BACKUP_DIR, pattern)))
-        for old in files[:-keep] if keep > 0 else []:
-            os.remove(old)
-            gone += 1
+def prune() -> int:
+    """Delete the database copies and data exports keep_days() lets go, and
+    all but the newest BACKUP_KEEP copies saved before a restore. Returns how
+    many went."""
+    gone = _prune_dated(BACKUP_DIR)
+    saved = sorted(glob.glob(os.path.join(BACKUP_DIR, f"{PRE_RESTORE_PREFIX}*.db")))
+    for old in saved[:-BACKUP_KEEP] if BACKUP_KEEP > 0 else []:
+        os.remove(old)
+        gone += 1
     return gone
 
 
 def copy_off_site(dest: str | None = None) -> str:
     """Copy backups/ into `dest` (BACKUP_COPY_DIR: an iCloud Drive or other
     synced folder, or a USB disk), so a disk failure or theft doesn't take the
-    only copies with the database. Only the newest BACKUP_KEEP of each kind
-    are kept there too. Returns a summary; "" when no folder is set. A failure
+    only copies with the database. The same days are kept there as here
+    (keep_days). Returns a summary; "" when no folder is set. A failure
     (the disk isn't plugged in, iCloud refuses) raises BackupError and never
     touches the local backups."""
     dest = os.path.expanduser((dest or os.getenv("BACKUP_COPY_DIR") or "").strip())
@@ -212,13 +319,61 @@ def copy_off_site(dest: str | None = None) -> str:
                 os.replace(target + ".part", target)
                 _private(target)
                 copied += 1
-        for prefix in (DB_PREFIX, DATA_PREFIX):
-            old = sorted(glob.glob(os.path.join(dest, f"{prefix}*")))[:-BACKUP_KEEP]
-            for path in old:
-                os.remove(path)
+        _prune_dated(dest)
     except OSError as e:
         raise BackupError(f"the copy to {dest} failed: {e}") from e
     return f"{copied} file(s) copied to {dest}"
+
+
+# ── Upkeep (EF6) ─────────────────────────────────────────────────────────────
+# A VACUUM rewrites the whole file to give back the room deleted rows left;
+# once a month is enough for a database that mostly grows.
+VACUUM_EVERY_DAYS = 30
+
+
+def _db_mb(path: str) -> float:
+    """The database's size on disk, its write-ahead log included."""
+    total = 0
+    for p in (path, path + "-wal"):
+        with contextlib.suppress(OSError):
+            total += os.path.getsize(p)
+    return total / 1e6
+
+
+def upkeep(day: date | None = None) -> str:
+    """Every run: PRAGMA optimize, so SQLite's query planner works from fresh
+    statistics. When the last VACUUM is VACUUM_EVERY_DAYS old (or there never
+    was one): VACUUM, then empty the write-ahead log it filled. Run after the
+    day's backup. A busy database only postpones the VACUUM to the next run.
+    The day of the last VACUUM is kept in the database itself (table upkeep).
+    Returns a summary for the run's log ("" when there is nothing to say)."""
+    day = day or date.today()
+    conn = database.get_conn()
+    conn.isolation_level = None              # VACUUM can't run in a transaction
+    try:
+        path = conn.execute("PRAGMA database_list").fetchone()[2] or ""
+        # Every step below can meet the dashboard mid-write ("database is
+        # locked"): the whole upkeep then waits for the next run.
+        conn.execute("CREATE TABLE IF NOT EXISTS upkeep (name TEXT PRIMARY KEY, value TEXT)")
+        row = conn.execute("SELECT value FROM upkeep WHERE name = 'last_vacuum'").fetchone()
+        try:
+            last = date.fromisoformat(row[0]) if row else None
+        except (TypeError, ValueError):
+            last = None
+        conn.execute("PRAGMA optimize")
+        if last and (day - last).days < VACUUM_EVERY_DAYS:
+            return ""
+        before = _db_mb(path)
+        conn.execute("VACUUM")
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.execute("INSERT OR REPLACE INTO upkeep (name, value) VALUES ('last_vacuum', ?)",
+                     (day.isoformat(),))
+    except sqlite3.OperationalError as e:
+        log.warning(f"Upkeep: postponed ({e})")
+        return "⚠ database upkeep postponed to the next run (it was busy)"
+    finally:
+        conn.close()
+    return f"database compacted ({before:.1f} → {_db_mb(path):.1f} MB)"
 
 
 def run_backup(day: date | None = None) -> str:
@@ -231,6 +386,14 @@ def run_backup(day: date | None = None) -> str:
     summary = (f"{name} {'written and checked' if written else 'already there (kept)'}, "
                f"data exported"
                + (f", {pruned} old backup(s) removed" if pruned else ""))
+    # After the copy, never before it: a VACUUM rewrites the whole file. Its
+    # failure never fails the run: the backup above stands.
+    try:
+        done = upkeep(day)
+    except sqlite3.Error as e:
+        done = f"⚠ database upkeep skipped ({type(e).__name__}: {e})"
+    if done:
+        summary += f", {done}"
     # A failed off-site copy never fails the run: the local backup stands.
     try:
         off = copy_off_site()
@@ -267,8 +430,9 @@ def save_live_copy() -> str | None:
 
 
 def restore_database(path: str) -> str | None:
-    """Replace the live database's contents with the backup at `path`. Stop
-    the scheduler first: a run in progress would keep writing over it.
+    """Replace the live database's contents with the backup at `path` (a .db
+    or a .db.gz). Stop the scheduler first: a run in progress would keep
+    writing over it.
 
     The backup is checked before anything is touched, and the live database
     is first saved as backups/pre-restore-<time>.db, so restoring the wrong
@@ -279,15 +443,16 @@ def restore_database(path: str) -> str | None:
     if problem:
         raise BackupError(f"{path} is not a sound database ({problem}) — nothing was restored")
     saved = save_live_copy()
-    src = sqlite3.connect(path)
-    try:
-        dst = database.get_conn()
+    with _plain(path) as plain:
+        src = sqlite3.connect(plain)
         try:
-            src.backup(dst)
+            dst = database.get_conn()
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
         finally:
-            dst.close()
-    finally:
-        src.close()
+            src.close()
     # An older backup may predate columns the code now expects. The dashboard
     # only runs init_db() once per process, so bring the schema up to date here.
     database.init_db()
@@ -308,4 +473,5 @@ if __name__ == "__main__":
     elif not args:
         print(run_backup())
     else:
-        sys.exit("usage: python -m modules.backup [restore <backup.db> | check <backup.db>]")
+        sys.exit("usage: python -m modules.backup [restore <backup.db[.gz]> | "
+                 "check <backup.db[.gz]>]")
