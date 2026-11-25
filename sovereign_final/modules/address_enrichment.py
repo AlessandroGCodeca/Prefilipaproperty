@@ -22,7 +22,8 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from database import get_unnormalized_addresses, update_address
-from modules.llm_enrichment import is_enabled, normalize_address
+from modules.llm_enrichment import (address_request, ask_json_many, is_enabled,
+                                    normalize_address)
 
 log = logging.getLogger(__name__)
 
@@ -45,9 +46,11 @@ def _compose_district(norm: dict) -> str:
 
 
 def run_address_enrichment(limit: int = 200, progress_callback=None,
-                           market: str | None = None) -> int:
+                           market: str | None = None, batch: bool = False) -> int:
     """Resolve blank districts for up to `limit` listings via normalize_address
     — `market`'s only, or every market's (None), each in its own language.
+    batch=True (the daily run) asks Claude for all of them in one Message
+    Batch at half the price (llm_enrichment.ask_json_many).
 
     Returns the number of listings for which a non-empty district was resolved.
     """
@@ -62,14 +65,22 @@ def run_address_enrichment(limit: int = 200, progress_callback=None,
         return 0
 
     log.info(f"🗺️  Normalizing {len(pending)} addresses via Claude...")
+    batched = None
+    if batch:
+        asks = [address_request(r["address_raw"], r.get("market") or "sk") for r in pending]
+        got = iter(ask_json_many([a for a in asks if a]))
+        batched = [next(got) if a else None for a in asks]
     fixed = 0
     for i, row in enumerate(pending, 1):
         if progress_callback:
             progress_callback(i, len(pending))
 
         row_market = row.get("market") or "sk"
-        norm = (normalize_address(row["address_raw"]) if row_market == "sk"
-                else normalize_address(row["address_raw"], market=row_market))
+        if batched is not None:
+            norm = batched[i - 1]
+        else:
+            norm = (normalize_address(row["address_raw"]) if row_market == "sk"
+                    else normalize_address(row["address_raw"], market=row_market))
         if norm is None:
             # Transient failure — leave addr_normalized=0 to retry; `limit` caps cost.
             continue

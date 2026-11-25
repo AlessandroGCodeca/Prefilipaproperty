@@ -387,7 +387,7 @@ def _market_steps(market: str, scraped: set) -> list[tuple[str, object]]:
     def lv():
         from modules.debt_bot import run_debt_filter
         from modules.debt_bot import keyword_only
-        p, r, u = run_debt_filter(market=market)
+        p, r, u = run_debt_filter(market=market, batch=True)
         return None, (f"Clean: {p} | Rejected: {r} | Unverified: {u}"
                       + (" | keyword rules only (no ANTHROPIC_API_KEY)" if keyword_only() else ""))
 
@@ -396,13 +396,14 @@ def _market_steps(market: str, scraped: set) -> list[tuple[str, object]]:
     # default.
     def addresses():
         from modules.address_enrichment import run_address_enrichment
-        return None, f"{run_address_enrichment(market=market)} districts resolved"
+        return None, f"{run_address_enrichment(market=market, batch=True)} districts resolved"
 
     # Optional; needs ANTHROPIC_API_KEY. Before scoring, so parking/furnished
     # rent premiums are available to the cashflow engine.
     def descriptions():
         from modules.description_enrichment import run_description_enrichment
-        return None, f"{run_description_enrichment(market=market)} descriptions parsed"
+        return None, (f"{run_description_enrichment(market=market, batch=True)} "
+                      f"descriptions parsed")
 
     def scoring():
         from modules.cashflow_runner import run_scoring

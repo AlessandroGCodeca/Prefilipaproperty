@@ -418,6 +418,13 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 # longer read: copied from .env.example it pinned every task to one model.)
 ANTHROPIC_MODEL_BULK = os.getenv("ANTHROPIC_MODEL_BULK") or "claude-haiku-5-5"
 ANTHROPIC_MODEL_LV   = os.getenv("ANTHROPIC_MODEL_LV") or "claude-opus-5-5"
+# EF3: the daily run sends its Claude reads (ads, addresses, title deeds) as one
+# Message Batch per step, at half the price, and waits at most this many
+# minutes for it; what it hasn't answered by then is asked one by one. The
+# dashboard's buttons always ask straight away. ANTHROPIC_BATCH=0: never batch.
+ANTHROPIC_BATCH          = os.getenv("ANTHROPIC_BATCH", "1").strip() != "0"
+ANTHROPIC_BATCH_WAIT_MIN = _env_float("ANTHROPIC_BATCH_WAIT_MIN", 20)
+ANTHROPIC_BATCH_MIN      = _env_int("ANTHROPIC_BATCH_MIN", 2)
 
 # ── Scraper ───────────────────────────────────────────────────────────────────
 SCRAPE_DELAY_SEC       = 2.5

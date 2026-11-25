@@ -651,6 +651,16 @@ hit on an LV the cadastre report was cut short on. Description parsing and
 address normalisation use `ANTHROPIC_MODEL_BULK` (default `claude-haiku-5-5`,
 low effort).
 
+In the daily run (and ▶ RUN EVERYTHING) each of these three steps sends its
+Claude reads as one **Message Batch**, at half the price: the deeds are all
+read from the cadastre first, then Claude reads them together. The run waits
+for the batch, at most `ANTHROPIC_BATCH_WAIT_MIN` (20) minutes; a batch still
+running then is cancelled (what it hadn't started isn't billed) and the rest
+is asked one by one. A batch can't carry the deed read's refusal fallback, so
+a deed the batch refuses is read again on its own with it: the verdicts are
+the same as before. The sidebar's step buttons and RE-VERIFY LV still ask
+straight away. `ANTHROPIC_BATCH=0` turns batches off.
+
 The screen's rules were written without live LV reports to check them
 against. `tests/fixtures/lv/` holds LV texts with their expected verdicts — so
 far only **synthetic** ones. Add real, anonymised LVs with
