@@ -107,6 +107,10 @@ section[data-testid="stSidebar"] {
     font-size: 1rem; font-weight: 700;
     color: var(--text); letter-spacing: 4px; text-transform: uppercase;
 }
+/* D22: TRIAGE TABLE as a list on a phone, the table elsewhere (one shows) */
+@media (min-width: 601px) { .st-key-triage_narrow { display: none !important; } }
+@media (max-width: 600px) { .st-key-triage_wide { display: none !important; } }
+
 /* D18: where the price sits among flats like it */
 .pband { margin: 2px 0 10px 0; }
 .pband-track { position: relative; height: 6px; border-radius: 3px; background: var(--line);

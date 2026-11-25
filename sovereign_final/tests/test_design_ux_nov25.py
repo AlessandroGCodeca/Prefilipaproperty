@@ -266,3 +266,79 @@ def test_an_open_card_shows_where_its_price_sits(populated_db):
     assert not at.exception, [e.value for e in at.exception]
     bands = [m.value for m in at.markdown if 'class="pband"' in m.value]
     assert bands and "cheaper than 3 of 3 similar flats" in bands[0]
+
+
+# ── D22 + UX5: TRIAGE TABLE as a list on a phone; acting on several rows ──────
+def _tick(monkeypatch, rows):
+    """Make the triage table report `rows` as ticked (AppTest can't tick a
+    dataframe row itself)."""
+    from types import SimpleNamespace
+
+    from streamlit.delta_generator import DeltaGenerator
+    real = DeltaGenerator.dataframe
+
+    def ticked(self, data=None, *a, **kw):
+        if str(kw.get("key", "")).startswith("triage_pick"):
+            real(self, data, *a, **{k: v for k, v in kw.items()
+                                    if k not in ("on_select", "selection_mode", "key")})
+            return SimpleNamespace(selection=SimpleNamespace(rows=list(rows)))
+        return real(self, data, *a, **kw)
+    monkeypatch.setattr(DeltaGenerator, "dataframe", ticked)
+
+
+def test_one_ticked_row_shows_its_summary(populated_db, monkeypatch):
+    """D3's summary: it used to raise, because the row loop had reused the
+    name `v` for a money helper by the time the summary read v.data."""
+    _tick(monkeypatch, [0])
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("pick-t" in m.value for m in at.markdown)
+
+
+def test_several_ticked_rows_can_be_starred_compared_or_passed(populated_db, monkeypatch):
+    _tick(monkeypatch, [0, 1, 2])
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    star = at.button(key="bulk_star")
+    assert star.label == "★ Star all 3"
+    star.click().run()
+    assert len(populated_db.get_starred()) == 3
+    at.button(key="bulk_cmp").click().run()
+    assert len(at.session_state["cmp_pick"]) == 3
+    assert at.query_params["tab"] in ("COMPARE", ["COMPARE"])
+
+
+def test_passing_several_needs_a_tick_and_spares_a_closed_deal(populated_db, monkeypatch):
+    _tick(monkeypatch, [0, 1, 2])
+    at = run_app()
+    assert at.button(key="bulk_pass").disabled
+    populated_db.set_deal_stage("w1", "CLOSED", "bought")
+    at.checkbox(key="bulk_pass_ok").check().run()
+    at.button(key="bulk_pass").click().run()
+    stages = populated_db.get_deal_stages()
+    assert sum(1 for s in stages.values() if s["stage"] == "PASSED") == 2
+    assert stages["w1"]["stage"] == "CLOSED"
+
+
+def test_a_phone_gets_a_list_a_page_at_a_time(populated_db):
+    from tests.conftest import make_listing
+    for i in range(30):
+        populated_db.upsert_listing(make_listing(f"m{i:02d}", district="Žilina",
+                                                 price_eur=80_000.0 + i, size_m2=55.0))
+    from modules.cashflow_runner import run_scoring
+    run_scoring()
+    at = run_app()
+    assert not at.exception, [e.value for e in at.exception]
+    opens = [b for b in at.button if str(b.key).startswith("trio_")]
+    assert len(opens) == 25                                   # a page
+    opens[0].click().run()
+    assert any("pick-t" in m.value for m in at.markdown)      # its summary, under it
+    at.button(key="trip_next").click().run()
+    assert at.session_state["triage_phone_page"] == 1
+
+
+def test_the_stylesheet_shows_one_of_the_two():
+    from dashboard import style
+    css = style.CSS if hasattr(style, "CSS") else open(style.__file__, encoding="utf-8").read()
+    assert "@media (min-width: 601px) { .st-key-triage_narrow { display: none !important; } }" in css
+    assert "@media (max-width: 600px) { .st-key-triage_wide { display: none !important; } }" in css
