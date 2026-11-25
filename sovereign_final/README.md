@@ -385,7 +385,11 @@ three groups under it, each folded until you open it:
   🇸🇰 Topreality.sk, 🇨🇿 Bezrealitky.cz, 🇨🇿 Reality.iDNES.cz, 🇨🇿 Bazos.cz),
   then 🔎 FILL MISSING DETAILS, 🏘️ RENT COMPS, 🔒 LV DEBT FILTER, 🗺️ NORMALIZE
   ADDRESSES, 📝 PARSE DESCRIPTIONS, 💰 CASHFLOW SCORE, 📍 LOCATION IQ,
-  🌊 RISK BACKFILL, 📡 MERGE PORTAL COPIES
+  🌊 RISK BACKFILL, 📡 MERGE PORTAL COPIES. In the daily run and ▶ RUN
+  EVERYTHING, a market's portals are read side by side: each keeps its own
+  pauses between pages, and the reads take as long as the slowest portal
+  rather than all of them added up (`PORTALS_SIDE_BY_SIDE=0` in `.env` reads
+  them one after another)
 - **🔧 REPAIR DATA**: ♻️ RESCORE ALL, 📝 RE-PARSE (new fields), 🏛️ UPDATE TAX
   RATES, 🧹 CLEAN STALE (21d)
 - **🩺 DIAGNOSTICS**: 🔗 TEST SITES, 🔗 TEST CZ SITES
@@ -646,6 +650,16 @@ clear a lien the screen couldn't attribute; it cannot clear distress, nor any
 hit on an LV the cadastre report was cut short on. Description parsing and
 address normalisation use `ANTHROPIC_MODEL_BULK` (default `claude-haiku-5-5`,
 low effort).
+
+In the daily run (and ▶ RUN EVERYTHING) each of these three steps sends its
+Claude reads as one **Message Batch**, at half the price: the deeds are all
+read from the cadastre first, then Claude reads them together. The run waits
+for the batch, at most `ANTHROPIC_BATCH_WAIT_MIN` (20) minutes; a batch still
+running then is cancelled (what it hadn't started isn't billed) and the rest
+is asked one by one. A batch can't carry the deed read's refusal fallback, so
+a deed the batch refuses is read again on its own with it: the verdicts are
+the same as before. The sidebar's step buttons and RE-VERIFY LV still ask
+straight away. `ANTHROPIC_BATCH=0` turns batches off.
 
 The screen's rules were written without live LV reports to check them
 against. `tests/fixtures/lv/` holds LV texts with their expected verdicts — so
@@ -1007,20 +1021,26 @@ Before each scheduled run, the scheduler writes to `backups/` in this folder
 (on your computer, outside Docker's volume — `docker compose down -v` can't
 delete it):
 
-- `sovereign-YYYY-MM-DD.db` — a full copy of the database, as it was before
-  that day's first run;
+- `sovereign-YYYY-MM-DD.db.gz` — a full copy of the database, as it was before
+  that day's first run, gzip-compressed (a database shrinks several times;
+  older plain `.db` copies are still read and restored);
 - `your-data-YYYY-MM-DD.json` — what you typed: deal stages and their
   history, notes and vibe scores, contract drafts, the flat LV numbers you
   entered, and enough of each listing to find it again. Readable without the
   app.
 
-The newest 14 of each are kept (`BACKUP_KEEP` in `.env`). Back up now, or put
-a copy back:
+Of each kind, the newest 7 days are kept, then the newest copy of each of
+the last 4 weeks and of each of the last 6 months: half a year back
+(`BACKUP_KEEP_DAILY`, `BACKUP_KEEP_WEEKLY`, `BACKUP_KEEP_MONTHLY` in `.env`).
+That is also how long an erased owner's deed text can still sit in a backup;
+the privacy notice says so from these settings. After the copy, the database
+gets its upkeep: fresh query statistics every run, and once a month a VACUUM
+that gives back the room deleted rows left. Back up now, or put a copy back:
 
 ```powershell
 docker compose exec dashboard python -m modules.backup
 docker compose stop scheduler
-docker compose exec dashboard python -m modules.backup restore backups/sovereign-2026-10-08.db
+docker compose exec dashboard python -m modules.backup restore backups/sovereign-2026-10-08.db.gz
 docker compose start scheduler
 ```
 
@@ -1035,7 +1055,7 @@ rules.
 
 The copies are on the same disk as the database. Set `BACKUP_COPY_DIR` in
 `.env` to a cloud-synced folder or a USB disk and each run copies the new
-backups there too (only the newest `BACKUP_KEEP` are kept there). On a Mac,
+backups there too (the same days are kept there). On a Mac,
 iCloud Drive is `~/Library/Mobile Documents/com~apple~CloudDocs/Sovereign-backups`.
 If that folder can't be written (the disk isn't plugged in), the run says so
 and the local backup stands. Keep the folder private: the backups hold

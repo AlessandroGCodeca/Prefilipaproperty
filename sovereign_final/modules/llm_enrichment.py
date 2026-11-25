@@ -26,16 +26,24 @@ Design rules:
     effort on the most capable one, with server-side refusal fallbacks.
 
 Run once per listing and cache the result — these fields don't change.
+
+In the daily run, many reads go out together through ask_json_many(): one
+Message Batch at half the price (EF3, ANTHROPIC_BATCH). A batch can't carry
+the LV read's refusal fallback, so a read the batch doesn't answer (refused,
+failed, or still waiting after ANTHROPIC_BATCH_WAIT_MIN minutes, when the
+batch is cancelled) is asked again on its own, exactly as before.
 """
 
 import logging
 import json
 import sys
 import os
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import (
-    ANTHROPIC_API_KEY, ANTHROPIC_MODEL_BULK, ANTHROPIC_MODEL_LV, LV_SOFT_FLAGS_REJECT,
+    ANTHROPIC_API_KEY, ANTHROPIC_BATCH, ANTHROPIC_BATCH_MIN, ANTHROPIC_BATCH_WAIT_MIN,
+    ANTHROPIC_MODEL_BULK, ANTHROPIC_MODEL_LV, LV_SOFT_FLAGS_REJECT,
 )
 
 log = logging.getLogger(__name__)
@@ -78,6 +86,27 @@ def _get_client():
     return _client
 
 
+def _params(system: str, user: str, schema: dict, model: str, effort: str,
+            max_tokens: int) -> dict:
+    """One request's Messages API parameters (without the refusal fallback)."""
+    return dict(
+        model=model,
+        max_tokens=max_tokens,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+        output_config={"effort": effort,
+                       "format": {"type": "json_schema", "schema": schema}},
+    )
+
+
+def _answer(message) -> dict | None:
+    """The JSON a reply carries; None for a refusal or no text."""
+    if message.stop_reason == "refusal":
+        return None
+    text = next((b.text for b in message.content if b.type == "text"), None)
+    return json.loads(text) if text else None
+
+
 def _ask_json(system: str, user: str, schema: dict, *, model: str = ANTHROPIC_MODEL_BULK,
               effort: str = "low", max_tokens: int = 4096,
               fallbacks: bool = False) -> dict | None:
@@ -92,29 +121,88 @@ def _ask_json(system: str, user: str, schema: dict, *, model: str = ANTHROPIC_MO
     if client is None:
         return None
     try:
-        kwargs = dict(
-            model=model,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-            output_config={"effort": effort,
-                           "format": {"type": "json_schema", "schema": schema}},
-        )
+        kwargs = _params(system, user, schema, model, effort, max_tokens)
         if fallbacks:
             resp = client.beta.messages.create(
                 **kwargs, betas=["server-side-fallback-2026-07-01"], fallbacks="default")
         else:
             resp = client.messages.create(**kwargs)
-        if resp.stop_reason == "refusal":
-            return None
-        text = next((b.text for b in resp.content if b.type == "text"), None)
-        if not text:
-            return None
-        return json.loads(text)
+        return _answer(resp)
     except Exception as e:
         # Never surface the key or raw client internals; a one-line note is enough.
         log.warning(f"    ↳ llm_enrichment call failed: {type(e).__name__}")
         return None
+
+
+# ── Many reads at once: a Message Batch (EF3) ─────────────────────────────────
+BATCH_POLL_S = 20
+# How long a cancelled batch gets to wind down before its answers are read.
+BATCH_CANCEL_WAIT_S = 120
+_sleep, _clock = time.sleep, time.monotonic       # replaced in tests
+
+
+def _ask_each(requests: list[dict]) -> list:
+    return [_ask_json(**r) for r in requests]
+
+
+def ask_json_many(requests: list[dict], batch: bool = True) -> list:
+    """_ask_json for each of `requests` (dicts of its arguments), answers in
+    the same order. With `batch` (and ANTHROPIC_BATCH on, and at least
+    ANTHROPIC_BATCH_MIN of them) they go out as one Message Batch at half the
+    price, and the call waits for it, at most ANTHROPIC_BATCH_WAIT_MIN
+    minutes; a batch still running then is cancelled (requests it hadn't
+    started aren't billed). Whatever the batch doesn't answer (an error, a
+    cancel, an expiry, or a refused read that has a fallback) is asked on its
+    own, so the answers are what one-by-one calls would give."""
+    client = _get_client()
+    if client is None:
+        return [None] * len(requests)
+    if not (batch and ANTHROPIC_BATCH) or len(requests) < max(ANTHROPIC_BATCH_MIN, 1):
+        return _ask_each(requests)
+    began = _clock()
+    try:
+        made = client.messages.batches.create(requests=[
+            {"custom_id": f"r{i}",
+             "params": _params(r["system"], r["user"], r["schema"],
+                               r.get("model", ANTHROPIC_MODEL_BULK), r.get("effort", "low"),
+                               r.get("max_tokens", 4096))}
+            for i, r in enumerate(requests)])
+        deadline = began + ANTHROPIC_BATCH_WAIT_MIN * 60
+        status = made.processing_status
+        cancelled = False
+        while status != "ended":
+            now = _clock()
+            if not cancelled and now >= deadline:
+                client.messages.batches.cancel(made.id)
+                cancelled, deadline = True, now + BATCH_CANCEL_WAIT_S
+            elif cancelled and now >= deadline:
+                raise TimeoutError("the cancelled batch didn't wind down")
+            _sleep(min(BATCH_POLL_S, max(deadline - now, 1)))
+            status = client.messages.batches.retrieve(made.id).processing_status
+        answers: list = [None] * len(requests)
+        again = set(range(len(requests)))
+        for item in client.messages.batches.results(made.id):
+            i = int(item.custom_id[1:])
+            if item.result.type != "succeeded":
+                continue                                   # asked again below
+            message = item.result.message
+            if message.stop_reason == "refusal" and requests[i].get("fallbacks"):
+                continue                                   # with its fallback, below
+            try:
+                answers[i] = _answer(message)
+            except ValueError:
+                continue
+            again.discard(i)
+    except Exception as e:
+        log.warning(f"    ↳ batch failed ({type(e).__name__}): asking one by one")
+        return _ask_each(requests)
+    for i in sorted(again):
+        answers[i] = _ask_json(**requests[i])
+    took = (_clock() - began) / 60
+    log.info(f"    ↳ batch of {len(requests)} at half price: {len(requests) - len(again)} "
+             f"answered in {took:.0f} min"
+             + (f", {len(again)} asked one by one" if again else ""))
+    return answers
 
 
 # ── 1. Description feature extraction ─────────────────────────────────────────
@@ -167,18 +255,25 @@ _DESCRIPTION_SYSTEM_CZ = (
 )
 
 
+def description_request(description: str, market: str = "sk") -> dict | None:
+    """parse_description's request (ask_json_many takes a list); None for an
+    empty description."""
+    description = (description or "").strip()
+    if not description:
+        return None
+    system = _DESCRIPTION_SYSTEM if market == "sk" else _DESCRIPTION_SYSTEM_CZ
+    return {"system": system, "user": f"DESCRIPTION:\n{description[:4000]}",
+            "schema": _DESCRIPTION_SCHEMA}
+
+
 def parse_description(description: str, market: str = "sk") -> dict | None:
     """Extract structured features from a free-text (Slovak, or for market
     "cz" Czech) description.
 
     Returns a dict matching _DESCRIPTION_SCHEMA, or None if disabled/failed.
     """
-    description = (description or "").strip()
-    if not description:
-        return None
-    system = _DESCRIPTION_SYSTEM if market == "sk" else _DESCRIPTION_SYSTEM_CZ
-    return _ask_json(system, f"DESCRIPTION:\n{description[:4000]}",
-                     _DESCRIPTION_SCHEMA)
+    request = description_request(description, market)
+    return _ask_json(**request) if request else None
 
 
 # ── 2. Address / district normalisation ───────────────────────────────────────
@@ -224,20 +319,26 @@ def _address_system_cz() -> str:
           "postcode you are unsure about.")
 
 
+def address_request(address_raw: str, market: str = "sk") -> dict | None:
+    """normalize_address's request; None for an empty address."""
+    address_raw = (address_raw or "").strip()
+    if not address_raw:
+        return None
+    if market != "sk":
+        return {"system": _address_system_cz(), "user": f"RAW ADDRESS:\n{address_raw[:500]}",
+                "schema": _address_schema_cz(), "max_tokens": 2048}
+    return {"system": _ADDRESS_SYSTEM, "user": f"RAW ADDRESS:\n{address_raw[:500]}",
+            "schema": _ADDRESS_SCHEMA, "max_tokens": 2048}
+
+
 def normalize_address(address_raw: str, market: str = "sk") -> dict | None:
     """Resolve a raw address string into {city, district, kraj} — a Slovak
     one, or for market "cz" a Czech one (Czech kraj codes).
 
     Returns a dict matching _ADDRESS_SCHEMA, or None if disabled/failed.
     """
-    address_raw = (address_raw or "").strip()
-    if not address_raw:
-        return None
-    if market != "sk":
-        return _ask_json(_address_system_cz(), f"RAW ADDRESS:\n{address_raw[:500]}",
-                         _address_schema_cz(), max_tokens=2048)
-    return _ask_json(_ADDRESS_SYSTEM, f"RAW ADDRESS:\n{address_raw[:500]}",
-                     _ADDRESS_SCHEMA, max_tokens=2048)
+    request = address_request(address_raw, market)
+    return _ask_json(**request) if request else None
 
 
 # ── 3. LV title-deed risk analysis ────────────────────────────────────────────
@@ -334,20 +435,26 @@ def lv_text_for_claude(lv_text, market: str = "sk") -> tuple[str, bool]:
     return text, complete
 
 
+def lv_request(lv_text: str, market: str = "sk") -> dict | None:
+    """analyze_lv's request; None for an empty text."""
+    lv_text = (lv_text or "").strip()
+    if not lv_text:
+        return None
+    excerpt, _ = lv_text_for_claude(lv_text, market)
+    return {"system": _LV_SYSTEM if market == "sk" else _LV_SYSTEM_CZ,
+            "user": f"LV DATA:\n{excerpt}", "schema": _LV_SCHEMA,
+            "model": ANTHROPIC_MODEL_LV, "effort": "high", "max_tokens": 16000,
+            "fallbacks": True}
+
+
 def analyze_lv(lv_text: str, market: str = "sk") -> dict | None:
     """Structured risk read of an LV title-deed document.
 
     Returns a dict matching _LV_SCHEMA, or None if disabled/failed. Intended as a
     more reliable, schema-validated alternative to the substring scan in debt_bot.
     """
-    lv_text = (lv_text or "").strip()
-    if not lv_text:
-        return None
-    excerpt, _ = lv_text_for_claude(lv_text, market)
-    return _ask_json(_LV_SYSTEM if market == "sk" else _LV_SYSTEM_CZ,
-                     f"LV DATA:\n{excerpt}", _LV_SCHEMA,
-                     model=ANTHROPIC_MODEL_LV, effort="high", max_tokens=16000,
-                     fallbacks=True)
+    request = lv_request(lv_text, market)
+    return _ask_json(**request) if request else None
 
 
 if __name__ == "__main__":

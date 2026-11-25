@@ -93,9 +93,17 @@ def make_full_db(path: str):
     def _conn():
         c = sqlite3.connect(path)
         c.row_factory = sqlite3.Row
+        # A throwaway database needs no flush to disk on every commit (that
+        # is only for surviving a power cut). On the Windows CI runner each
+        # flush, and each journal file made and deleted per commit, took up to
+        # 0.2 s: a test writing 700 rows ran 140 s there against 1.5 s on Linux.
+        c.execute("PRAGMA synchronous=OFF")
         return c
 
     conn = _conn()
+    # Write-ahead log, as the app's own connection (database.get_conn): one log
+    # file appended to, not a journal file made and deleted per commit.
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(db.SQLITE_SCHEMA)
     db._ensure_dev_project_column(conn)
     db._ensure_cashflow_columns(conn)
@@ -115,7 +123,11 @@ def full_db(monkeypatch):
     _conn = make_full_db(path)
     monkeypatch.setattr(db, "get_conn", _conn)
     yield _conn
-    os.unlink(path)
+    for p in (path, path + "-wal", path + "-shm"):     # WAL's two side files too
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
 
 
 def make_listing(lid: str, **over) -> dict:

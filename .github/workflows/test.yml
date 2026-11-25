@@ -47,7 +47,7 @@ jobs:
           # which skip here. streamlit stays:
           # tests/test_app_smoke.py runs the dashboard script with it.
           grep -v -E "^playwright" requirements.txt > requirements-test.txt
-          pip install -r requirements-test.txt pytest ruff
+          pip install -r requirements-test.txt pytest pytest-xdist ruff
 
       - name: Check requirements.txt resolves
         # The install above leaves playwright out, so a pin pip
@@ -61,7 +61,12 @@ jobs:
         run: ruff check . --output-format=github
 
       - name: Run tests
-        run: pytest tests/ -v --tb=short
+        # On every core the runner has (pytest-xdist). Windows only gained
+        # once the test databases stopped making a journal file per commit
+        # (tests/conftest.py make_full_db): its test step went from 12:50 to
+        # 7:47, Linux's from about 2:50 to about 1 minute. The 20 slowest
+        # tests are listed at the end of the log.
+        run: pytest tests/ -n auto -v --tb=short --durations=20
 
   browser:
     # The job above leaves Playwright out, so on its own a Playwright or

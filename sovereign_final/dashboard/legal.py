@@ -82,6 +82,12 @@ def imprint_html() -> str:
                    'data: Úrad na ochranu osobných údajov SR, dataprotection.gov.sk.</div>')
 
 
+def _backup_reach() -> str:
+    """How far back the backups reach (modules/backup.retention_text)."""
+    from modules.backup import retention_text
+    return retention_text()
+
+
 def privacy_md() -> str:
     who = operator()["OPERATOR_NAME"] or "the operator named in the imprint"
     mail = operator()["OPERATOR_EMAIL"] or "the e-mail in the imprint"
@@ -118,7 +124,7 @@ servers and, when a Mapy.com key is set, the Mapy.com logo from Mapy.com's serve
 Czechia — its terms require the logo): they see your IP address, as with any website you open.
 
 **How long.** Deed texts: until the flat has been off the market for LV_TEXT_RETENTION_DAYS
-(180 by default) and is not a deal you track. Daily backups: the newest BACKUP_KEEP (14).
+(180 by default) and is not a deal you track. Backups: {_backup_reach()}.
 Logs: rotated, at most about 30 MB. Listings stay while they are useful for price history.
 
 **Cookies and browser storage.** `_streamlit_xsrf`, protection against forged requests; and,

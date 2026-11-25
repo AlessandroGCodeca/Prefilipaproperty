@@ -48,7 +48,7 @@ from modules.lv_screen import screen_lv, describe, part_c_start, unrecognised_en
 from engine.regional_prices import kraj_for_district
 from modules.llm_enrichment import (
     is_enabled as claude_enabled, analyze_lv as claude_analyze_lv,
-    lv_text_for_claude,
+    ask_json_many, lv_request, lv_text_for_claude,
 )
 
 log = logging.getLogger(__name__)
@@ -299,7 +299,19 @@ def keyword_only() -> bool:
     return not claude_enabled()
 
 
-def _decide_lv(api_result: dict) -> dict:
+def _wants_claude(api_result: dict) -> bool:
+    """Whether _decide_lv would ask Claude to read this result's deed."""
+    if not claude_enabled():
+        return False
+    unknown = api_result.get("unknown_entries") or []
+    return bool(api_result.get("raw")) and not (
+        api_result.get("status") == "UNVERIFIED" and not unknown)
+
+
+_ASK = object()          # _decide_lv: no read given, ask Claude now
+
+
+def _decide_lv(api_result: dict, analysis=_ASK) -> dict:
     """Refine a screened LV result with Claude's structured LV analysis.
 
     Runs only on LV text that is the flat's own (`raw`); an UNVERIFIED result
@@ -313,21 +325,23 @@ def _decide_lv(api_result: dict) -> dict:
     Degrades gracefully — returns the screen's decision untouched when Claude
     is disabled, there's no LV text, the call fails, or it returns an UNKNOWN
     risk level. So the hard-stop safety net is never weaker than the screen.
+
+    `analysis` is Claude's read when it was asked already (the daily run asks
+    for every deed at once, run_debt_filter); by default it is asked here.
     """
-    if not claude_enabled():
-        return api_result
-    raw = api_result.get("raw")
     # An UNVERIFIED result carries no deed to read — except one the screen
     # held back for an entry it has no rule for: Claude reads that deed.
-    unknown = api_result.get("unknown_entries") or []
-    if not raw or (api_result.get("status") == "UNVERIFIED" and not unknown):
+    if not _wants_claude(api_result):
         return api_result
+    raw = api_result.get("raw")
+    unknown = api_result.get("unknown_entries") or []
 
     # A Czech LV (modules/lv_cz) is read with the Czech prompt; a Slovak one
     # exactly as before.
     cz = api_result.get("market") == "cz"
-    analysis = (claude_analyze_lv(str(raw), market="cz") if cz
-                else claude_analyze_lv(str(raw)))
+    if analysis is _ASK:
+        analysis = (claude_analyze_lv(str(raw), market="cz") if cz
+                    else claude_analyze_lv(str(raw)))
     if not analysis or analysis.get("risk_level") == "UNKNOWN":
         return api_result  # fall back to the screen's decision
 
@@ -388,14 +402,23 @@ def _decide_lv(api_result: dict) -> dict:
 _DB_STATUS = {"PASS": "PASS", "REJECT": "REJECTED", "UNVERIFIED": "UNVERIFIED"}
 
 
-def _check_and_store(row: dict, module: str = "debt_bot", refresh: bool = False) -> dict:
+def _check(row: dict, refresh: bool = False) -> dict:
+    """Read a listing's LV (check_listing) and store the plot it found."""
     result = check_listing(row, refresh=True) if refresh else check_listing(row)
     parcel = result.get("parcel")
     if parcel:
         set_parcel_data(row["id"], parcel["cadastral_area"], parcel["parcel_no"],
                         parcel["ku_code"], parcel["plot_lv"])
+    return result
+
+
+def _check_and_store(row: dict, module: str = "debt_bot", refresh: bool = False,
+                     checked: dict | None = None, analysis=_ASK) -> dict:
+    """Check a listing's LV, let Claude decide, store the verdict. `checked`
+    and `analysis`: the check and Claude's read, when done already."""
+    result = checked if checked is not None else _check(row, refresh)
     # Claude-authoritative refinement (no-op when disabled / not the flat's LV).
-    result = _decide_lv(result)
+    result = _decide_lv(result, analysis)
     # Every check replaces the last one's Claude read: one that Claude did not
     # decide (UNVERIFIED, Claude off, the call failed) stores none, so an
     # earlier "LOW … clean" never sits beside a new REJECTED or UNVERIFIED.
@@ -410,11 +433,17 @@ def _check_and_store(row: dict, module: str = "debt_bot", refresh: bool = False)
     return result
 
 
-def run_debt_filter(progress_callback=None, market: str | None = None) -> tuple[int, int, int]:
+def run_debt_filter(progress_callback=None, market: str | None = None,
+                    batch: bool = False) -> tuple[int, int, int]:
     """Check every pending listing — `market`'s only, or every market's
     (None), each against its own cadastre. Returns (passed, rejected,
     unverified) — `passed` counts only flats whose own LV was read and found
-    clean."""
+    clean.
+
+    batch=True (the daily run): every deed is read from the cadastre first,
+    then Claude reads all that need it in one Message Batch at half the price
+    (a read the batch refuses is asked again with its fallback, as one by
+    one), and only then is each verdict decided and stored."""
     # Heal rows the old demo mode fabricated: "[DEMO]" rejections hid real
     # listings behind invented liens. Reset them to PENDING so they get an
     # honest re-check below. Idempotent — a clean DB is a no-op.
@@ -432,15 +461,30 @@ def run_debt_filter(progress_callback=None, market: str | None = None) -> tuple[
     log.info(f"🔒 Running LV debt filter on {len(pending)} listings...")
     passed = rejected = unverified = plots = 0
 
+    checks, reads = [None] * len(pending), [_ASK] * len(pending)
+    if batch and claude_enabled():
+        for i, row in enumerate(pending):
+            if progress_callback:
+                progress_callback(i + 1, len(pending), (row.get("address_raw") or "")[:55])
+            again = (row.get("lv_status") or "") in ("PASS", "CLEAN")
+            checks[i] = _check(row, refresh=again)
+        need = [i for i, c in enumerate(checks) if _wants_claude(c)]
+        asks = [lv_request(str(checks[i]["raw"]),
+                           "cz" if checks[i].get("market") == "cz" else "sk") for i in need]
+        for i, read in zip(need, ask_json_many(asks)):
+            reads[i] = read
+
     for i, row in enumerate(pending):
         addr = (row.get("address_raw") or "")[:55]
-        if progress_callback:
+        if progress_callback and checks[i] is None:
             progress_callback(i + 1, len(pending), addr)
 
         # A PASS due again is read from the cadastre itself: the cached copy
         # is the deed as it was when the tick was given.
         again = (row.get("lv_status") or "") in ("PASS", "CLEAN")
-        result = _check_and_store(row, refresh=True) if again else _check_and_store(row)
+        result = (_check_and_store(row, checked=checks[i], analysis=reads[i])
+                  if checks[i] is not None else
+                  _check_and_store(row, refresh=True) if again else _check_and_store(row))
         if result["status"] == "REJECT":
             rejected += 1
             log.warning(f"  ❌ {addr} — {result['detail']}")

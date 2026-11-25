@@ -398,6 +398,11 @@ GOOGLE_API_KEY    = os.getenv("GOOGLE_PLACES_API_KEY", "")
 # ScraperAPI key — bypasses IP blocks on nehnutelnosti/bazos when running
 # from a server/cloud environment. Free tier: https://www.scraperapi.com
 SCRAPER_API_KEY   = os.getenv("SCRAPER_API_KEY", "")
+# fallback (direct first, ScraperAPI for a site that refuses it), always, off.
+SCRAPER_API_MODE  = os.getenv("SCRAPER_API_MODE", "fallback")
+# EF2: a market's portals are read at the same time (each keeps its own
+# pauses); 0 reads them one after another.
+PORTALS_SIDE_BY_SIDE = os.getenv("PORTALS_SIDE_BY_SIDE", "1").strip() != "0"
 
 # Anthropic Claude — optional cloud LLM for listing enrichment (parsing Slovak
 # free-text descriptions, normalising blank districts, structured LV analysis).
@@ -413,6 +418,13 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 # longer read: copied from .env.example it pinned every task to one model.)
 ANTHROPIC_MODEL_BULK = os.getenv("ANTHROPIC_MODEL_BULK") or "claude-haiku-5-5"
 ANTHROPIC_MODEL_LV   = os.getenv("ANTHROPIC_MODEL_LV") or "claude-opus-5-5"
+# EF3: the daily run sends its Claude reads (ads, addresses, title deeds) as one
+# Message Batch per step, at half the price, and waits at most this many
+# minutes for it; what it hasn't answered by then is asked one by one. The
+# dashboard's buttons always ask straight away. ANTHROPIC_BATCH=0: never batch.
+ANTHROPIC_BATCH          = os.getenv("ANTHROPIC_BATCH", "1").strip() != "0"
+ANTHROPIC_BATCH_WAIT_MIN = _env_float("ANTHROPIC_BATCH_WAIT_MIN", 20)
+ANTHROPIC_BATCH_MIN      = _env_int("ANTHROPIC_BATCH_MIN", 2)
 
 # ── Scraper ───────────────────────────────────────────────────────────────────
 SCRAPE_DELAY_SEC       = 2.5
@@ -684,4 +696,11 @@ LOGS_DIR       = os.path.join(BASE_DIR, "logs")
 # Daily database copies and data exports (modules/backup). In Docker this is
 # a folder on the host (docker-compose.yml), outside the sovereign_data volume.
 BACKUP_DIR     = os.path.join(BASE_DIR, "backups")
-BACKUP_KEEP    = _env_int("BACKUP_KEEP", 14)   # days of each kept
+# Database copies and data exports kept (modules/backup.keep_days): the newest
+# DAILY days, then the newest of each of the last WEEKLY weeks and MONTHLY
+# months. An older .env's BACKUP_KEEP still sets the daily count; it also caps
+# the copies saved before a restore.
+BACKUP_KEEP         = _env_int("BACKUP_KEEP", 14)
+BACKUP_KEEP_DAILY   = _env_int("BACKUP_KEEP_DAILY", _env_int("BACKUP_KEEP", 7))
+BACKUP_KEEP_WEEKLY  = _env_int("BACKUP_KEEP_WEEKLY", 4)
+BACKUP_KEEP_MONTHLY = _env_int("BACKUP_KEEP_MONTHLY", 6)

@@ -23,7 +23,8 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from database import get_unparsed_descriptions, update_description_features
-from modules.llm_enrichment import is_enabled, parse_description
+from modules.llm_enrichment import (ask_json_many, description_request, is_enabled,
+                                    parse_description)
 
 log = logging.getLogger(__name__)
 
@@ -71,8 +72,10 @@ def _to_features(parsed: dict) -> dict:
 
 
 def run_description_enrichment(limit: int = 200, progress_callback=None,
-                               market: str | None = None) -> int:
+                               market: str | None = None, batch: bool = False) -> int:
     """Parse descriptions for up to `limit` un-parsed active listings.
+    batch=True (the daily run) asks Claude for all of them in one Message
+    Batch at half the price (llm_enrichment.ask_json_many).
 
     Returns the number of descriptions successfully parsed and stored.
     """
@@ -87,14 +90,22 @@ def run_description_enrichment(limit: int = 200, progress_callback=None,
         return 0
 
     log.info(f"📝 Parsing {len(pending)} descriptions via Claude...")
+    batched = None
+    if batch:
+        asks = [description_request(r["description"], r.get("market") or "sk") for r in pending]
+        got = iter(ask_json_many([a for a in asks if a]))
+        batched = [next(got) if a else None for a in asks]
     parsed_n = 0
     for i, row in enumerate(pending, 1):
         if progress_callback:
             progress_callback(i, len(pending))
 
         row_market = row.get("market") or "sk"
-        result = (parse_description(row["description"]) if row_market == "sk"
-                  else parse_description(row["description"], market=row_market))
+        if batched is not None:
+            result = batched[i - 1]
+        else:
+            result = (parse_description(row["description"]) if row_market == "sk"
+                      else parse_description(row["description"], market=row_market))
         if not result:
             # Leave desc_parsed=0 so a later run retries; `limit` caps the cost.
             continue
