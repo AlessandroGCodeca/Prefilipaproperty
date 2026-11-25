@@ -47,7 +47,7 @@ jobs:
           # which skip here. streamlit stays:
           # tests/test_app_smoke.py runs the dashboard script with it.
           grep -v -E "^playwright" requirements.txt > requirements-test.txt
-          pip install -r requirements-test.txt pytest ruff
+          pip install -r requirements-test.txt pytest pytest-xdist ruff
 
       - name: Check requirements.txt resolves
         # The install above leaves playwright out, so a pin pip
@@ -61,7 +61,9 @@ jobs:
         run: ruff check . --output-format=github
 
       - name: Run tests
-        run: pytest tests/ -v --tb=short
+        # On every core the runner has (pytest-xdist): the Windows job spent
+        # nearly 13 of its 14 minutes running the tests one at a time.
+        run: pytest tests/ -n auto -v --tb=short
 
   browser:
     # The job above leaves Playwright out, so on its own a Playwright or
