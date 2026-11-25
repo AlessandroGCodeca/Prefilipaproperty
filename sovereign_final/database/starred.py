@@ -45,9 +45,11 @@ def get_followed() -> list[dict]:
     """The flats you follow, active or not: the starred ones and the ones in
     a deal stage that isn't CLOSED or PASSED. With "stage" (or None) and
     "starred" (0/1)."""
+    from database.schema import _ensure_market_columns
     conn = _db.get_conn()
     try:
         _ensure(conn)
+        _ensure_market_columns(conn)        # an older database had no market column
         staged = _db._has_table(conn, "deal_stages")
         stage_col = "d.stage" if staged else "NULL"
         join = "LEFT JOIN deal_stages d ON d.listing_id = l.id" if staged else ""

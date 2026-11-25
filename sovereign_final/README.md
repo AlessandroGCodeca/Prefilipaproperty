@@ -890,9 +890,12 @@ send one Telegram message with what is new:
   PASSED), and whether the new price is inside max 🟡;
 - **problems** — a run that failed with no retry left, a portal gone quiet
   (`ALERT_FAILURES=0` turns these off);
-- **a flat you follow that left the portals** — starred, or in a deal stage
-  that isn't CLOSED or PASSED: sold or withdrawn? Once each (TODAY lists the
-  last 30 days' too).
+- **a flat you follow that the dashboard retired** as gone from its portal —
+  starred, or in a deal stage that isn't CLOSED or PASSED: sold or withdrawn?
+  Once each. Only retired flats (its page said it's gone, or 21 days unseen):
+  the scrapers read a set number of result pages, so a flat merely unseen for
+  a few days may still be listed. TODAY lists both, the unseen ones with
+  "still listed?".
 
 Once a week, with the first run on or after Monday (`ALERT_DIGEST_DAY`, 0 =
 Monday … 6 = Sunday), a **weekly digest**: what is on the dashboard by class,

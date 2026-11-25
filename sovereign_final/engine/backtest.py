@@ -289,10 +289,17 @@ def days_on_market(market: str = "sk", days: int = 180) -> list[dict]:
     return sorted(out, key=lambda r: (-r["Left"], -r["Still listed"], r["District key"]))
 
 
-def gone_followed(within_days: int | None = None) -> list[dict]:
+def gone_followed(within_days: int | None = None, retired_only: bool = False) -> list[dict]:
     """The flats you follow (starred, or in an open deal stage) that have
-    left the portals (is_gone), newest departure first, each with
-    "_days_listed" and "_last_seen" (a datetime). within_days: only the ones
+    left the portals or may have (is_gone), newest departure first, each with
+    "_days_listed", "_last_seen" (a datetime), "_unseen_days" and "_retired".
+
+    _retired: the dashboard itself retired the flat (is_active 0: unseen for
+    the 21 days of database.deactivate_stale_listings, or its own page said it
+    is gone). Otherwise it is only unseen for GONE_AFTER_DAYS: the scrapers
+    read a set number of result pages, so a flat further down a portal's
+    results can go unseen for days and still be for sale. retired_only:
+    leave those out (the Telegram notice does). within_days: only the ones
     last seen that recently."""
     rows = _db.get_followed()
     if not rows:
@@ -308,8 +315,13 @@ def gone_followed(within_days: int | None = None) -> list[dict]:
         newest = newest_by.get(r.get("market") or "sk")
         if not last or not is_gone(r.get("is_active"), last, newest):
             continue
+        retired = not r.get("is_active")
+        if retired_only and not retired:
+            continue
         if within_days is not None and newest and (newest - last).days > within_days:
             continue
-        out.append({**r, "_last_seen": last,
+        out.append({**r, "_last_seen": last, "_retired": retired,
+                    "_unseen_days": (round((newest - last).total_seconds() / 86400)
+                                     if newest else None),
                     "_days_listed": max((last - first).days, 0) if first else None})
     return sorted(out, key=lambda r: r["_last_seen"], reverse=True)

@@ -86,7 +86,7 @@ def _digest(items) -> str:
     """A short, stable digest of a sequence, for a widget key that has to
     change when the rows or options behind the widget change."""
     import hashlib
-    return hashlib.sha1("\x1f".join(map(str, items)).encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha1("\x1f".join(map(str, items)).encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
 
 def _local_stamp(iso: str | None) -> tuple[str, str]:
     """A stored UTC timestamp in Bratislava time — the time the draft's own

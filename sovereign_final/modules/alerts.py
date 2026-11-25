@@ -17,7 +17,8 @@ chat with what is new since the last one:
   - with config.ALERT_FAILURES: a market whose run failed with no retry left,
     and a portal gone quiet (database.quiet_portals), each once;
   - a flat you follow (starred, or in a deal stage that isn't CLOSED or
-    PASSED) that has gone from the portals — sold or withdrawn — once (S18).
+    PASSED) that the dashboard has retired as gone from its portal — sold or
+    withdrawn? — once (S18).
 
 Once a week, with the first run on or after ALERT_DIGEST_DAY (Monday by
 default), a digest of its own: what is on the dashboard, what came and went
@@ -393,10 +394,12 @@ def build_message(deals, cuts, issues, now: datetime | None = None,
 
 # ── The pipeline's step ───────────────────────────────────────────────────────
 def gone_news() -> list[dict]:
-    """Followed flats gone from the portals that weren't announced yet. The
-    first time, the ones already gone are noted, not messaged."""
+    """Followed flats the dashboard has retired (gone from their portal) that
+    weren't announced yet. Only retired ones: a flat merely unseen for a few
+    days may be further down the results than the scrapers read. The first
+    time, the ones already gone are noted, not messaged."""
     from engine.backtest import gone_followed
-    gone, told = gone_followed(), _sent("gone")
+    gone, told = gone_followed(retired_only=True), _sent("gone")
     if not told:
         _mark_sent([("gone", "__baseline__")] + [("gone", g["id"]) for g in gone])
         return []
@@ -495,7 +498,8 @@ def digest_figures(now: datetime) -> dict:
     finally:
         conn.close()
     followed = _db.get_followed()
-    gone = [g for g in gone_followed() if g["_last_seen"].isoformat() >= week_ago]
+    gone = [g for g in gone_followed(retired_only=True)
+            if g["_last_seen"].isoformat() >= week_ago]
     failed = _failed_portals()
     best = sorted((l for l in qualifying_deals() if (l.get("scraped_at") or "") >= week_ago),
                   key=lambda l: -(l["_best"] if l.get("_best") is not None else -1e12))[:3]

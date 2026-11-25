@@ -267,7 +267,7 @@ def _build_listing_from_detail(url: str, html: str, now: str) -> dict | None:
     # The listing's own map pin, which the LV filter finds the building by.
     pin = ld_data.get("pin") or pin_from_meta(html)
 
-    uid = hashlib.md5(url.encode()).hexdigest()
+    uid = hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()
     return {
         "id": uid, "source": "topreality", "url": url, "url_hash": uid,
         "title": (title or "")[:200], "description": (description or "")[:8000],

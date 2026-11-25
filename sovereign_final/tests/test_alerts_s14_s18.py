@@ -18,6 +18,11 @@ def _gone_flat(db, lid, days_ago_seen=10, market="sk", **over):
                                    last_seen_at=_now(days_ago_seen), market=market, **over))
 
 
+def _retire(db, lid):
+    """The dashboard retires it (its page said it's gone, or 21 days unseen)."""
+    db.deactivate_listings([f"https://example.sk/{lid}"])
+
+
 def _fresh(db, lid, market="sk"):
     db.upsert_listing(make_listing(lid, price_eur=100_000.0, scraped_at=_now(2),
                                    last_seen_at=_now(), market=market))
@@ -55,6 +60,11 @@ def test_only_followed_flats_count(db):
     assert {g["id"] for g in gone} == {"starred", "viewing"}
     g = next(g for g in gone if g["id"] == "viewing")
     assert g["stage"] == "VIEWING" and g["_days_listed"] == 30
+    assert not g["_retired"] and g["_unseen_days"] == 10
+    # Retired only: the flats the dashboard itself took off.
+    assert backtest.gone_followed(retired_only=True) == []
+    _retire(db, "viewing")
+    assert [g["id"] for g in backtest.gone_followed(retired_only=True)] == ["viewing"]
 
 
 def test_a_followed_flat_that_left_is_announced_once(db, tg):
@@ -62,11 +72,16 @@ def test_a_followed_flat_that_left_is_announced_once(db, tg):
     _fresh(db, "x")
     _gone_flat(db, "old")
     db.set_starred("old", True)
+    _retire(db, "old")
     alerts.run()                                   # first run: noted, not messaged
     alerts.run()
     assert not any("old" in m and "Gone from the portals" in m for m in tg.sent)
     _gone_flat(db, "v1", days_ago_seen=5, title="Byt na Vlčincoch")
     db.set_deal_stage("v1", "OFFER", "")
+    # Only unseen for 5 days: maybe further down the results than the
+    # scrapers read. No message for that.
+    assert alerts.run() == "nothing new"
+    _retire(db, "v1")
     assert "1 gone" in alerts.run()
     msg = tg.sent[-1]
     assert "Gone from the portals" in msg and "Byt na Vlčincoch" in msg and "[OFFER]" in msg
@@ -83,7 +98,9 @@ def test_today_lists_followed_flats_that_left(db, monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     md = " ".join(m.value for m in at.markdown)
     assert "Gone from the portals" in md and "Starred flat that went" in md
-    assert "up 34 days" in md
+    assert "up 34 days" in md and "not seen for 6 days: still listed?" in md
+    # Shown once: not again under Starred.
+    assert md.count("Starred flat that went") == 1
 
 
 def test_days_on_market_per_district(db):
@@ -121,6 +138,7 @@ def test_the_digest_says_what_is_there_and_what_changed(db, tg, monkeypatch, eve
     _add(db, "g1", title="A cheap flat")
     _gone_flat(db, "s1", days_ago_seen=4)
     db.set_starred("s1", True)
+    _retire(db, "s1")
     db.set_deal_stage("g1", "VIEWING", "")
     now = datetime.now(timezone.utc)
     text = alerts.build_digest(now, alerts.digest_figures(now))
@@ -136,3 +154,22 @@ def test_a_run_sends_the_digest_when_due(db, tg, monkeypatch):
     assert alerts.run().endswith("; weekly digest sent")
     assert "your week" in tg.sent[-1]
     assert not alerts.run().endswith("weekly digest sent")
+
+
+def test_followed_flats_on_a_database_from_before_markets(monkeypatch, tmp_path):
+    """A database whose listings table predates the market column: the
+    followed flats still read (and the alert run doesn't fall over)."""
+    import sqlite3
+    import database
+    path = str(tmp_path / "old.db")
+    conn = sqlite3.connect(path)
+    conn.execute("""CREATE TABLE listings (id TEXT PRIMARY KEY, title TEXT, district TEXT,
+        url TEXT, price_eur REAL, scraped_at TEXT, last_seen_at TEXT, is_active INTEGER)""")
+    conn.execute("INSERT INTO listings VALUES ('o1', 'Old flat', 'Žilina', 'https://x', "
+                 "90000, ?, ?, 0)", (_now(40), _now(9)))
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(database, "SQLITE_PATH", path)
+    database.set_starred("o1", True)
+    rows = database.get_followed()
+    assert rows[0]["id"] == "o1" and rows[0]["market"] == "sk" and rows[0]["starred"] == 1

@@ -506,7 +506,7 @@ def _parse_api_item(item: dict, now: str, require_url_field: bool = False) -> di
         # building by it (see scraper/geo.py).
         pin = pin_from_item(item)
 
-        uid = hashlib.md5(canon.encode()).hexdigest()
+        uid = hashlib.md5(canon.encode(), usedforsecurity=False).hexdigest()
         return {
             "id": uid, "source": "nehnutelnosti", "url": canon, "url_hash": uid,
             "title": str(title)[:200], "description": "",
@@ -625,14 +625,14 @@ def _parse_rsc_chunks(html: str) -> list[dict]:
         canon = _canonical_url(url)
         if canon not in seen_urls:
             seen_urls.add(canon)
-            uid = hashlib.md5(canon.encode()).hexdigest()
+            uid = hashlib.md5(canon.encode(), usedforsecurity=False).hexdigest()
             results.append({"_url": canon, "_uid": uid, "_href": url})
 
     for path in detail_paths:
         canon = _canonical_url(BASE + path)
         if canon not in seen_urls:
             seen_urls.add(canon)
-            uid = hashlib.md5(canon.encode()).hexdigest()
+            uid = hashlib.md5(canon.encode(), usedforsecurity=False).hexdigest()
             results.append({"_url": canon, "_uid": uid, "_href": BASE + path})
 
     return results
@@ -640,7 +640,7 @@ def _parse_rsc_chunks(html: str) -> list[dict]:
 
 def _minimal_listing(url: str, title: str, now: str) -> dict:
     canon = _canonical_url(url)
-    uid = hashlib.md5(canon.encode()).hexdigest()
+    uid = hashlib.md5(canon.encode(), usedforsecurity=False).hexdigest()
     # The card links /detail/{id}/{slug}, and the slug often names the town.
     # Everything downstream sees only canon, which has no slug, so read the
     # town out of it now. A detail-page address still takes precedence.
