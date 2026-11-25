@@ -400,3 +400,68 @@ def test_a_saved_search_becomes_an_alert_rule(populated_db):
     assert [r["name"] for r in rules] == ["Cheap Žilina"]
     at.sidebar.button(key="fl_rule").click().run()               # not twice
     assert len(populated_db.get_alert_rules()) == 1
+
+
+# ── UX2: find a flat by its link, id or words ────────────────────────────────
+def test_find_by_link_id_or_words():
+    from dashboard.find import find
+    rows = [{"id": "abc123xyz", "url": "https://www.topreality.sk/byt-123/?utm=x",
+             "title": "3-izbový byt, Ľudovíta Štúra", "address_raw": "Žilina", "district": "Žilina"},
+            {"id": "zzz999", "url": "https://reality.bazos.sk/inzerat/9/", "title": "Byt Nitra",
+             "address_raw": "", "district": "Nitra"}]
+    assert [r["id"] for r in find("https://topreality.sk/byt-123", rows)] == ["abc123xyz"]
+    assert [r["id"] for r in find("abc123", rows)] == ["abc123xyz"]
+    assert [r["id"] for r in find("ludovita stura zilina", rows)] == ["abc123xyz"]
+    assert find("https://reality.bazos.sk/inzerat/10/", rows) == []
+    assert find("   ", rows) == []
+
+
+def test_only_the_portals_own_hosts_are_read():
+    from dashboard.find import reader_for
+    assert reader_for("https://www.topreality.sk/x-123.html")[0] == "Topreality.sk"
+    assert reader_for("https://www.bezrealitky.cz/nemovitosti-byty-domy/123-nabidka-prodej-bytu")
+    for other in ("https://topreality.sk.evil.example/x", "https://evil.example/topreality.sk",
+                  "http://127.0.0.1/", "https://reality.bazos.sk/inzerat/1/"):
+        assert reader_for(other) is None
+
+
+def test_the_box_finds_a_flat_and_shows_its_summary(populated_db):
+    at = run_app()
+    at.text_input(key="find_q").input("g1").run()          # too short for an id: words
+    at.text_input(key="find_q").input("Trnava").run()
+    assert not at.exception, [e.value for e in at.exception]
+    show = [b for b in at.button if str(b.key).startswith("finds_")]
+    assert show
+    show[0].click().run()
+    assert any("pick-t" in m.value for m in at.markdown)
+
+
+def test_a_flat_the_filters_hide_is_listed_with_a_note(populated_db):
+    at = run_app()
+    at.sidebar.slider(key="fl_max_price").set_value(50_000).run()
+    at.text_input(key="find_q").input("Trnava").run()
+    assert any("hidden by the sidebar" in m.value for m in at.markdown)
+
+
+def test_an_untracked_topreality_link_can_be_read_on_the_spot(populated_db, monkeypatch):
+    from dashboard import find
+    from tests.conftest import make_listing
+    url = "https://www.topreality.sk/predaj-byt-zilina-r12345.html"
+    read = make_listing("tr12345", url=url, title="2-izbový byt, Vlčince",
+                        district="Žilina", price_eur=95_000.0, size_m2=52.0, source="topreality")
+    monkeypatch.setitem(find.READERS, "topreality.sk", ("Topreality.sk", lambda u: read))
+    at = run_app()
+    at.text_input(key="find_q").input(url).run()
+    at.button(key="find_read").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "tr12345" in {r["id"] for r in populated_db.get_all_active()}
+    assert any("Read from Topreality.sk and scored" in c.value for c in at.caption)
+
+
+def test_another_portals_link_is_not_fetched(populated_db, monkeypatch):
+    import requests
+    monkeypatch.setattr(requests, "get", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
+    at = run_app()
+    at.text_input(key="find_q").input("https://reality.bazos.sk/inzerat/77/").run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("read every morning" in i.value for i in at.info)
