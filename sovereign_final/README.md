@@ -929,7 +929,7 @@ send `/revoke` to @BotFather and put the new one in `.env`.
 | Key | Where | Enables |
 |-----|-------|---------|
 | MAPY_API_KEY | developer.mapy.com (free) | Mapy.com geocoder: Czech addresses to the house number (tried first for Czech listings, after Google for Slovak ones); shows a "Search by Mapy.com" credit |
-| GOOGLE_PLACES_API_KEY | console.cloud.google.com | Google geocoding/places + inline satellite view (OpenStreetMap is used without it) |
+| GOOGLE_PLACES_API_KEY | console.cloud.google.com → enable Places API (New), Geocoding API and **Maps Static API** (the satellite picture; HTTP 403 without it) | Google geocoding/places + inline satellite view (OpenStreetMap is used without it) |
 | CZ_CUZK_API_KEY | registrace.cuzk.gov.cz (free) | Czech LV check: the building under a listing's pin, its LV and pending proceedings |
 | TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID | @BotFather in Telegram (free) | Alerts after each run — see "Telegram alerts" |
 | HEALTHCHECK_URL | healthchecks.io (free) | An e-mail when the daily run is late or fails — see "Is the daily run happening?" |
