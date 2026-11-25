@@ -136,3 +136,41 @@ def test_scheduler_runs_when_the_refresh_raises(monkeypatch):
     monkeypatch.setattr(fx_rate, "refresh", boom)
     monkeypatch.setattr(scheduler, "run_pipeline", lambda **k: True)
     assert scheduler.run_all_markets(holder="test", which=["sk"]) == {"sk": True}
+
+
+# ── The ECB as a fallback (row 12 of section 8) ──────────────────────────────
+ECB_CSV = (
+    "KEY,FREQ,CURRENCY,CURRENCY_DENOM,EXR_TYPE,EXR_SUFFIX,TIME_PERIOD,OBS_VALUE,OBS_STATUS\n"
+    "EXR.D.CZK.EUR.SP00.A,D,CZK,EUR,SP00,A,2026-11-23,24.455,A\n"
+    "EXR.D.CZK.EUR.SP00.A,D,CZK,EUR,SP00,A,2026-11-24,24.428,A\n")
+
+
+def test_the_ecb_answer_is_read():
+    from datetime import date
+    rate, fixed = fx_rate.parse_ecb(ECB_CSV)
+    assert rate == 24.428 and fixed == date(2026, 11, 24)
+    for bad in ("", "KEY,TIME_PERIOD,OBS_VALUE\n", ECB_CSV.replace("24.428", "244.28")):
+        with pytest.raises(fx_rate.FxError):
+            fx_rate.parse_ecb(bad)
+
+
+def test_the_ecb_stands_in_when_the_cnb_fails(monkeypatch):
+    import config
+    monkeypatch.setattr(fx_rate, "_fetch_ecb", lambda timeout=15: ECB_CSV)
+    assert fx_rate.refresh() is True
+    assert config.CZK_PER_EUR == 24.428 and config.FX_RATE_DATE == "2026-11-24"
+    assert config.FX_RATE_SOURCE == fx_rate.ECB_SOURCE
+
+
+def test_the_cnb_comes_first(monkeypatch):
+    import config
+    monkeypatch.setattr(fx_rate, "_fetch", lambda timeout=15: CNB)
+    monkeypatch.setattr(fx_rate, "_fetch_ecb", lambda timeout=15: pytest.fail("ECB not asked"))
+    assert fx_rate.refresh() is True and config.FX_RATE_SOURCE == fx_rate.SOURCE
+
+
+def test_neither_answering_keeps_the_last_rate(monkeypatch):
+    import config
+    before = (config.CZK_PER_EUR, config.FX_RATE_DATE)
+    assert fx_rate.refresh() is False
+    assert (config.CZK_PER_EUR, config.FX_RATE_DATE) == before

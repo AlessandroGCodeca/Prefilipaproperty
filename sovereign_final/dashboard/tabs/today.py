@@ -3,6 +3,11 @@ dashboard/tabs/today.py — TODAY, the first page (D1): what changed since you
 last looked and what needs you, each line one tap from its card. Above it,
 until everything is set up, the setup checklist (D11).
 
+Flats you follow that left the portals in the last GONE_SHOWN_DAYS days are
+listed too (S18): retired by the dashboard (sold or withdrawn?), or not seen
+for a few days (worth checking it is still listed). They are left out of the
+other sections.
+
 "Since you last looked" is the time of the previous visit, kept in the
 database (app_state 'last_visit'), so it holds across devices; a first visit
 looks back a week.
@@ -18,6 +23,7 @@ import streamlit as st
 from dashboard.fmt import amt, esc, sgn
 
 SECTION_MAX = 8
+GONE_SHOWN_DAYS = 30
 LV_STALE_DAYS = 30
 ACTIVE_STAGES = ("VIEWING", "OFFER", "NEGOTIATING", "DUE DILIGENCE", "NOTARY")
 
@@ -139,6 +145,26 @@ def _row(l, v, section: str) -> None:
             st.link_button("Listing", safe_url(l.get("url")), width="stretch")
 
 
+def _gone_row(g: dict) -> None:
+    from dashboard.fmt import amt, safe_url
+    tag = g.get("stage") or "★ starred"
+    days = f" · up {g['_days_listed']} days" if g.get("_days_listed") is not None else ""
+    state = ("gone from its portal" if g.get("_retired") else
+             f"not seen for {g['_unseen_days']} days: still listed?")
+    c1, c2 = st.columns([5, 1], vertical_alignment="center")
+    with c1:
+        st.markdown(
+            f'<div class="td-row"><div class="td-t">{esc((g.get("title") or g.get("district") or "—")[:70])}'
+            f' <span class="muted">· {esc(tag)}</span></div>'
+            f'<div class="td-m">{esc(state)} · last asked {amt(g, g.get("price_eur") or 0)}'
+            f'{esc(days)} · '
+            f'last seen {g["_last_seen"].day} {g["_last_seen"]:%b}</div></div>',
+            unsafe_allow_html=True)
+    with c2:
+        if g.get("url"):
+            st.link_button("Listing", safe_url(g.get("url")), width="stretch")
+
+
 # ── Setup checklist (D11) ────────────────────────────────────────────────────
 def setup_items() -> list[tuple[str, bool, str]]:
     """(what, done, how) for each part of the setup."""
@@ -188,8 +214,14 @@ def render(v) -> None:
                 "not the demo data.")
         return
     from database import get_starred, portal_health
+    from engine.backtest import gone_followed
     since = since_last_visit()
-    listings = v.greens + v.yellows + v.whites
+    try:
+        gone = gone_followed(within_days=GONE_SHOWN_DAYS)
+    except Exception:
+        gone = []
+    gone_ids = {g["id"] for g in gone}
+    listings = [l for l in v.greens + v.yellows + v.whites if l.get("id") not in gone_ids]
     secs = sections(listings, v, since, get_starred())
     failed = failed_portals(portal_health(days=2))
     local = since.astimezone()
@@ -202,8 +234,16 @@ def render(v) -> None:
     if failed:
         st.warning(f"{', '.join(failed)}: the latest run failed or found nothing. "
                    "Open DIAGNOSTICS → TEST SITES in the sidebar to see why.")
+    # S18: flats you follow that left the portals, or may have.
+    if gone:
+        st.markdown(f'<div class="td-h">Gone from the portals? <span class="muted">· {len(gone)} · '
+                    f'flats you follow, retired or not seen lately (last {GONE_SHOWN_DAYS} '
+                    f'days)</span></div>', unsafe_allow_html=True)
+        for g in gone[:SECTION_MAX]:
+            _gone_row(g)
     if not secs:
-        st.success("Nothing new needs you. The full list is in DEALS → ACTIVE SNAG LIST.")
+        if not gone:
+            st.success("Nothing new needs you. The full list is in DEALS → ACTIVE SNAG LIST.")
         return
     for title, hint, ls in secs:
         st.markdown(f'<div class="td-h">{esc(title)} <span class="muted">· {len(ls)} · '

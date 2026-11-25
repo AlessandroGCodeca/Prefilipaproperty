@@ -7,6 +7,9 @@ to be typed into config.py by hand and went stale. Now:
 
   - refresh() reads the ČNB daily fixing (denni_kurz.txt, published each
     working day after 14:30 Prague time) and saves it to data/fx_rate.json.
+    When the ČNB can't be read, the ECB's reference rate for CZK (the ECB
+    Data Portal, no key) is used instead, so one bank's outage doesn't leave
+    the rate to go stale.
     The scheduler calls it before each run; the dashboard at most hourly.
   - sync() loads that file into config.CZK_PER_EUR / FX_RATE_DATE /
     FX_RATE_SOURCE, so every process (dashboard, scheduler — they share the
@@ -34,6 +37,9 @@ log = logging.getLogger(__name__)
 CNB_URL = ("https://www.cnb.cz/cs/financni-trhy/devizovy-trh/kurzy-devizoveho-trhu/"
            "kurzy-devizoveho-trhu/denni_kurz.txt")
 SOURCE = "ČNB kurzy devizového trhu"
+ECB_URL = ("https://data-api.ecb.europa.eu/service/data/EXR/"
+           "D.CZK.EUR.SP00.A?lastNObservations=5&format=csvdata")
+ECB_SOURCE = "ECB reference rate"
 CACHE_PATH = os.path.join(config.DATA_DIR, "fx_rate.json")
 FX_STALE_DAYS = 7          # older than this, the dashboard warns
 REFETCH_AFTER_S = 6 * 3600  # refresh_if_due(): at most this often
@@ -84,6 +90,36 @@ def parse_cnb(text: str, code: str = "EUR") -> tuple[float, date]:
                 raise FxError(f"implausible {code} rate in the ČNB file: {line[:60]!r}")
             return rate / amount, fixed
     raise FxError(f"no {code} row in the ČNB file")
+
+
+def parse_ecb(text: str) -> tuple[float, date]:
+    """(CZK per EUR, date) of the newest observation in the ECB's csvdata
+    answer for EXR.D.CZK.EUR.SP00.A."""
+    import csv
+    import io
+    rows = [r for r in csv.DictReader(io.StringIO(text or ""))
+            if (r.get("TIME_PERIOD") or "").strip() and (r.get("OBS_VALUE") or "").strip()]
+    if not rows:
+        raise FxError("no observation in the ECB answer")
+    newest = max(rows, key=lambda r: r["TIME_PERIOD"])
+    try:
+        rate = float(newest["OBS_VALUE"])
+        fixed = date.fromisoformat(newest["TIME_PERIOD"].strip())
+    except ValueError:
+        raise FxError(f"unreadable ECB row: {newest.get('OBS_VALUE')!r}") from None
+    if not 15 < rate < 40:
+        raise FxError(f"implausible ECB rate {rate}")
+    return rate, fixed
+
+
+def _fetch_ecb(timeout: float = 15) -> str:
+    import requests
+    with requests.Session() as s:
+        r = s.get(ECB_URL, timeout=timeout,
+                  headers={"Accept": "text/csv",
+                           "User-Agent": "SovereignDashboard/1.0 (exchange rate)"})
+        r.raise_for_status()
+        return r.text
 
 
 def _fetch(timeout: float = 15) -> str:
@@ -150,13 +186,22 @@ def refresh(timeout: float = 15) -> bool:
     fetched. Never raises: a failure is logged and the last rate stays."""
     if pinned():
         return False
+    source = SOURCE
     try:
         rate, fixed = parse_cnb(_fetch(timeout))
     except Exception as e:
-        log.warning(f"EUR/CZK: the ČNB rate couldn't be fetched ({type(e).__name__}: {e}); "
-                    f"keeping 1 € = {config.CZK_PER_EUR:.3f} Kč of {config.FX_RATE_DATE}")
-        return False
-    d = {"czk_per_eur": round(rate, 4), "date": fixed.isoformat(), "source": SOURCE,
+        cnb_error = f"{type(e).__name__}: {e}"
+        try:
+            rate, fixed = parse_ecb(_fetch_ecb(timeout))
+            source = ECB_SOURCE
+            log.warning(f"EUR/CZK: the ČNB rate couldn't be fetched ({cnb_error}); "
+                        f"using the {ECB_SOURCE} instead")
+        except Exception as e2:
+            log.warning(f"EUR/CZK: neither the ČNB ({cnb_error}) nor the ECB "
+                        f"({type(e2).__name__}: {e2}) answered; keeping "
+                        f"1 € = {config.CZK_PER_EUR:.3f} Kč of {config.FX_RATE_DATE}")
+            return False
+    d = {"czk_per_eur": round(rate, 4), "date": fixed.isoformat(), "source": source,
          "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     with _lock:
         try:
@@ -164,7 +209,7 @@ def refresh(timeout: float = 15) -> bool:
         except OSError as e:
             log.warning(f"EUR/CZK: the rate couldn't be saved ({e}); using it in this process only")
         _apply(d)
-    log.info(f"EUR/CZK: 1 € = {rate:.3f} Kč ({SOURCE}, {fixed.isoformat()})")
+    log.info(f"EUR/CZK: 1 € = {rate:.3f} Kč ({source}, {fixed.isoformat()})")
     return True
 
 

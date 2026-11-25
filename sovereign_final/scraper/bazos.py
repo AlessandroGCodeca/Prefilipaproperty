@@ -134,7 +134,7 @@ def _build_listing_from_card(card, link) -> dict | None:
     if img and not img.startswith("http"):
         img = "https:" + img if img.startswith("//") else BASE + img
 
-    uid = hashlib.md5(href.encode()).hexdigest()
+    uid = hashlib.md5(href.encode(), usedforsecurity=False).hexdigest()
     now = datetime.now(timezone.utc).isoformat()
     return {
         "id": uid, "source": "bazos", "url": href, "url_hash": uid,

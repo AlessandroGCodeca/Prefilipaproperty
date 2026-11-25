@@ -145,7 +145,7 @@ def memo_fingerprint(l: dict) -> str:
     own = sorted((k, repr(v)) for k, v in l.items() if k != "_copies")
     copies = [(c.get("id"), c.get("source"), c.get("price_eur"), c.get("url"),
                c.get("scraped_at")) for c in (l.get("_copies") or [])]
-    return hashlib.sha1(repr((own, copies)).encode("utf-8", "replace")).hexdigest()
+    return hashlib.sha1(repr((own, copies)).encode("utf-8", "replace"), usedforsecurity=False).hexdigest()
 
 
 def build_memo_pdf(l: dict, *, price_history: dict | None = None,

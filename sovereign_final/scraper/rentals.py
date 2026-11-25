@@ -170,7 +170,7 @@ def build_rental(source: str, url: str, title: str, text: str, location: str = "
     if not district:
         return None                      # a comp with no place is no comp
     now = now or datetime.now(timezone.utc).isoformat()
-    uid = hashlib.md5(url.encode()).hexdigest()
+    uid = hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()
     return {
         "id": uid, "source": source, "url": url, "title": (title or "")[:200],
         "rent_eur": float(rent), "size_m2": float(size),

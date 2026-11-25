@@ -384,6 +384,12 @@ ALERT_MIN_SURPLUS = (float(os.getenv("ALERT_MIN_SURPLUS").strip())
                      if (os.getenv("ALERT_MIN_SURPLUS") or "").strip() else None)
 # Also message a run that failed for good, and a portal gone quiet.
 ALERT_FAILURES = (os.getenv("ALERT_FAILURES") or "1").strip().lower() in ("1", "true", "yes")
+# A weekly digest on Telegram (S14): what is on the dashboard, what came and
+# went that week, the portals. Sent with the first daily run on or after
+# ALERT_DIGEST_DAY (0 = Monday … 6 = Sunday), once a week. ALERT_DIGEST=0
+# turns it off.
+ALERT_DIGEST = (os.getenv("ALERT_DIGEST") or "1").strip().lower() in ("1", "true", "yes")
+ALERT_DIGEST_DAY = min(max(_env_int("ALERT_DIGEST_DAY", 0), 0), 6)
 
 # ── APIs ──────────────────────────────────────────────────────────────────────
 GOOGLE_API_KEY    = os.getenv("GOOGLE_PLACES_API_KEY", "")

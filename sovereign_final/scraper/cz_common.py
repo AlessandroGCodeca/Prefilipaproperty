@@ -363,7 +363,7 @@ def is_excluded_cz(*texts: str) -> bool:
 def listing_id(source: str, key: str) -> str:
     """A stable id from the portal's own listing id — a slug in the URL can
     change, the id doesn't."""
-    return hashlib.md5(f"{source}:{key}".encode()).hexdigest()
+    return hashlib.md5(f"{source}:{key}".encode(), usedforsecurity=False).hexdigest()
 
 
 def listing_record(source: str, key: str, url: str, *, title: str = "",

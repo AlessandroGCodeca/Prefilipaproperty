@@ -356,10 +356,16 @@ ST_THEME_NAMES = {"dark": "Dark", "light": "Light", "auto": "System"}
 # Puts the theme chosen in DISPLAY (dashboard/prefs.py, kept in the database)
 # into Streamlit's slot and reloads once if it wasn't there; then marks <html>
 # with the theme Streamlit is showing (its header's color-scheme), which the
-# CSS tokens above follow. No data in it but the theme's name.
+# CSS tokens above follow. Right after a switch by a logged-in user it also
+# carries a one-time resume ticket (dashboard/login.py) into a 60-second
+# cookie, so the reload doesn't ask for the password again. No other data.
 THEME_JS = """<script>
 (() => {
   const want = __WANT__;
+  const ticket = __TICKET__;
+  // A resume ticket the server has read already (it came with this page's
+  // first request): it is good once, so it goes.
+  document.cookie = "sv_resume=; Max-Age=0; Path=/; SameSite=Strict";
   const key = "stActiveTheme-" + window.location.pathname + "-v2";
   let have = null;
   try { have = JSON.parse(window.localStorage.getItem(key)); } catch (e) {}
@@ -370,6 +376,10 @@ THEME_JS = """<script>
       try {
         window.localStorage.setItem(key, JSON.stringify(want));
         window.sessionStorage.setItem("svThemeTries", String(tries + 1));
+        if (ticket) {
+          document.cookie = "sv_resume=" + ticket + "; Max-Age=60; Path=/; SameSite=Strict" +
+            (window.location.protocol === "https:" ? "; Secure" : "");
+        }
         window.location.reload();
         return;
       } catch (e) {}
@@ -397,4 +407,9 @@ def inject() -> None:
     from dashboard import prefs
     st.markdown(CSS, unsafe_allow_html=True)
     want = ST_THEME_NAMES[prefs.get("theme")]
-    st.html(THEME_JS.replace("__WANT__", json.dumps(want)), unsafe_allow_javascript=True)
+    ticket = ""
+    if st.session_state.pop("_theme_reload", False) and st.session_state.get("_authed"):
+        from dashboard.login import issue_resume_ticket
+        ticket = issue_resume_ticket()
+    st.html(THEME_JS.replace("__WANT__", json.dumps(want)).replace("__TICKET__", json.dumps(ticket)),
+            unsafe_allow_javascript=True)

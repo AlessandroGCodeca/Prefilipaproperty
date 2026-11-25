@@ -156,7 +156,7 @@ def build_rental(source: str, url: str, title: str, text: str, location: str = "
         return None                      # a comp with no place is no comp
     now = now or datetime.now(timezone.utc).isoformat()
     return {
-        "id": hashlib.md5(url.encode()).hexdigest(), "source": source, "url": url,
+        "id": hashlib.md5(url.encode(), usedforsecurity=False).hexdigest(), "source": source, "url": url,
         "title": (title or "")[:200], "rent_eur": float(rent), "size_m2": float(size),
         "rooms": rooms_cz(title) or rooms_cz(text), "district": district,
         "rent_key": match_rent_key(district),

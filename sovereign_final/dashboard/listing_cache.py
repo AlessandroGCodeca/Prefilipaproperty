@@ -140,10 +140,27 @@ def rent_types() -> list[dict]:
         return []
 
 
+@st.cache_data(ttl=LISTINGS_TTL_S, show_spinner=False)
+def _days_on_market(market: str, db_path: str) -> dict[str, dict]:
+    from engine.backtest import days_on_market as dom
+    return {r["District key"]: r for r in dom(market)}
+
+
+def days_on_market(market: str = "sk") -> dict[str, dict]:
+    """engine.backtest.days_on_market by district key, cached as the listing
+    load is; {} on any error (the card's hint is then left out)."""
+    import database
+    try:
+        return _days_on_market(market, database.SQLITE_PATH)
+    except Exception:
+        return {}
+
+
 def clear_listing_cache() -> None:
     """After the dashboard changes listings: the next load reads the database."""
     _load_active.clear()
     _rent_types.clear()
+    _days_on_market.clear()
     _waiting_for_rent.clear()
     _quiet_portals.clear()
     _portal_health.clear()

@@ -77,7 +77,7 @@ LISTINGS = [
 ]
 
 def _uid(suffix):
-    return hashlib.md5(f"sample:{suffix}".encode()).hexdigest()
+    return hashlib.md5(f"sample:{suffix}".encode(), usedforsecurity=False).hexdigest()
 
 def seed():
     init_db()
