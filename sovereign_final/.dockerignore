@@ -6,6 +6,8 @@
 # (env_file), so it never needs to be — and must never be — in an image layer.
 .env
 .env.*
+# This computer's own compose settings (its folder paths): not needed in an image.
+docker-compose.override.yml
 .git
 data/
 logs/

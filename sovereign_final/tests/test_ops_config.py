@@ -68,3 +68,36 @@ def test_restart_only_stops_its_own_streamlit():
     code = [ln for ln in _read("restart.sh").splitlines() if not ln.lstrip().startswith("#")]
     assert not [ln for ln in code if "pkill" in ln]
     assert any("streamlit.pid" in ln for ln in code)
+
+
+# ── The backups' off-site folder in Docker ───────────────────────────────────
+OVERRIDE = "docker-compose.override.yml"
+
+
+def test_this_computers_compose_settings_stay_out_of_git_and_the_image():
+    # The override file names a folder on this computer (its user name, its
+    # iCloud path): never in the public repository, nor in an image layer.
+    with open(os.path.join(os.path.dirname(ROOT), ".gitignore"), encoding="utf-8") as f:
+        gitignore = f.read().splitlines()
+    assert OVERRIDE in gitignore
+    assert OVERRIDE in _read(".dockerignore").splitlines()
+
+
+def test_the_override_example_mounts_a_placeholder_folder_in_both_containers():
+    example = "\n".join(ln for ln in _read("docker-compose.override.example.yml").splitlines()
+                        if not ln.lstrip().startswith("#"))
+    sources = re.findall(r"^\s*source:\s*(.+?)\s*$", example, re.M)
+    assert len(sources) == 2 and all("/Users/YOU/" in s for s in sources), sources
+    assert re.findall(r"^\s*target:\s*(\S+)\s*$", example, re.M) == ["/offsite", "/offsite"]
+    # A missing folder stops the containers rather than Docker making an empty
+    # one on this computer that nothing syncs.
+    assert example.count("create_host_path: false") == 2
+    for service in ("dashboard:", "scheduler:"):
+        assert re.search(rf"^  {service}$", example, re.M), service
+
+
+def test_the_docs_say_how_to_use_it():
+    assert "docker-compose.override.example.yml" in _read("docker-compose.yml")
+    env = _read(".env.example")
+    assert "BACKUP_COPY_DIR=/offsite" in env and "double quotes" in env
+    assert "docker-compose.override.example.yml" in _read("README.md")

@@ -32,6 +32,11 @@ logs/
 # Database backups (sovereign_final/modules/backup.py)
 backups/
 
+# Docker Compose settings for this computer only, such as the folder the
+# backups are copied to (sovereign_final/docker-compose.override.example.yml).
+# They name your own paths, so they stay out of the repository.
+docker-compose.override.yml
+
 # OS
 .DS_Store
 Thumbs.db
