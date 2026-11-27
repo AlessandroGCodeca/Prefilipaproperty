@@ -1,0 +1,34 @@
+# The backups' off-site copy, in Docker (README, "Backups").
+#
+# The containers can't see this computer's folders, so BACKUP_COPY_DIR set to
+# an iCloud Drive or USB path in .env makes every run say "off-site copy
+# skipped". This file shows that folder to both containers as /offsite:
+#
+#   1. copy this file to docker-compose.override.yml, next to it (git and
+#      the Docker build both ignore that name: it holds your own path);
+#   2. replace the source path below with your folder, in both places;
+#   3. in .env, set BACKUP_COPY_DIR=/offsite;
+#   4. docker compose up -d (Compose reads the override file by itself).
+#
+# create_host_path: false makes the containers refuse to start when the folder
+# is missing (the disk unplugged, a typo), instead of Docker quietly making an
+# empty folder on this computer that nothing syncs.
+#
+# Keep the folder private: the backups hold title-deed texts with owners' names.
+
+services:
+  dashboard:
+    volumes:
+      - type: bind
+        source: /Users/YOU/Library/Mobile Documents/com~apple~CloudDocs/Sovereign-backups
+        target: /offsite
+        bind:
+          create_host_path: false
+
+  scheduler:
+    volumes:
+      - type: bind
+        source: /Users/YOU/Library/Mobile Documents/com~apple~CloudDocs/Sovereign-backups
+        target: /offsite
+        bind:
+          create_host_path: false

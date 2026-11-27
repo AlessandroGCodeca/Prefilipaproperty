@@ -10,6 +10,10 @@ services:
   # container starts: edit .env, then `docker compose up -d` picks it up — no
   # rebuild. .env is kept out of the image (.dockerignore), so the keys are
   # never baked into a layer. Without a .env the containers start on defaults.
+  #
+  # This computer's own folders, such as where the backups are copied off the
+  # disk, go in docker-compose.override.yml, which Compose reads with this
+  # file and git ignores: see docker-compose.override.example.yml.
   dashboard:
     build:
       context: .

@@ -1056,9 +1056,19 @@ rules.
 The copies are on the same disk as the database. Set `BACKUP_COPY_DIR` in
 `.env` to a cloud-synced folder or a USB disk and each run copies the new
 backups there too (the same days are kept there). On a Mac,
-iCloud Drive is `~/Library/Mobile Documents/com~apple~CloudDocs/Sovereign-backups`.
-If that folder can't be written (the disk isn't plugged in), the run says so
-and the local backup stands. Keep the folder private: the backups hold
+iCloud Drive is `~/Library/Mobile Documents/com~apple~CloudDocs/Sovereign-backups`
+(in `.env`, put a path with a space in double quotes, or Docker Compose
+refuses the whole file). If that folder can't be written (the disk isn't
+plugged in), the run says so and the local backup stands.
+
+**In Docker** the containers can't see your folders, so a Mac or Windows path
+there makes every run say "off-site copy skipped". Copy
+`docker-compose.override.example.yml` to `docker-compose.override.yml`, put
+your folder in it, set `BACKUP_COPY_DIR=/offsite` in `.env`, and run
+`docker compose up -d`. Compose reads the override file by itself; git and
+the Docker build ignore it, since it names your own path. The containers
+won't start while that folder is missing, rather than back up into an empty
+folder nothing syncs. Keep the folder private: the backups hold
 title-deed texts with owners' names.
 
 ---
